@@ -396,11 +396,24 @@ def mirror_backside(
 # PDF-Rendering (HTML/CSS → WeasyPrint)
 # --------------------------------------------------------------------------- #
 
-PAPER_SIZES = {"a4": "A4", "letter": "Letter"}
+PAPER_SIZES = {"a4": "A4", "letter": "Letter", "a6": "A6"}
 
 # Papiermaße in mm (Breite, Höhe, Hochformat) – Basis für die *feste*
 # Rastergeometrie, damit Vorder- und Rückseite exakt deckungsgleich sind.
-PAPER_DIMS_MM = {"a4": (210.0, 297.0), "letter": (215.9, 279.4)}
+PAPER_DIMS_MM = {
+    "a4": (210.0, 297.0),
+    "letter": (215.9, 279.4),
+    "a6": (105.0, 148.0),
+}
+
+# Layout-Profile: bestimmen Papier, Ausrichtung, Raster und Rand.
+#   a4-4up: 4 Karten pro A4-Blatt (quer), mittiges Schnittkreuz, dann schneiden.
+#   a6:     eine Karte pro A6-Seite (quer) – direkt auf A6-Karten drucken,
+#           kein Schneiden nötig.
+LAYOUTS: dict[str, dict[str, Any]] = {
+    "a4-4up": {"paper": "a4", "landscape": True, "cols": 2, "rows": 2, "margin": 8.0},
+    "a6": {"paper": "a6", "landscape": True, "cols": 1, "rows": 1, "margin": 0.0},
+}
 # Kleiner Außenrand: die einzigen SCHNITT-Kanten sind das mittige Kreuz
 # (waagerecht + senkrecht) zwischen den 4 Karten. Der schmale Rand am
 # Blattrand wird nicht geschnitten (Papierkante) und verhindert zugleich das
@@ -499,6 +512,8 @@ def render_pdf(
         content_h=content_h,
         cell_w=content_w / cols,
         cell_h=content_h / rows,
+        # Schnittkreuz nur, wenn mehrere Karten pro Blatt geschnitten werden.
+        show_cross=cut_marks and (cols * rows > 1),
         kanji_font_url=Path(kanji_font).resolve().as_uri(),
         sans_font_url=Path(sans_font).resolve().as_uri(),
         sans_bold_font_url=Path(sans_bold_font).resolve().as_uri(),
@@ -578,10 +593,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Wende-Kante für den Duplexdruck (Default: long-edge).",
     )
     parser.add_argument(
+        "--layout",
+        choices=list(LAYOUTS),
+        default="a4-4up",
+        help="Druck-Layout: 'a4-4up' = 4 Karten pro A4-Blatt (quer) zum "
+        "Schneiden (Default); 'a6' = eine Karte pro A6-Seite, direkt auf "
+        "A6-Karten drucken (kein Schneiden).",
+    )
+    parser.add_argument(
         "--paper",
-        choices=list(PAPER_SIZES),
+        choices=["a4", "letter"],
         default="a4",
-        help="Papierformat (Default: a4).",
+        help="Papierformat für Layout 'a4-4up' (Default: a4). Bei '--layout a6' "
+        "ohne Wirkung.",
     )
     parser.add_argument(
         "--font",
@@ -632,19 +656,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         level_label = "1" if args.sample else args.level
         deck.insert(0, build_cover(level_label, cards))
 
+    profile = dict(LAYOUTS[args.layout])
+    if args.layout == "a4-4up":
+        profile["paper"] = args.paper  # a4/letter erlaubt
+
     out = render_pdf(
         deck,
         args.output,
         kanji_font=Path(args.font),
         duplex=args.duplex,
-        paper=args.paper,
+        paper=profile["paper"],
+        landscape=profile["landscape"],
+        cols=profile["cols"],
+        rows=profile["rows"],
+        margin=profile["margin"],
         cut_marks=not args.no_cut_marks,
     )
-    n_sheets = ((len(deck) + 3) // 4) * 2
+    per_page = profile["cols"] * profile["rows"]
+    n_sheets = ((len(deck) + per_page - 1) // per_page) * 2
     cover_note = "" if args.no_cover else " inkl. Deckkarte"
     print(
-        f"{len(deck)} Karten{cover_note} → {out} ({n_sheets} Seiten, 4/Seite, "
-        f"A4 quer, Duplex: {args.duplex}, {args.paper.upper()})."
+        f"{len(deck)} Karten{cover_note} → {out} ({n_sheets} Seiten, "
+        f"{per_page}/Seite, {profile['paper'].upper()} quer, "
+        f"Duplex: {args.duplex})."
     )
     return 0
 

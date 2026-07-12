@@ -47,7 +47,7 @@
   }
   .sheet:last-child { page-break-after: auto; }
 
-  {% if cut_marks %}
+  {% if show_cross %}
   /* Nur ZWEI Schnittkanten: mittiges Kreuz (senkrecht + waagerecht).
      Als Overlay gezeichnet, damit die Zellengröße exakt gleich bleibt. */
   .sheet::before,

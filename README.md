@@ -1,36 +1,48 @@
 # WaniKani Kanji-Karteikarten
 
 CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
-**Kanji-Karteikarten als PDF** erzeugt – **4 Karten pro Seite** auf **A4 quer**
-(2 × 2).
+**Kanji-Karteikarten als PDF** erzeugt.
 
 - **Vorderseite:** nur das Kanji, groß und zentriert.
-- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Bedeutung
-  & Lesung) · eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
+- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Meaning
+  & Reading) · eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
+
+## Druck-Layouts (`--layout`)
+
+| Layout | Beschreibung |
+|---|---|
+| `a4-4up` (Default) | 4 Karten pro **A4-Blatt** (quer). Nur die mittige Kreuzlinie wird geschnitten → 4 Karten. |
+| `a6` | **Eine Karte pro A6-Seite** (quer). Zum **direkten Bedrucken von A6-Karten** – kein Schneiden. |
 
 Weitere Eigenschaften:
 
 - **Deckkarte** als erste Karte: vorne „WaniKani – Level N" (+ Kanji-Anzahl),
   hinten eine Übersicht aller enthaltenen Kanji mit Bedeutung. Abschaltbar mit
   `--no-cover`.
-- **Nur zwei Schnittkanten** je Blatt: die mittige Kreuzlinie (waagerecht +
-  senkrecht). Die Karten stoßen in der Mitte aneinander; die Außenkanten sind
-  Blattrand und werden nicht geschnitten.
 - **Lochbereich oben links** auf jeder Karte (mit dezenter Loch-Markierung) –
   zum Lochen und Aufhängen an einem Ring. Der Bereich ist auf der Rückseite
   spiegelbildlich reserviert, sodass ein einziges Loch durch beide Seiten passt.
-- Das Rückseiten-Raster wird für den Duplexdruck automatisch gespiegelt, sodass
+- Beim `a4-4up`-Layout wird zusätzlich die mittige Kreuzlinie als einzige
+  Schnittkante gedruckt.
+- Die Rückseite wird für den Duplexdruck automatisch gespiegelt, sodass
   Vorder- und Rückseite exakt zusammenpassen.
 
 ## Vorschau
 
-Beispielseite (Level 1, `--sample`):
+**A4, 4 Karten/Seite** (`--sample`, Standard):
 
 | Vorderseite | Rückseite |
 |---|---|
 | ![Vorderseite](previews/sample_page1_front.png) | ![Rückseite](previews/sample_page2_back.png) |
 
-Das fertige PDF liegt unter [`previews/sample_level1.pdf`](previews/sample_level1.pdf).
+**A6, eine Karte/Seite** (`--sample --layout a6`):
+
+| Deckkarte (vorne) | Kanji-Karte (hinten) |
+|---|---|
+| ![A6 Deckkarte](previews/a6_cover_front.png) | ![A6 Rückseite](previews/a6_card_back.png) |
+
+Fertige PDFs: [`previews/sample_level1.pdf`](previews/sample_level1.pdf) (A4) ·
+[`previews/sample_a6.pdf`](previews/sample_a6.pdf) (A6).
 
 ## Setup
 
@@ -74,7 +86,8 @@ WANIKANI_API_TOKEN=…
 ### Ohne Token ausprobieren
 
 ```bash
-python kanji_cards.py --sample          # nutzt fonts/-Demodaten (Level 1)
+python kanji_cards.py --sample                 # A4, 4 Karten/Seite (Level 1)
+python kanji_cards.py --sample --layout a6     # A6, eine Karte pro Seite
 ```
 
 ### Optionen
@@ -83,28 +96,39 @@ python kanji_cards.py --sample          # nutzt fonts/-Demodaten (Level 1)
 |---|---|---|
 | `level` | – | WaniKani-Level (1–60) |
 | `--output`, `-o` | `cards.pdf` | Ausgabedatei |
+| `--layout {a4-4up,a6}` | `a4-4up` | Druck-Layout (A4 4-fach mit Schnitt / A6 pro Karte) |
 | `--duplex {long-edge,short-edge}` | `long-edge` | Wende-Kante für den Duplexdruck |
-| `--paper {a4,letter}` | `a4` | Papierformat |
+| `--paper {a4,letter}` | `a4` | Papierformat (nur für `a4-4up`) |
 | `--font PFAD` | `fonts/NotoSerifJP-SemiBold.ttf` | Schrift für das große Kanji |
 | `--no-cache` | – | API-Cache unter `.cache/` umgehen |
-| `--no-cut-marks` | – | Kreuz-Schnittlinien und Loch-Markierung weglassen |
+| `--no-cut-marks` | – | Schnitt-/Loch-Markierungen weglassen |
 | `--no-cover` | – | keine Deckkarte (Titel + Kanji-Übersicht) voranstellen |
 | `--sample` | – | Beispieldaten ohne API-Token verwenden |
 
 ## Drucken
 
-1. PDF mit **beidseitigem Druck (Duplex)** und **Querformat** öffnen.
-2. Wende-Option passend zu `--duplex` wählen:
-   - `long-edge` → *Wenden an der langen Kante* (Standard).
-   - `short-edge` → *Wenden an der kurzen Kante*.
-3. „Tatsächliche Größe“ / „100 %“ wählen (nicht „An Seite anpassen“), damit die
-   Geometrie exakt bleibt.
-4. Jedes Blatt **einmal waagerecht und einmal senkrecht mittig** entlang der
-   gestrichelten Kreuzlinie schneiden → 4 Karten.
-5. Oben links (Vorderseite) an der gestrichelten Kreis-Markierung lochen und die
-   Karten auf einen Ring ziehen.
+Allgemein: PDF mit **beidseitigem Druck (Duplex)** und **Querformat** öffnen,
+Wende-Option passend zu `--duplex` wählen (`long-edge` = lange Kante, Standard;
+sonst `short-edge`) und **„Tatsächliche Größe“ / „100 %“** wählen (nicht „An
+Seite anpassen“), damit die Geometrie exakt bleibt.
 
-Tipp: Vor dem Serienlauf eine Seite testen und Vorder-/Rückseite gegen das
+**Layout `a4-4up` (schneiden):**
+
+1. Auf A4 drucken.
+2. Jedes Blatt **einmal waagerecht und einmal senkrecht mittig** entlang der
+   gestrichelten Kreuzlinie schneiden → 4 Karten.
+3. Oben links (Vorderseite) an der Kreis-Markierung lochen und auf einen Ring
+   ziehen.
+
+**Layout `a6` (kein Schneiden):**
+
+1. Im Druckdialog als Papierformat **A6** wählen und die A6-Karten einlegen.
+2. Duplex drucken – jede Karte belegt genau eine A6-Seite, Vorder- und
+   Rückseite liegen exakt übereinander.
+3. Oben links (Vorderseite) an der Kreis-Markierung lochen und auf einen Ring
+   ziehen.
+
+Tipp: Vor dem Serienlauf eine Karte testen und Vorder-/Rückseite gegen das
 Licht halten, um die Ausrichtung der Wende-Kante zu prüfen. Passt es nicht,
 `--duplex short-edge` versuchen.
 

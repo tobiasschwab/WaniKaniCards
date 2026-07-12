@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kanji_cards import (  # noqa: E402
+    LAYOUTS,
     Card,
     CoverCard,
     build_card,
@@ -59,6 +60,19 @@ def test_mirror_backside_2x2_long_edge():
 def test_mirror_backside_2x2_short_edge():
     page = [1, 2, 3, 4]
     assert mirror_backside(page, cols=2, duplex="short-edge") == [3, 4, 1, 2]
+
+
+def test_mirror_backside_1up_is_noop():
+    # A6-Layout: eine Karte pro Seite → keine Positionsänderung nötig.
+    assert mirror_backside([1], cols=1, duplex="long-edge") == [1]
+    assert mirror_backside([1], cols=1, duplex="short-edge") == [1]
+
+
+def test_layout_profiles():
+    assert LAYOUTS["a4-4up"]["cols"] * LAYOUTS["a4-4up"]["rows"] == 4
+    a6 = LAYOUTS["a6"]
+    assert a6["cols"] == 1 and a6["rows"] == 1
+    assert a6["paper"] == "a6" and a6["landscape"] is True
 
 
 def test_mirror_backside_keeps_empty_cells_aligned():
