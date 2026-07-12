@@ -368,6 +368,11 @@ def mirror_backside(
 
 PAPER_SIZES = {"a4": "A4", "letter": "Letter"}
 
+# Papiermaße in mm (Breite, Höhe) und Außenrand – Basis für die *feste*
+# Rastergeometrie, damit Vorder- und Rückseite exakt deckungsgleich sind.
+PAPER_DIMS_MM = {"a4": (210.0, 297.0), "letter": (215.9, 279.4)}
+PAGE_MARGIN_MM = 10.0
+
 
 def _card_to_dict(card: Card | None) -> dict[str, Any] | None:
     if card is None:
@@ -427,11 +432,21 @@ def render_pdf(
 
     sheets = build_sheets(cards, cols=cols, rows=rows, duplex=duplex)
 
+    page_w, page_h = PAPER_DIMS_MM.get(paper, PAPER_DIMS_MM["a4"])
+    margin = PAGE_MARGIN_MM
+    # Feste Maße der bedruckbaren Fläche → identische Zellen auf Vorder-/Rückseite.
+    content_w = page_w - 2 * margin
+    content_h = page_h - 2 * margin
+
     html_str = template.render(
         sheets=sheets,
         cols=cols,
         rows=rows,
-        paper=PAPER_SIZES.get(paper, "A4"),
+        page_w=page_w,
+        page_h=page_h,
+        margin=margin,
+        content_w=content_w,
+        content_h=content_h,
         kanji_font_url=Path(kanji_font).resolve().as_uri(),
         sans_font_url=Path(sans_font).resolve().as_uri(),
         sans_bold_font_url=Path(sans_bold_font).resolve().as_uri(),
