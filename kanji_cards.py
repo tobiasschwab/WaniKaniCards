@@ -78,6 +78,15 @@ class Card:
     sentence_en: str | None = None
 
 
+@dataclass
+class CoverCard:
+    """Deckkarte des Stapels: vorne Titel/Level, hinten die Kanji-Übersicht."""
+
+    title: str
+    subtitle: str
+    entries: list[tuple[str, str]] = field(default_factory=list)  # (kanji, Bedeutung)
+
+
 # --------------------------------------------------------------------------- #
 # Hilfsfunktionen
 # --------------------------------------------------------------------------- #
@@ -322,15 +331,29 @@ def build_cards(
     return [build_card(k, vocab_map) for k in kanji_list]
 
 
+def build_cover(level: int | str, cards: Sequence[Card]) -> CoverCard:
+    """Deckkarte aus den Karten des Stapels bauen (Kanji + primäre Bedeutung)."""
+    entries = [
+        (c.kanji, c.meanings[0] if c.meanings else "")
+        for c in cards
+        if c.kanji
+    ]
+    return CoverCard(
+        title="WaniKani",
+        subtitle=f"Level {level}",
+        entries=entries,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Layout / Paginierung / Duplex
 # --------------------------------------------------------------------------- #
 
 def paginate(
-    cards: Sequence[Card | None], per_page: int = 6
-) -> list[list[Card | None]]:
+    cards: Sequence[Card | CoverCard | None], per_page: int = 6
+) -> list[list[Card | CoverCard | None]]:
     """Karten in Seiten à `per_page` aufteilen; letzte Seite mit None auffüllen."""
-    pages: list[list[Card | None]] = []
+    pages: list[list[Card | CoverCard | None]] = []
     for start in range(0, len(cards), per_page):
         chunk: list[Card | None] = list(cards[start : start + per_page])
         while len(chunk) < per_page:
@@ -385,10 +408,19 @@ PAPER_DIMS_MM = {"a4": (210.0, 297.0), "letter": (215.9, 279.4)}
 PAGE_MARGIN_MM = 8.0
 
 
-def _card_to_dict(card: Card | None) -> dict[str, Any] | None:
+def _card_to_dict(card: Card | CoverCard | None) -> dict[str, Any] | None:
     if card is None:
         return None
+    if isinstance(card, CoverCard):
+        return {
+            "type": "cover",
+            "title": card.title,
+            "subtitle": card.subtitle,
+            "count": len(card.entries),
+            "entries": [{"kanji": k, "meaning": m} for k, m in card.entries],
+        }
     return {
+        "type": "kanji",
         "kanji": card.kanji,
         "meanings": card.meanings,
         "onyomi": card.onyomi,
@@ -404,7 +436,7 @@ def _card_to_dict(card: Card | None) -> dict[str, Any] | None:
 
 
 def build_sheets(
-    cards: Sequence[Card | None],
+    cards: Sequence[Card | CoverCard | None],
     *,
     cols: int = 2,
     rows: int = 2,
@@ -421,7 +453,7 @@ def build_sheets(
 
 
 def render_pdf(
-    cards: Sequence[Card | None],
+    cards: Sequence[Card | CoverCard | None],
     output: str | Path,
     *,
     template_dir: Path = DEFAULT_TEMPLATE_DIR,
@@ -563,6 +595,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cut-marks", action="store_true", help="Keine Schnittmarken zeichnen."
     )
     parser.add_argument(
+        "--no-cover",
+        action="store_true",
+        help="Keine Deckkarte (Titel + Kanji-Übersicht) voranstellen.",
+    )
+    parser.add_argument(
         "--sample",
         action="store_true",
         help="Beispieldaten ohne API-Token verwenden (Demo).",
@@ -590,18 +627,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Keine Karten zu erzeugen.", file=sys.stderr)
         return 1
 
+    deck: list[Card | CoverCard] = list(cards)
+    if not args.no_cover:
+        level_label = "1" if args.sample else args.level
+        deck.insert(0, build_cover(level_label, cards))
+
     out = render_pdf(
-        cards,
+        deck,
         args.output,
         kanji_font=Path(args.font),
         duplex=args.duplex,
         paper=args.paper,
         cut_marks=not args.no_cut_marks,
     )
-    n_sheets = ((len(cards) + 3) // 4) * 2
+    n_sheets = ((len(deck) + 3) // 4) * 2
+    cover_note = "" if args.no_cover else " inkl. Deckkarte"
     print(
-        f"{len(cards)} Karten → {out} ({n_sheets} Seiten, 4/Seite, A4 quer, "
-        f"Duplex: {args.duplex}, {args.paper.upper()})."
+        f"{len(deck)} Karten{cover_note} → {out} ({n_sheets} Seiten, 4/Seite, "
+        f"A4 quer, Duplex: {args.duplex}, {args.paper.upper()})."
     )
     return 0
 

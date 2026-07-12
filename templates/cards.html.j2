@@ -113,6 +113,71 @@
     font-weight: 600;
   }
 
+  /* ---------- Deckkarte: Vorderseite ---------- */
+  .cover-front {
+    align-items: center;
+    justify-content: center;
+    background: #0098c8;   /* WaniKani-Blau */
+    color: #fff;
+  }
+  .cover-front .hole { border-color: rgba(255, 255, 255, 0.75); }
+  .cover-brand {
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 30pt;
+    letter-spacing: 0.5px;
+    line-height: 1.05;
+  }
+  .cover-level {
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 44pt;
+    line-height: 1.1;
+    margin-top: 3mm;
+  }
+  .cover-count {
+    font-size: 12pt;
+    opacity: 0.85;
+    margin-top: 3mm;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ---------- Deckkarte: Rückseite (Kanji-Übersicht) ---------- */
+  .cover-back { display: block; }
+  .cover-back-title {
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 12pt;
+    color: #0098c8;
+    margin-bottom: 2.5mm;
+  }
+  ul.cover-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    columns: 2;
+    column-gap: 6mm;
+  }
+  ul.cover-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 2mm;
+    break-inside: avoid;
+    margin-bottom: 1.4mm;
+  }
+  ul.cover-list .cl-k {
+    font-family: "KanjiFont", "SansJP", serif;
+    font-size: 13pt;
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
+  ul.cover-list .cl-m {
+    font-size: 8.5pt;
+    color: #555;
+    line-height: 1.15;
+  }
+
   /* ---------- Rückseite ----------
      Normaler Blockfluss (kein Flex): so kann kein Abschnitt flex-geschrumpft
      werden und Texte überlappen nie; zu viel Inhalt wird am Kartenrand
@@ -265,9 +330,28 @@
       {% if cell is none %}
         <div class="card empty" style="{{ pos }}"></div>
       {% elif sheet.side == "front" %}
+        {% if cell.type == "cover" %}
+        <div class="card front cover-front" style="{{ pos }}">
+          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          <div class="cover-brand">{{ cell.title }}</div>
+          <div class="cover-level">{{ cell.subtitle }}</div>
+          <div class="cover-count">{{ cell.count }} Kanji</div>
+        </div>
+        {% else %}
         <div class="card front" style="{{ pos }}">
           {% if cut_marks %}<div class="hole"></div>{% endif %}
           <div class="kanji">{{ cell.kanji }}</div>
+        </div>
+        {% endif %}
+      {% elif cell.type == "cover" %}
+        <div class="card back cover-back" style="{{ pos }}">
+          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          <div class="cover-back-title">{{ cell.subtitle }} · Übersicht</div>
+          <ul class="cover-list">
+            {% for e in cell.entries %}
+            <li><span class="cl-k">{{ e.kanji }}</span><span class="cl-m">{{ e.meaning }}</span></li>
+            {% endfor %}
+          </ul>
         </div>
       {% else %}
         <div class="card back" style="{{ pos }}">

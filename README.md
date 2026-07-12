@@ -10,6 +10,9 @@ CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
 
 Weitere Eigenschaften:
 
+- **Deckkarte** als erste Karte: vorne „WaniKani – Level N" (+ Kanji-Anzahl),
+  hinten eine Übersicht aller enthaltenen Kanji mit Bedeutung. Abschaltbar mit
+  `--no-cover`.
 - **Nur zwei Schnittkanten** je Blatt: die mittige Kreuzlinie (waagerecht +
   senkrecht). Die Karten stoßen in der Mitte aneinander; die Außenkanten sind
   Blattrand und werden nicht geschnitten.
@@ -85,6 +88,7 @@ python kanji_cards.py --sample          # nutzt fonts/-Demodaten (Level 1)
 | `--font PFAD` | `fonts/NotoSerifJP-SemiBold.ttf` | Schrift für das große Kanji |
 | `--no-cache` | – | API-Cache unter `.cache/` umgehen |
 | `--no-cut-marks` | – | Kreuz-Schnittlinien und Loch-Markierung weglassen |
+| `--no-cover` | – | keine Deckkarte (Titel + Kanji-Übersicht) voranstellen |
 | `--sample` | – | Beispieldaten ohne API-Token verwenden |
 
 ## Drucken

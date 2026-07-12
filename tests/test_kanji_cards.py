@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kanji_cards import (  # noqa: E402
     Card,
+    CoverCard,
     build_card,
+    build_cover,
     mirror_backside,
     paginate,
     pick_example_vocab,
@@ -181,6 +183,18 @@ def test_build_card_full():
     assert card.vocab_meaning == "Mountain"
     assert card.sentence_ja == "山に登る。"
     assert card.sentence_en == "Climb a mountain."
+
+
+def test_build_cover_lists_kanji_and_meanings():
+    cards = [
+        Card(kanji="一", meanings=["One", "Primary"]),
+        Card(kanji="人", meanings=["Person"]),
+        Card(kanji="", meanings=["ignored"]),  # ohne Kanji → nicht gelistet
+    ]
+    cover = build_cover(5, cards)
+    assert isinstance(cover, CoverCard)
+    assert cover.subtitle == "Level 5"
+    assert cover.entries == [("一", "One"), ("人", "Person")]
 
 
 def test_build_card_without_vocab_still_builds():
