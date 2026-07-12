@@ -13,6 +13,8 @@
           {"reading": "いつ", "primary": false, "accepted_answer": true, "type": "onyomi"},
           {"reading": "ひと", "primary": false, "accepted_answer": false, "type": "kunyomi"}
         ],
+        "meaning_mnemonic": "Lying on the ground is something that looks just like the ground, the number <kanji>One</kanji>. Why is this One lying down? It's been shot by the number two.",
+        "reading_mnemonic": "One reason this kanji is read <reading>いち</reading> (ichi): picture someone with just one itch they can't stop scratching.",
         "amalgamation_subject_ids": [2467, 2468]
       }
     },
@@ -28,6 +30,8 @@
           {"reading": "にん", "primary": true, "accepted_answer": true, "type": "onyomi"},
           {"reading": "ひと", "primary": false, "accepted_answer": false, "type": "kunyomi"}
         ],
+        "meaning_mnemonic": "This kanji looks just like a <kanji>Person</kanji> walking, striding forward on two legs.",
+        "reading_mnemonic": "A <reading>じん</reading> (jin) is what you call a person from somewhere — an American person is an American-jin.",
         "amalgamation_subject_ids": [2480, 2481]
       }
     },
@@ -46,6 +50,8 @@
           {"reading": "だい", "primary": true, "accepted_answer": true, "type": "onyomi"},
           {"reading": "おお", "primary": false, "accepted_answer": false, "type": "kunyomi"}
         ],
+        "meaning_mnemonic": "A <kanji>Person</kanji> spreading their arms out as wide as possible to show you how <kanji>Big</kanji> something is.",
+        "reading_mnemonic": "When something is really <reading>だい</reading> (dai) big, imagine it is so huge it could cause you to die.",
         "amalgamation_subject_ids": [2490]
       }
     },
@@ -64,6 +70,8 @@
           {"reading": "うえ", "primary": false, "accepted_answer": false, "type": "kunyomi"},
           {"reading": "あ", "primary": false, "accepted_answer": false, "type": "kunyomi"}
         ],
+        "meaning_mnemonic": "A short line sitting <kanji>Above</kanji> the long ground line. Whatever sits on top is above.",
+        "reading_mnemonic": "Read <reading>じょう</reading> (jou): picture your friend Joe standing up above you on the roof.",
         "amalgamation_subject_ids": [2500]
       }
     },
@@ -78,6 +86,8 @@
           {"reading": "さん", "primary": true, "accepted_answer": true, "type": "onyomi"},
           {"reading": "やま", "primary": false, "accepted_answer": false, "type": "kunyomi"}
         ],
+        "meaning_mnemonic": "Three peaks rising up next to each other — that's a <kanji>Mountain</kanji> range.",
+        "reading_mnemonic": "Read <reading>さん</reading> (san): the mountain is so grand you politely call it Mountain-san.",
         "amalgamation_subject_ids": [2510]
       }
     },
@@ -93,6 +103,8 @@
           {"reading": "く", "primary": false, "accepted_answer": true, "type": "onyomi"},
           {"reading": "くち", "primary": false, "accepted_answer": false, "type": "kunyomi"}
         ],
+        "meaning_mnemonic": "A big open square is your wide-open <kanji>Mouth</kanji>, ready for the dentist.",
+        "reading_mnemonic": "Read <reading>こう</reading> (kou): open your mouth and out comes a loud cow-like 'kou' sound.",
         "amalgamation_subject_ids": [2520]
       }
     }

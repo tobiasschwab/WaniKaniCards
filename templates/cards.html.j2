@@ -31,34 +31,75 @@
     padding: 0;
     font-family: "SansJP", sans-serif;
     color: #1a1a1a;
+    /* Whitespace zwischen den Seiten-Divs darf keine Zeilenhöhe erzeugen,
+       sonst überläuft das randlose Raster um Sub-mm → Leerseiten. */
+    line-height: 0;
   }
 
   /* Eine Seite = ein Raster aus cols x rows Karten mit FESTER Geometrie.
      Feste mm-Maße (statt height:100%) sind entscheidend, damit Vorder- und
      Rückseite exakt deckungsgleich sind und die Schnittkanten passen. */
   .sheet {
-    display: grid;
-    grid-template-columns: repeat({{ cols }}, {{ (content_w / cols) }}mm);
-    grid-template-rows: repeat({{ rows }}, {{ (content_h / rows) }}mm);
+    position: relative;
     width: {{ content_w }}mm;
     height: {{ content_h }}mm;
-    gap: 0;
     page-break-after: always;
   }
   .sheet:last-child { page-break-after: auto; }
 
+  {% if cut_marks %}
+  /* Nur ZWEI Schnittkanten: mittiges Kreuz (senkrecht + waagerecht).
+     Als Overlay gezeichnet, damit die Zellengröße exakt gleich bleibt. */
+  .sheet::before,
+  .sheet::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+  .sheet::before {   /* senkrechte Mittellinie */
+    top: 0; bottom: 0; left: 50%;
+    border-left: 0.25mm dashed #b4b4b4;
+  }
+  .sheet::after {    /* waagerechte Mittellinie */
+    left: 0; right: 0; top: 50%;
+    border-top: 0.25mm dashed #b4b4b4;
+  }
+  {% endif %}
+
+  /* Karten absolut positioniert (per Inline-Style je Zelle): so sind sie aus
+     dem Fluss genommen und eine Seite kann niemals überlaufen/fragmentieren. */
   .card {
-    position: relative;
-    padding: 6mm;
+    position: absolute;
+    width: {{ cell_w }}mm;
+    height: {{ cell_h }}mm;
+    padding: 7mm;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    {% if cut_marks %}
-    outline: 0.2mm dashed #c9c9c9;
-    outline-offset: -0.1mm;
-    {% endif %}
+    line-height: 1.3;
   }
-  .card.empty { outline: none; }
+
+  /* ---------- Lochbereich (oben links auf der Vorderseite) ----------
+     Das Loch wird durch die fertige Karte gestanzt und muss auf beiden
+     Seiten frei bleiben. Die reservierte Zone liegt vorne oben LINKS;
+     hinten je nach Wende-Kante gespiegelt, damit dasselbe physische Eck
+     getroffen wird (long-edge → oben rechts, short-edge → unten links). */
+  .hole {
+    position: absolute;
+    width: 6mm;
+    height: 6mm;
+    border: 0.3mm dashed #9a9a9a;
+    border-radius: 50%;
+  }
+  .card.front .hole { top: 6mm; left: 6mm; }
+  {% if duplex == "short-edge" %}
+  .card.back .hole { bottom: 6mm; left: 6mm; }
+  .card.back { padding-bottom: 15mm; }
+  {% else %}
+  .card.back .hole { top: 6mm; right: 6mm; }
+  .card.back { padding-top: 15mm; }
+  {% endif %}
+  .card.empty .hole { display: none; }
 
   /* ---------- Vorderseite: nur das Kanji, riesig & zentriert ---------- */
   .card.front {
@@ -72,29 +113,31 @@
     font-weight: 600;
   }
 
-  /* ---------- Rückseite ---------- */
+  /* ---------- Rückseite ----------
+     Normaler Blockfluss (kein Flex): so kann kein Abschnitt flex-geschrumpft
+     werden und Texte überlappen nie; zu viel Inhalt wird am Kartenrand
+     sauber abgeschnitten (overflow:hidden). */
   .card.back {
-    justify-content: flex-start;
-    gap: 2.4mm;
+    display: block;
   }
   .back .meanings {
     font-family: "SansJP", sans-serif;
     font-weight: 700;
-    font-size: 15pt;
-    line-height: 1.15;
+    font-size: 14pt;
+    line-height: 1.12;
     color: #111;
+    margin-bottom: 2mm;
   }
   .back .meanings .secondary {
     font-weight: 400;
-    font-size: 10.5pt;
+    font-size: 10pt;
     color: #666;
   }
 
   .readings {
-    display: flex;
-    flex-direction: column;
-    gap: 1.2mm;
+    margin-bottom: 2mm;
   }
+  .readings .reading-row + .reading-row { margin-top: 1mm; }
   .reading-row {
     display: flex;
     align-items: baseline;
@@ -116,6 +159,33 @@
     line-height: 1.3;
     color: #1a1a1a;
   }
+
+  /* ---------- Eselsbrücken (Mnemonics) ---------- */
+  .mnemonics {
+    background: #faf7f1;
+    border-left: 0.7mm solid #e2d6c2;
+    border-radius: 0.6mm;
+    padding: 1.6mm 2.2mm;
+    margin-bottom: 2mm;
+  }
+  .mnemonic {
+    font-size: 7.4pt;
+    line-height: 1.28;
+    color: #5a544c;
+    text-align: justify;
+  }
+  .mnemonic + .mnemonic { margin-top: 1mm; }
+  .mnemonic .mlabel {
+    display: inline-block;
+    font-size: 6.3pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-right: 1.4mm;
+    vertical-align: 1.5%;
+  }
+  .mnemonic .mlabel.meaning { color: #a2792e; }
+  .mnemonic .mlabel.reading { color: #7a5a9e; }
 
   hr.divider {
     border: none;
@@ -139,18 +209,23 @@
     font-size: 15pt;
     font-weight: 600;
   }
+  .vocab .vreading {
+    font-family: "KanjiFont", "SansJP", serif;
+    font-size: 11pt;
+    color: #444;
+  }
   .vocab .gloss {
     font-size: 10pt;
     color: #555;
   }
 
   .sentence {
-    margin-top: auto;   /* Beispielsatz nach unten schieben */
+    margin-top: 1.6mm;
   }
   .sentence .ja {
     font-family: "SansJP", sans-serif;
-    font-size: 10.5pt;
-    line-height: 1.4;
+    font-size: 10pt;
+    line-height: 1.35;
     color: #1a1a1a;
     word-break: break-all;   /* sauberer CJK-Umbruch */
     line-break: strict;
@@ -163,29 +238,40 @@
     margin-top: 0.6mm;
   }
 
+  /* Kleines Referenz-Kanji im reservierten Loch-Band (Gegenseite zum Loch). */
   .kanji-mini {
     position: absolute;
-    top: 4mm;
-    right: 5mm;
+    top: 4.5mm;
     font-family: "KanjiFont", serif;
-    font-size: 20pt;
-    color: #dcdcdc;
+    font-size: 19pt;
+    line-height: 1;
+    color: #cfcfcf;
     font-weight: 600;
   }
+  {% if duplex == "short-edge" %}
+  .kanji-mini { top: auto; bottom: 4.5mm; right: 6mm; }
+  {% else %}
+  .kanji-mini { left: 6mm; }
+  {% endif %}
 </style>
 </head>
 <body>
 {% for sheet in sheets %}
   <div class="sheet">
     {% for cell in sheet.cells %}
+      {% set col = loop.index0 % cols %}
+      {% set row = loop.index0 // cols %}
+      {% set pos = "left:" ~ (col * cell_w) ~ "mm; top:" ~ (row * cell_h) ~ "mm;" %}
       {% if cell is none %}
-        <div class="card empty"></div>
+        <div class="card empty" style="{{ pos }}"></div>
       {% elif sheet.side == "front" %}
-        <div class="card front">
+        <div class="card front" style="{{ pos }}">
+          {% if cut_marks %}<div class="hole"></div>{% endif %}
           <div class="kanji">{{ cell.kanji }}</div>
         </div>
       {% else %}
-        <div class="card back">
+        <div class="card back" style="{{ pos }}">
+          {% if cut_marks %}<div class="hole"></div>{% endif %}
           <div class="kanji-mini">{{ cell.kanji }}</div>
 
           {% if cell.meanings %}
@@ -209,11 +295,23 @@
             {% endif %}
           </div>
 
+          {% if cell.meaning_mnemonic or cell.reading_mnemonic %}
+          <div class="mnemonics">
+            {% if cell.meaning_mnemonic %}
+            <div class="mnemonic"><span class="mlabel meaning">Bedeutung</span>{{ cell.meaning_mnemonic }}</div>
+            {% endif %}
+            {% if cell.reading_mnemonic %}
+            <div class="mnemonic"><span class="mlabel reading">Lesung</span>{{ cell.reading_mnemonic }}</div>
+            {% endif %}
+          </div>
+          {% endif %}
+
           {% if cell.vocab %}
           <hr class="divider">
           <div class="vocab">
             <div class="head">
               <span class="word">{{ cell.vocab }}</span>
+              {% if cell.vocab_reading %}<span class="vreading">{{ cell.vocab_reading }}</span>{% endif %}
               {% if cell.vocab_meaning %}<span class="gloss">{{ cell.vocab_meaning }}</span>{% endif %}
             </div>
           </div>

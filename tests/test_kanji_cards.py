@@ -48,6 +48,17 @@ def test_mirror_backside_short_edge_2cols():
     assert mirror_backside(page, cols=2, duplex="short-edge") == [5, 6, 3, 4, 1, 2]
 
 
+def test_mirror_backside_2x2_long_edge():
+    # Neues Standardlayout: 4 Karten (2x2), Wenden an der langen Kante.
+    page = [1, 2, 3, 4]
+    assert mirror_backside(page, cols=2, duplex="long-edge") == [2, 1, 4, 3]
+
+
+def test_mirror_backside_2x2_short_edge():
+    page = [1, 2, 3, 4]
+    assert mirror_backside(page, cols=2, duplex="short-edge") == [3, 4, 1, 2]
+
+
 def test_mirror_backside_keeps_empty_cells_aligned():
     # 5 Karten + 1 leere Zelle (None) → None bleibt beim Spiegeln an der
     # korrekten Position, damit Vorder-/Rückseite passen.
@@ -140,6 +151,8 @@ def test_build_card_full():
                 {"reading": "やま", "primary": False, "type": "kunyomi"},
                 {"reading": "た", "primary": False, "type": "nanori"},
             ],
+            "meaning_mnemonic": "Three <radical>peaks</radical> make a <kanji>Mountain</kanji>.",
+            "reading_mnemonic": "Read <reading>さん</reading> like Mountain-san.",
             "amalgamation_subject_ids": [77],
         }
     }
@@ -150,6 +163,7 @@ def test_build_card_full():
                 "level": 1,
                 "characters": "山",
                 "meanings": [{"meaning": "Mountain", "primary": True}],
+                "readings": [{"reading": "やま", "primary": True}],
                 "context_sentences": [{"ja": "山に登る。", "en": "Climb a mountain."}],
             },
         }
@@ -159,7 +173,11 @@ def test_build_card_full():
     assert card.meanings == ["Mountain", "Hill"]
     assert card.onyomi == ["さん"]
     assert card.kunyomi == ["やま"]  # nanori wird nicht als kunyomi geführt
+    # Mnemonics werden übernommen und WaniKani-Markup gestrippt
+    assert card.meaning_mnemonic == "Three peaks make a Mountain."
+    assert card.reading_mnemonic == "Read さん like Mountain-san."
     assert card.vocab == "山"
+    assert card.vocab_reading == "やま"
     assert card.vocab_meaning == "Mountain"
     assert card.sentence_ja == "山に登る。"
     assert card.sentence_en == "Climb a mountain."

@@ -1,14 +1,23 @@
 # WaniKani Kanji-Karteikarten
 
 CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
-**Kanji-Karteikarten als PDF** erzeugt – **6 Karten pro Seite** (2 Spalten × 3 Zeilen).
+**Kanji-Karteikarten als PDF** erzeugt – **4 Karten pro Seite** auf **A4 quer**
+(2 × 2).
 
 - **Vorderseite:** nur das Kanji, groß und zentriert.
-- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · eine Beispielvokabel · ein
-  Beispielsatz mit Übersetzung.
+- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Bedeutung
+  & Lesung) · eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
 
-Das Rückseiten-Raster wird für den Duplexdruck automatisch gespiegelt, sodass
-Vorder- und Rückseite exakt zusammenpassen.
+Weitere Eigenschaften:
+
+- **Nur zwei Schnittkanten** je Blatt: die mittige Kreuzlinie (waagerecht +
+  senkrecht). Die Karten stoßen in der Mitte aneinander; die Außenkanten sind
+  Blattrand und werden nicht geschnitten.
+- **Lochbereich oben links** auf jeder Karte (mit dezenter Loch-Markierung) –
+  zum Lochen und Aufhängen an einem Ring. Der Bereich ist auf der Rückseite
+  spiegelbildlich reserviert, sodass ein einziges Loch durch beide Seiten passt.
+- Das Rückseiten-Raster wird für den Duplexdruck automatisch gespiegelt, sodass
+  Vorder- und Rückseite exakt zusammenpassen.
 
 ## Vorschau
 
@@ -75,21 +84,25 @@ python kanji_cards.py --sample          # nutzt fonts/-Demodaten (Level 1)
 | `--paper {a4,letter}` | `a4` | Papierformat |
 | `--font PFAD` | `fonts/NotoSerifJP-SemiBold.ttf` | Schrift für das große Kanji |
 | `--no-cache` | – | API-Cache unter `.cache/` umgehen |
-| `--no-cut-marks` | – | dezente Schnitthilfen weglassen |
+| `--no-cut-marks` | – | Kreuz-Schnittlinien und Loch-Markierung weglassen |
 | `--sample` | – | Beispieldaten ohne API-Token verwenden |
 
 ## Drucken
 
-1. PDF mit **beidseitigem Druck (Duplex)** öffnen.
+1. PDF mit **beidseitigem Druck (Duplex)** und **Querformat** öffnen.
 2. Wende-Option passend zu `--duplex` wählen:
    - `long-edge` → *Wenden an der langen Kante* (Standard).
    - `short-edge` → *Wenden an der kurzen Kante*.
 3. „Tatsächliche Größe“ / „100 %“ wählen (nicht „An Seite anpassen“), damit die
    Geometrie exakt bleibt.
-4. Entlang der dezenten Schnittmarken auseinanderschneiden.
+4. Jedes Blatt **einmal waagerecht und einmal senkrecht mittig** entlang der
+   gestrichelten Kreuzlinie schneiden → 4 Karten.
+5. Oben links (Vorderseite) an der gestrichelten Kreis-Markierung lochen und die
+   Karten auf einen Ring ziehen.
 
 Tipp: Vor dem Serienlauf eine Seite testen und Vorder-/Rückseite gegen das
-Licht halten, um die Ausrichtung der Wende-Kante zu prüfen.
+Licht halten, um die Ausrichtung der Wende-Kante zu prüfen. Passt es nicht,
+`--duplex short-edge` versuchen.
 
 ## Architektur
 
