@@ -1,0 +1,190 @@
+{
+  "_comment": "Beispieldaten im WaniKani-API-Format (Level 1) für --sample / Tests. Kein API-Token nötig.",
+  "kanji": [
+    {
+      "id": 440,
+      "object": "kanji",
+      "data": {
+        "characters": "一",
+        "level": 1,
+        "meanings": [{"meaning": "One", "primary": true, "accepted_answer": true}],
+        "readings": [
+          {"reading": "いち", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "いつ", "primary": false, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "ひと", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+        ],
+        "amalgamation_subject_ids": [2467, 2468]
+      }
+    },
+    {
+      "id": 449,
+      "object": "kanji",
+      "data": {
+        "characters": "人",
+        "level": 1,
+        "meanings": [{"meaning": "Person", "primary": true, "accepted_answer": true}],
+        "readings": [
+          {"reading": "じん", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "にん", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "ひと", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+        ],
+        "amalgamation_subject_ids": [2480, 2481]
+      }
+    },
+    {
+      "id": 450,
+      "object": "kanji",
+      "data": {
+        "characters": "大",
+        "level": 1,
+        "meanings": [
+          {"meaning": "Big", "primary": true, "accepted_answer": true},
+          {"meaning": "Large", "primary": false, "accepted_answer": true}
+        ],
+        "readings": [
+          {"reading": "たい", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "だい", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "おお", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+        ],
+        "amalgamation_subject_ids": [2490]
+      }
+    },
+    {
+      "id": 448,
+      "object": "kanji",
+      "data": {
+        "characters": "上",
+        "level": 1,
+        "meanings": [
+          {"meaning": "Above", "primary": true, "accepted_answer": true},
+          {"meaning": "Up", "primary": false, "accepted_answer": true}
+        ],
+        "readings": [
+          {"reading": "じょう", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "うえ", "primary": false, "accepted_answer": false, "type": "kunyomi"},
+          {"reading": "あ", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+        ],
+        "amalgamation_subject_ids": [2500]
+      }
+    },
+    {
+      "id": 451,
+      "object": "kanji",
+      "data": {
+        "characters": "山",
+        "level": 1,
+        "meanings": [{"meaning": "Mountain", "primary": true, "accepted_answer": true}],
+        "readings": [
+          {"reading": "さん", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "やま", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+        ],
+        "amalgamation_subject_ids": [2510]
+      }
+    },
+    {
+      "id": 452,
+      "object": "kanji",
+      "data": {
+        "characters": "口",
+        "level": 1,
+        "meanings": [{"meaning": "Mouth", "primary": true, "accepted_answer": true}],
+        "readings": [
+          {"reading": "こう", "primary": true, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "く", "primary": false, "accepted_answer": true, "type": "onyomi"},
+          {"reading": "くち", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+        ],
+        "amalgamation_subject_ids": [2520]
+      }
+    }
+  ],
+  "vocab": [
+    {
+      "id": 2467, "object": "vocabulary",
+      "data": {
+        "characters": "一", "level": 1,
+        "meanings": [{"meaning": "One", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "いち", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "一から始めましょう。", "en": "Let's start from the beginning."}
+        ]
+      }
+    },
+    {
+      "id": 2468, "object": "vocabulary",
+      "data": {
+        "characters": "一つ", "level": 2,
+        "meanings": [{"meaning": "One Thing", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "ひとつ", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "一つください。", "en": "One, please."}
+        ]
+      }
+    },
+    {
+      "id": 2480, "object": "vocabulary",
+      "data": {
+        "characters": "人", "level": 1,
+        "meanings": [{"meaning": "Person", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "ひと", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "あの人は誰ですか。", "en": "Who is that person?"}
+        ]
+      }
+    },
+    {
+      "id": 2481, "object": "vocabulary",
+      "data": {
+        "characters": "一人", "level": 3,
+        "meanings": [{"meaning": "Alone", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "ひとり", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "一人で行きます。", "en": "I will go alone."}
+        ]
+      }
+    },
+    {
+      "id": 2490, "object": "vocabulary",
+      "data": {
+        "characters": "大きい", "level": 1,
+        "meanings": [{"meaning": "Big", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "おおきい", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "大きい犬ですね。", "en": "That's a big dog, isn't it?"}
+        ]
+      }
+    },
+    {
+      "id": 2500, "object": "vocabulary",
+      "data": {
+        "characters": "上", "level": 1,
+        "meanings": [{"meaning": "Above", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "うえ", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "机の上に本があります。", "en": "There is a book on the desk."}
+        ]
+      }
+    },
+    {
+      "id": 2510, "object": "vocabulary",
+      "data": {
+        "characters": "山", "level": 1,
+        "meanings": [{"meaning": "Mountain", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "やま", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "山に登ります。", "en": "I climb the mountain."}
+        ]
+      }
+    },
+    {
+      "id": 2520, "object": "vocabulary",
+      "data": {
+        "characters": "口", "level": 1,
+        "meanings": [{"meaning": "Mouth", "primary": true, "accepted_answer": true}],
+        "readings": [{"reading": "くち", "primary": true, "accepted_answer": true}],
+        "context_sentences": [
+          {"ja": "口を大きく開けてください。", "en": "Please open your mouth wide."}
+        ]
+      }
+    }
+  ]
+}
