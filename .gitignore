@@ -1,0 +1,14 @@
+# Umgebung / Secrets
+.env
+.venv/
+venv/
+
+# Caches
+.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Erzeugte PDFs (Beispiel-Previews unter previews/ sind ausgenommen)
+*.pdf
+!previews/*.pdf
