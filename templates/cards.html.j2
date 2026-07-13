@@ -113,15 +113,15 @@
     font-weight: 600;
   }
 
-  /* ---------- Deckkarte: Vorderseite (schwarz-weiß) ---------- */
+  /* ---------- Deckkarte: Vorderseite (schwarz auf weiß, tintensparend) ---------- */
   .cover-front {
     align-items: center;
     justify-content: center;
-    background: #111;
-    color: #fff;
+    background: #fff;
+    color: #111;
     text-align: center;
+    border: 0.6mm solid #111;   /* dezenter Rahmen als Struktur (wenig Tinte) */
   }
-  .cover-front .hole { border-color: rgba(255, 255, 255, 0.75); }
   .cover-brand {
     font-family: "SansJP", sans-serif;
     font-weight: 700;
@@ -144,12 +144,12 @@
     text-transform: uppercase;
     margin-top: 3.5mm;
     padding: 1.2mm 3.5mm;
-    border: 0.4mm solid rgba(255, 255, 255, 0.8);
+    border: 0.4mm solid #111;
     border-radius: 1mm;
   }
   .cover-count {
     font-size: 11pt;
-    opacity: 0.8;
+    color: #666;
     margin-top: 3mm;
     letter-spacing: 1px;
     text-transform: uppercase;

@@ -26,9 +26,13 @@ CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
 
 Weitere Eigenschaften:
 
-- **Deckkarte** (schwarz-weiß) als erste Karte: vorne „WaniKani – Level N" mit
-  Untertitel **Kanji** bzw. **Radicals**, hinten eine Übersicht aller Einträge
-  mit Bedeutung. Abschaltbar mit `--no-cover`.
+- **Deckkarte** als erste Karte (**schwarze Schrift auf weißem Grund** –
+  tintensparend): vorne „WaniKani – Level N" mit Untertitel **Kanji** bzw.
+  **Radicals**, hinten eine Übersicht aller Einträge mit Bedeutung. Abschaltbar
+  mit `--no-cover`.
+- Jedes Layout (`a4-4up` / `a6`) funktioniert mit beiden Stapel-Typen –
+  Radicals lassen sich also mit `--type radicals --layout a6` ebenfalls **ohne
+  Schneiden** direkt auf A6-Karten drucken.
 - **Lochbereich oben links** auf jeder Karte (mit dezenter Loch-Markierung) –
   zum Lochen und Aufhängen an einem Ring. Der Bereich ist auf der Rückseite
   spiegelbildlich reserviert, sodass ein einziges Loch durch beide Seiten passt.
