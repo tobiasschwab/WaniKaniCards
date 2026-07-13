@@ -113,31 +113,43 @@
     font-weight: 600;
   }
 
-  /* ---------- Deckkarte: Vorderseite ---------- */
+  /* ---------- Deckkarte: Vorderseite (schwarz-weiß) ---------- */
   .cover-front {
     align-items: center;
     justify-content: center;
-    background: #0098c8;   /* WaniKani-Blau */
+    background: #111;
     color: #fff;
+    text-align: center;
   }
   .cover-front .hole { border-color: rgba(255, 255, 255, 0.75); }
   .cover-brand {
     font-family: "SansJP", sans-serif;
     font-weight: 700;
-    font-size: 30pt;
+    font-size: 26pt;
     letter-spacing: 0.5px;
     line-height: 1.05;
   }
   .cover-level {
     font-family: "SansJP", sans-serif;
     font-weight: 700;
-    font-size: 44pt;
+    font-size: 42pt;
     line-height: 1.1;
-    margin-top: 3mm;
+    margin-top: 2.5mm;
+  }
+  .cover-kind {
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 15pt;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-top: 3.5mm;
+    padding: 1.2mm 3.5mm;
+    border: 0.4mm solid rgba(255, 255, 255, 0.8);
+    border-radius: 1mm;
   }
   .cover-count {
-    font-size: 12pt;
-    opacity: 0.85;
+    font-size: 11pt;
+    opacity: 0.8;
     margin-top: 3mm;
     letter-spacing: 1px;
     text-transform: uppercase;
@@ -149,7 +161,7 @@
     font-family: "SansJP", sans-serif;
     font-weight: 700;
     font-size: 12pt;
-    color: #0098c8;
+    color: #111;
     margin-bottom: 2.5mm;
   }
   /* Spaltenzahl + Basis-Schriftgröße werden je nach Kanji-Anzahl per
@@ -178,6 +190,70 @@
   ul.cover-list .cl-m {
     font-size: 0.92em;
     color: #555;
+    line-height: 1.12;
+  }
+
+  /* ---------- Radical: Vorderseite ---------- */
+  .radical-front .radical-img {
+    height: 42mm;      /* feste Höhe: SVGs ohne intrinsische Größe skalieren sonst nicht */
+    width: auto;
+    max-width: 80%;
+    object-fit: contain;
+  }
+  .radical-front .radical-fallback {
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 30pt;
+    text-align: center;
+    line-height: 1.1;
+  }
+
+  /* ---------- Radical: Rückseite ---------- */
+  .radical-image-back {
+    text-align: center;
+    margin: 1.5mm 0 2mm;
+  }
+  .radical-image-back img {
+    max-height: 16mm;
+    max-width: 45mm;
+    object-fit: contain;
+  }
+  .rk-title {
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 9pt;
+    color: #111;
+    margin-bottom: 1mm;
+  }
+  ul.rk-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    columns: 2;
+    column-gap: 5mm;
+    font-size: 8.5pt;
+  }
+  ul.rk-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 1.4mm;
+    break-inside: avoid;
+    margin-bottom: 0.5em;
+  }
+  ul.rk-list .rk-k {
+    font-family: "KanjiFont", "SansJP", serif;
+    font-size: 1.3em;
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
+  ul.rk-list .rk-r {
+    color: #a23b2e;
+    font-size: 0.92em;
+    flex: 0 0 auto;
+  }
+  ul.rk-list .rk-m {
+    color: #555;
+    font-size: 0.92em;
     line-height: 1.12;
   }
 
@@ -338,7 +414,19 @@
           {% if cut_marks %}<div class="hole"></div>{% endif %}
           <div class="cover-brand">{{ cell.title }}</div>
           <div class="cover-level">{{ cell.subtitle }}</div>
-          <div class="cover-count">{{ cell.count }} Kanji</div>
+          <div class="cover-kind">{{ cell.kind }}</div>
+          <div class="cover-count">{{ cell.count }} {{ cell.kind }}</div>
+        </div>
+        {% elif cell.type == "radical" %}
+        <div class="card front radical-front" style="{{ pos }}">
+          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          {% if cell.radical %}
+          <div class="kanji">{{ cell.radical }}</div>
+          {% elif cell.image_uri %}
+          <img class="radical-img" src="{{ cell.image_uri }}" alt="{{ cell.meaning }}">
+          {% else %}
+          <div class="radical-fallback">{{ cell.meaning }}</div>
+          {% endif %}
         </div>
         {% else %}
         <div class="card front" style="{{ pos }}">
@@ -363,6 +451,35 @@
             <li><span class="cl-k">{{ e.kanji }}</span><span class="cl-m">{{ e.meaning }}</span></li>
             {% endfor %}
           </ul>
+        </div>
+      {% elif cell.type == "radical" %}
+        <div class="card back radical-back" style="{{ pos }}">
+          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          {% if cell.radical %}<div class="kanji-mini">{{ cell.radical }}</div>{% endif %}
+
+          {% if cell.meaning %}<div class="meanings">{{ cell.meaning }}</div>{% endif %}
+
+          {% if cell.mnemonic %}
+          <div class="mnemonics">
+            <div class="mnemonic"><span class="mlabel meaning">Mnemonic</span>{{ cell.mnemonic }}</div>
+          </div>
+          {% endif %}
+
+          {% if cell.image_uri %}
+          <div class="radical-image-back">
+            <img src="{{ cell.image_uri }}" alt="{{ cell.meaning }}">
+          </div>
+          {% endif %}
+
+          {% if cell.kanji_examples %}
+          <hr class="divider">
+          <div class="rk-title">Kanji</div>
+          <ul class="rk-list">
+            {% for e in cell.kanji_examples %}
+            <li><span class="rk-k">{{ e.kanji }}</span>{% if e.reading %}<span class="rk-r">{{ e.reading }}</span>{% endif %}<span class="rk-m">{{ e.meaning }}</span></li>
+            {% endfor %}
+          </ul>
+          {% endif %}
         </div>
       {% else %}
         <div class="card back" style="{{ pos }}">
@@ -393,7 +510,7 @@
           {% if cell.meaning_mnemonic or cell.reading_mnemonic %}
           <div class="mnemonics">
             {% if cell.meaning_mnemonic %}
-            <div class="mnemonic"><span class="mlabel meaning">Meaning</span>{{ cell.meaning_mnemonic }}</div>
+            <div class="mnemonic"><span class="mlabel meaning">Mnemonic</span>{{ cell.meaning_mnemonic }}</div>
             {% endif %}
             {% if cell.reading_mnemonic %}
             <div class="mnemonic"><span class="mlabel reading">Reading</span>{{ cell.reading_mnemonic }}</div>

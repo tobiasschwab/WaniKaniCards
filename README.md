@@ -1,11 +1,21 @@
 # WaniKani Kanji-Karteikarten
 
 CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
-**Kanji-Karteikarten als PDF** erzeugt.
+**Karteikarten als PDF** erzeugt – wahlweise für die **Kanji** oder die
+**Radicals** des Levels (`--type`).
+
+**Kanji-Karten**
 
 - **Vorderseite:** nur das Kanji, groß und zentriert.
-- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Meaning
+- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Mnemonic
   & Reading) · eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
+
+**Radical-Karten** (`--type radicals`)
+
+- **Vorderseite:** das Radical (Zeichen, oder – falls kein Unicode-Zeichen
+  existiert – das WaniKani-Bild).
+- **Rückseite:** Bedeutung · **Mnemonic** · (falls vorhanden) das Radical-Bild ·
+  eine Liste der ersten zugehörigen Kanji mit Lesung und Bedeutung.
 
 ## Druck-Layouts (`--layout`)
 
@@ -16,9 +26,9 @@ CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
 
 Weitere Eigenschaften:
 
-- **Deckkarte** als erste Karte: vorne „WaniKani – Level N" (+ Kanji-Anzahl),
-  hinten eine Übersicht aller enthaltenen Kanji mit Bedeutung. Abschaltbar mit
-  `--no-cover`.
+- **Deckkarte** (schwarz-weiß) als erste Karte: vorne „WaniKani – Level N" mit
+  Untertitel **Kanji** bzw. **Radicals**, hinten eine Übersicht aller Einträge
+  mit Bedeutung. Abschaltbar mit `--no-cover`.
 - **Lochbereich oben links** auf jeder Karte (mit dezenter Loch-Markierung) –
   zum Lochen und Aufhängen an einem Ring. Der Bereich ist auf der Rückseite
   spiegelbildlich reserviert, sodass ein einziges Loch durch beide Seiten passt.
@@ -41,8 +51,15 @@ Weitere Eigenschaften:
 |---|---|
 | ![A6 Deckkarte](previews/a6_cover_front.png) | ![A6 Rückseite](previews/a6_card_back.png) |
 
-Fertige PDFs: [`previews/sample_level1.pdf`](previews/sample_level1.pdf) (A4) ·
-[`previews/sample_a6.pdf`](previews/sample_a6.pdf) (A6).
+**Radicals** (`--sample --type radicals`):
+
+| Vorderseite | Rückseite |
+|---|---|
+| ![Radicals vorne](previews/radicals_front.png) | ![Radicals hinten](previews/radicals_back.png) |
+
+Fertige PDFs: [`previews/sample_level1.pdf`](previews/sample_level1.pdf) (Kanji, A4) ·
+[`previews/sample_a6.pdf`](previews/sample_a6.pdf) (A6) ·
+[`previews/sample_radicals.pdf`](previews/sample_radicals.pdf) (Radicals).
 
 ## Setup
 
@@ -86,8 +103,9 @@ WANIKANI_API_TOKEN=…
 ### Ohne Token ausprobieren
 
 ```bash
-python kanji_cards.py --sample                 # A4, 4 Karten/Seite (Level 1)
-python kanji_cards.py --sample --layout a6     # A6, eine Karte pro Seite
+python kanji_cards.py --sample                    # A4, Kanji (Level 1)
+python kanji_cards.py --sample --type radicals    # Radicals statt Kanji
+python kanji_cards.py --sample --layout a6        # A6, eine Karte pro Seite
 ```
 
 ### Optionen
@@ -96,6 +114,7 @@ python kanji_cards.py --sample --layout a6     # A6, eine Karte pro Seite
 |---|---|---|
 | `level` | – | WaniKani-Level (1–60) |
 | `--output`, `-o` | `cards.pdf` | Ausgabedatei |
+| `--type {kanji,radicals}` | `kanji` | Welcher Stapel exportiert wird |
 | `--layout {a4-4up,a6}` | `a4-4up` | Druck-Layout (A4 4-fach mit Schnitt / A6 pro Karte) |
 | `--duplex {long-edge,short-edge}` | `long-edge` | Wende-Kante für den Duplexdruck |
 | `--paper {a4,letter}` | `a4` | Papierformat (nur für `a4-4up`) |

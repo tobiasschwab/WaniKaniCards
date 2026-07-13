@@ -12,8 +12,11 @@ from kanji_cards import (  # noqa: E402
     LAYOUTS,
     Card,
     CoverCard,
+    RadicalCard,
     build_card,
     build_cover,
+    build_cover_radicals,
+    build_radical_card,
     mirror_backside,
     paginate,
     pick_example_vocab,
@@ -209,6 +212,60 @@ def test_build_cover_lists_kanji_and_meanings():
     assert isinstance(cover, CoverCard)
     assert cover.subtitle == "Level 5"
     assert cover.entries == [("一", "One"), ("人", "Person")]
+
+
+def test_build_radical_card_full():
+    radical = {
+        "data": {
+            "characters": "山",
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+            "meaning_mnemonic": "Three <radical>peaks</radical> = a Mountain.",
+            "amalgamation_subject_ids": [10, 11],
+        }
+    }
+    kanji_map = {
+        10: {"data": {
+            "characters": "山",
+            "readings": [{"reading": "さん", "primary": True, "type": "onyomi"}],
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+        }},
+        11: {"data": {
+            "characters": "岩",
+            "readings": [{"reading": "がん", "primary": True, "type": "onyomi"}],
+            "meanings": [{"meaning": "Boulder", "primary": True}],
+        }},
+    }
+    card = build_radical_card(radical, kanji_map)
+    assert isinstance(card, RadicalCard)
+    assert card.radical == "山"
+    assert card.meaning == "Mountain"
+    assert card.mnemonic == "Three peaks = a Mountain."  # Markup gestrippt
+    assert card.kanji_examples == [("山", "さん", "Mountain"), ("岩", "がん", "Boulder")]
+
+
+def test_build_radical_card_image_only():
+    radical = {
+        "data": {
+            "characters": None,
+            "meanings": [{"meaning": "Stick", "primary": True}],
+            "meaning_mnemonic": "A stick.",
+            "character_images": [],
+            "_image_data_uri": "data:image/svg+xml;base64,AAA",
+            "amalgamation_subject_ids": [],
+        }
+    }
+    card = build_radical_card(radical, {})
+    assert card.radical == ""
+    assert card.image_uri == "data:image/svg+xml;base64,AAA"
+    assert card.kanji_examples == []
+
+
+def test_build_cover_radicals_kind():
+    cards = [RadicalCard(radical="山", meaning="Mountain"), RadicalCard(radical="", meaning="Stick")]
+    cover = build_cover_radicals(3, cards)
+    assert cover.kind == "Radicals"
+    assert cover.subtitle == "Level 3"
+    assert cover.entries == [("山", "Mountain"), ("", "Stick")]
 
 
 def test_build_card_without_vocab_still_builds():

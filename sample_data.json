@@ -7,15 +7,39 @@
       "data": {
         "characters": "一",
         "level": 1,
-        "meanings": [{"meaning": "One", "primary": true, "accepted_answer": true}],
+        "meanings": [
+          {
+            "meaning": "One",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "readings": [
-          {"reading": "いち", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "いつ", "primary": false, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "ひと", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+          {
+            "reading": "いち",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "いつ",
+            "primary": false,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "ひと",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          }
         ],
         "meaning_mnemonic": "Lying on the ground is something that looks just like the ground, the number <kanji>One</kanji>. Why is this One lying down? It's been shot by the number two.",
         "reading_mnemonic": "One reason this kanji is read <reading>いち</reading> (ichi): picture someone with just one itch they can't stop scratching.",
-        "amalgamation_subject_ids": [2467, 2468]
+        "amalgamation_subject_ids": [
+          2467,
+          2468
+        ]
       }
     },
     {
@@ -24,15 +48,39 @@
       "data": {
         "characters": "人",
         "level": 1,
-        "meanings": [{"meaning": "Person", "primary": true, "accepted_answer": true}],
+        "meanings": [
+          {
+            "meaning": "Person",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "readings": [
-          {"reading": "じん", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "にん", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "ひと", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+          {
+            "reading": "じん",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "にん",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "ひと",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          }
         ],
         "meaning_mnemonic": "This kanji looks just like a <kanji>Person</kanji> walking, striding forward on two legs.",
         "reading_mnemonic": "A <reading>じん</reading> (jin) is what you call a person from somewhere — an American person is an American-jin.",
-        "amalgamation_subject_ids": [2480, 2481]
+        "amalgamation_subject_ids": [
+          2480,
+          2481
+        ]
       }
     },
     {
@@ -42,17 +90,42 @@
         "characters": "大",
         "level": 1,
         "meanings": [
-          {"meaning": "Big", "primary": true, "accepted_answer": true},
-          {"meaning": "Large", "primary": false, "accepted_answer": true}
+          {
+            "meaning": "Big",
+            "primary": true,
+            "accepted_answer": true
+          },
+          {
+            "meaning": "Large",
+            "primary": false,
+            "accepted_answer": true
+          }
         ],
         "readings": [
-          {"reading": "たい", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "だい", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "おお", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+          {
+            "reading": "たい",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "だい",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "おお",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          }
         ],
         "meaning_mnemonic": "A <kanji>Person</kanji> spreading their arms out as wide as possible to show you how <kanji>Big</kanji> something is.",
         "reading_mnemonic": "When something is really <reading>だい</reading> (dai) big, imagine it is so huge it could cause you to die.",
-        "amalgamation_subject_ids": [2490]
+        "amalgamation_subject_ids": [
+          2490
+        ]
       }
     },
     {
@@ -62,17 +135,42 @@
         "characters": "上",
         "level": 1,
         "meanings": [
-          {"meaning": "Above", "primary": true, "accepted_answer": true},
-          {"meaning": "Up", "primary": false, "accepted_answer": true}
+          {
+            "meaning": "Above",
+            "primary": true,
+            "accepted_answer": true
+          },
+          {
+            "meaning": "Up",
+            "primary": false,
+            "accepted_answer": true
+          }
         ],
         "readings": [
-          {"reading": "じょう", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "うえ", "primary": false, "accepted_answer": false, "type": "kunyomi"},
-          {"reading": "あ", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+          {
+            "reading": "じょう",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "うえ",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          },
+          {
+            "reading": "あ",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          }
         ],
         "meaning_mnemonic": "A short line sitting <kanji>Above</kanji> the long ground line. Whatever sits on top is above.",
         "reading_mnemonic": "Read <reading>じょう</reading> (jou): picture your friend Joe standing up above you on the roof.",
-        "amalgamation_subject_ids": [2500]
+        "amalgamation_subject_ids": [
+          2500
+        ]
       }
     },
     {
@@ -81,14 +179,32 @@
       "data": {
         "characters": "山",
         "level": 1,
-        "meanings": [{"meaning": "Mountain", "primary": true, "accepted_answer": true}],
+        "meanings": [
+          {
+            "meaning": "Mountain",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "readings": [
-          {"reading": "さん", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "やま", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+          {
+            "reading": "さん",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "やま",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          }
         ],
         "meaning_mnemonic": "Three peaks rising up next to each other — that's a <kanji>Mountain</kanji> range.",
         "reading_mnemonic": "Read <reading>さん</reading> (san): the mountain is so grand you politely call it Mountain-san.",
-        "amalgamation_subject_ids": [2510]
+        "amalgamation_subject_ids": [
+          2510
+        ]
       }
     },
     {
@@ -97,105 +213,384 @@
       "data": {
         "characters": "口",
         "level": 1,
-        "meanings": [{"meaning": "Mouth", "primary": true, "accepted_answer": true}],
+        "meanings": [
+          {
+            "meaning": "Mouth",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "readings": [
-          {"reading": "こう", "primary": true, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "く", "primary": false, "accepted_answer": true, "type": "onyomi"},
-          {"reading": "くち", "primary": false, "accepted_answer": false, "type": "kunyomi"}
+          {
+            "reading": "こう",
+            "primary": true,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "く",
+            "primary": false,
+            "accepted_answer": true,
+            "type": "onyomi"
+          },
+          {
+            "reading": "くち",
+            "primary": false,
+            "accepted_answer": false,
+            "type": "kunyomi"
+          }
         ],
         "meaning_mnemonic": "A big open square is your wide-open <kanji>Mouth</kanji>, ready for the dentist.",
         "reading_mnemonic": "Read <reading>こう</reading> (kou): open your mouth and out comes a loud cow-like 'kou' sound.",
-        "amalgamation_subject_ids": [2520]
+        "amalgamation_subject_ids": [
+          2520
+        ]
       }
     }
   ],
   "vocab": [
     {
-      "id": 2467, "object": "vocabulary",
+      "id": 2467,
+      "object": "vocabulary",
       "data": {
-        "characters": "一", "level": 1,
-        "meanings": [{"meaning": "One", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "いち", "primary": true, "accepted_answer": true}],
+        "characters": "一",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "One",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "いち",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "一から始めましょう。", "en": "Let's start from the beginning."}
+          {
+            "ja": "一から始めましょう。",
+            "en": "Let's start from the beginning."
+          }
         ]
       }
     },
     {
-      "id": 2468, "object": "vocabulary",
+      "id": 2468,
+      "object": "vocabulary",
       "data": {
-        "characters": "一つ", "level": 2,
-        "meanings": [{"meaning": "One Thing", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "ひとつ", "primary": true, "accepted_answer": true}],
+        "characters": "一つ",
+        "level": 2,
+        "meanings": [
+          {
+            "meaning": "One Thing",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "ひとつ",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "一つください。", "en": "One, please."}
+          {
+            "ja": "一つください。",
+            "en": "One, please."
+          }
         ]
       }
     },
     {
-      "id": 2480, "object": "vocabulary",
+      "id": 2480,
+      "object": "vocabulary",
       "data": {
-        "characters": "人", "level": 1,
-        "meanings": [{"meaning": "Person", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "ひと", "primary": true, "accepted_answer": true}],
+        "characters": "人",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Person",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "ひと",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "あの人は誰ですか。", "en": "Who is that person?"}
+          {
+            "ja": "あの人は誰ですか。",
+            "en": "Who is that person?"
+          }
         ]
       }
     },
     {
-      "id": 2481, "object": "vocabulary",
+      "id": 2481,
+      "object": "vocabulary",
       "data": {
-        "characters": "一人", "level": 3,
-        "meanings": [{"meaning": "Alone", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "ひとり", "primary": true, "accepted_answer": true}],
+        "characters": "一人",
+        "level": 3,
+        "meanings": [
+          {
+            "meaning": "Alone",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "ひとり",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "一人で行きます。", "en": "I will go alone."}
+          {
+            "ja": "一人で行きます。",
+            "en": "I will go alone."
+          }
         ]
       }
     },
     {
-      "id": 2490, "object": "vocabulary",
+      "id": 2490,
+      "object": "vocabulary",
       "data": {
-        "characters": "大きい", "level": 1,
-        "meanings": [{"meaning": "Big", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "おおきい", "primary": true, "accepted_answer": true}],
+        "characters": "大きい",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Big",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "おおきい",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "大きい犬ですね。", "en": "That's a big dog, isn't it?"}
+          {
+            "ja": "大きい犬ですね。",
+            "en": "That's a big dog, isn't it?"
+          }
         ]
       }
     },
     {
-      "id": 2500, "object": "vocabulary",
+      "id": 2500,
+      "object": "vocabulary",
       "data": {
-        "characters": "上", "level": 1,
-        "meanings": [{"meaning": "Above", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "うえ", "primary": true, "accepted_answer": true}],
+        "characters": "上",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Above",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "うえ",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "机の上に本があります。", "en": "There is a book on the desk."}
+          {
+            "ja": "机の上に本があります。",
+            "en": "There is a book on the desk."
+          }
         ]
       }
     },
     {
-      "id": 2510, "object": "vocabulary",
+      "id": 2510,
+      "object": "vocabulary",
       "data": {
-        "characters": "山", "level": 1,
-        "meanings": [{"meaning": "Mountain", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "やま", "primary": true, "accepted_answer": true}],
+        "characters": "山",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Mountain",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "やま",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "山に登ります。", "en": "I climb the mountain."}
+          {
+            "ja": "山に登ります。",
+            "en": "I climb the mountain."
+          }
         ]
       }
     },
     {
-      "id": 2520, "object": "vocabulary",
+      "id": 2520,
+      "object": "vocabulary",
       "data": {
-        "characters": "口", "level": 1,
-        "meanings": [{"meaning": "Mouth", "primary": true, "accepted_answer": true}],
-        "readings": [{"reading": "くち", "primary": true, "accepted_answer": true}],
+        "characters": "口",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Mouth",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "readings": [
+          {
+            "reading": "くち",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
         "context_sentences": [
-          {"ja": "口を大きく開けてください。", "en": "Please open your mouth wide."}
+          {
+            "ja": "口を大きく開けてください。",
+            "en": "Please open your mouth wide."
+          }
         ]
+      }
+    }
+  ],
+  "radicals": [
+    {
+      "id": 1,
+      "object": "radical",
+      "data": {
+        "characters": "一",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Ground",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "meaning_mnemonic": "This radical is just a single horizontal line — the <radical>Ground</radical> you stand on.",
+        "amalgamation_subject_ids": [
+          440,
+          448
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "object": "radical",
+      "data": {
+        "characters": "人",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Person",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "meaning_mnemonic": "Two legs walking: it's a <radical>Person</radical> striding forward.",
+        "amalgamation_subject_ids": [
+          449,
+          450
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "object": "radical",
+      "data": {
+        "characters": "口",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Mouth",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "meaning_mnemonic": "A big open square is your wide-open <radical>Mouth</radical>.",
+        "amalgamation_subject_ids": [
+          452
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "object": "radical",
+      "data": {
+        "characters": "大",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Big",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "meaning_mnemonic": "A <radical>Person</radical> stretching their arms out wide to show something <radical>Big</radical>.",
+        "amalgamation_subject_ids": [
+          450
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "object": "radical",
+      "data": {
+        "characters": "山",
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Mountain",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "meaning_mnemonic": "Three peaks side by side make up a <radical>Mountain</radical>.",
+        "amalgamation_subject_ids": [
+          451
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "object": "radical",
+      "data": {
+        "characters": null,
+        "level": 1,
+        "meanings": [
+          {
+            "meaning": "Stick",
+            "primary": true,
+            "accepted_answer": true
+          }
+        ],
+        "meaning_mnemonic": "No Unicode character for this one, so remember the <radical>Stick</radical> from its hooked shape.",
+        "amalgamation_subject_ids": [
+          440
+        ],
+        "character_images": [],
+        "_image_data_uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cGF0aCBkPSJNMjggMjIgTDcyIDIyIE01MCAyMiBMNTAgNzggUTUwIDkyIDMzIDg3IiBzdHJva2U9IiMxMTEiIHN0cm9rZS13aWR0aD0iOSIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9zdmc+"
       }
     }
   ]
