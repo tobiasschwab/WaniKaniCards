@@ -1,0 +1,12 @@
+services:
+  wkcards:
+    build: .
+    image: wanikani-card-studio
+    container_name: wkcards
+    ports:
+      - "8000:8000"
+    volumes:
+      # Alle Daten (Einstellungen inkl. Token, erzeugte PDFs, Jobs, API-Cache)
+      # liegen dateibasiert im Host-Ordner ./data – keine Datenbank.
+      - ./data:/data
+    restart: unless-stopped

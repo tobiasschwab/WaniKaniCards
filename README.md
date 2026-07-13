@@ -1,8 +1,11 @@
 # WaniKani Kanji-Karteikarten
 
-CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
-**Karteikarten als PDF** erzeugt – wahlweise für die **Kanji** oder die
-**Radicals** des Levels (`--type`).
+CLI-Tool (Python 3) **und Web-Frontend**, das aus einem **WaniKani-Level**
+doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
+**Kanji** oder die **Radicals** des Levels (`--type`).
+
+> **Web-Frontend & Docker:** Für die grafische Oberfläche (API-Token setzen,
+> Level wählen, PDF-Vorschau, Verlauf) siehe [Web-Frontend (Docker)](#web-frontend-docker).
 
 **Kanji-Karten**
 
@@ -154,6 +157,47 @@ Seite anpassen“), damit die Geometrie exakt bleibt.
 Tipp: Vor dem Serienlauf eine Karte testen und Vorder-/Rückseite gegen das
 Licht halten, um die Ausrichtung der Wende-Kante zu prüfen. Passt es nicht,
 `--duplex short-edge` versuchen.
+
+## Web-Frontend (Docker)
+
+Ein modernes Web-Frontend (`webapp.py`, Flask) bietet dieselben Funktionen
+grafisch: **API-Token setzen**, Level/Typ/Layout wählen, **PDF-Vorschau** direkt
+im Browser und einen **Verlauf** aller Exporte. Es gibt **keine Datenbank** –
+alles wird dateibasiert im Ordner `data/` gespeichert:
+
+```
+data/
+├── settings.json     # API-Token (+ zuletzt genutzte Optionen)
+├── output/<id>.pdf   # erzeugte PDFs
+├── jobs/<id>.json    # Job-Status/Metadaten
+└── .cache/           # WaniKani-API-Cache
+```
+
+![Web-Frontend](previews/webui.png)
+
+### Mit Docker starten (empfohlen)
+
+```bash
+docker compose up --build      # baut das Image inkl. WeasyPrint-System-Libs
+# → Frontend auf http://localhost:8000
+```
+
+Der Host-Ordner `./data` ist als Volume eingehängt (`./data:/data`), sodass
+Einstellungen und PDFs einen Neustart überdauern. Danach im Browser oben rechts
+auf ⚙ klicken, den **WaniKani API-Token** eintragen und speichern.
+
+### Ohne Docker (lokal)
+
+```bash
+pip install -r requirements.txt -r requirements-web.txt
+python webapp.py               # http://localhost:8000  (Entwicklungsserver)
+# produktiv:
+gunicorn -b 0.0.0.0:8000 -w 2 --timeout 600 webapp:app
+```
+
+Der Token wird über die Oberfläche gesetzt und landet in `data/settings.json`
+(nicht im Repo – `data/` ist in `.gitignore`). Alternativ funktioniert weiter
+`WANIKANI_API_TOKEN` als Umgebungsvariable fürs CLI.
 
 ## Architektur
 

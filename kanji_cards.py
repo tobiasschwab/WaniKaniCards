@@ -38,7 +38,8 @@ except ImportError:  # python-dotenv ist optional
 
 WK_BASE_URL = "https://api.wanikani.com/v2/"
 WK_REVISION = "20170710"
-CACHE_DIR = Path(".cache")
+# Cache-Verzeichnis; per Env überschreibbar (z. B. für den Docker-Container).
+CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache"))
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_TEMPLATE_DIR = HERE / "templates"
@@ -741,6 +742,69 @@ def load_radicals_from_api(level: int, *, use_cache: bool = True) -> list[Radica
 
 
 # --------------------------------------------------------------------------- #
+# Orchestrierung (von CLI und Web-Frontend gemeinsam genutzt)
+# --------------------------------------------------------------------------- #
+
+def build_deck(
+    level: int | None,
+    deck_type: str = "kanji",
+    *,
+    use_cache: bool = True,
+    with_cover: bool = True,
+    sample: bool = False,
+) -> list[Card | CoverCard | RadicalCard]:
+    """Kompletten Kartenstapel (inkl. optionaler Deckkarte) für ein Level bauen."""
+    radicals = deck_type == "radicals"
+    if sample:
+        cards: Sequence[Card] | Sequence[RadicalCard] = (
+            load_sample_radicals() if radicals else load_sample_cards()
+        )
+    elif radicals:
+        cards = load_radicals_from_api(level, use_cache=use_cache)  # type: ignore[arg-type]
+    else:
+        cards = load_cards_from_api(level, use_cache=use_cache)  # type: ignore[arg-type]
+
+    deck: list[Card | CoverCard | RadicalCard] = list(cards)
+    if with_cover and cards:
+        label = level if level is not None else 1
+        cover = (
+            build_cover_radicals(label, cards)  # type: ignore[arg-type]
+            if radicals
+            else build_cover(label, cards)  # type: ignore[arg-type]
+        )
+        deck.insert(0, cover)
+    return deck
+
+
+def render_deck(
+    deck: Sequence[Card | CoverCard | RadicalCard],
+    output: str | Path,
+    *,
+    layout: str = "a4-4up",
+    paper: str = "a4",
+    duplex: str = "long-edge",
+    cut_marks: bool = True,
+    kanji_font: str | Path = DEFAULT_KANJI_FONT,
+) -> Path:
+    """Einen Stapel gemäß Layout-Profil als PDF rendern."""
+    profile = dict(LAYOUTS[layout])
+    if layout == "a4-4up":
+        profile["paper"] = paper  # a4/letter erlaubt
+    return render_pdf(
+        deck,
+        output,
+        kanji_font=Path(kanji_font),
+        duplex=duplex,
+        paper=profile["paper"],
+        landscape=profile["landscape"],
+        cols=profile["cols"],
+        rows=profile["rows"],
+        margin=profile["margin"],
+        cut_marks=cut_marks,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 
@@ -820,54 +884,39 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     radicals = args.deck_type == "radicals"
     try:
-        if args.sample:
-            cards = load_sample_radicals() if radicals else load_sample_cards()
-        elif radicals:
-            cards = load_radicals_from_api(args.level, use_cache=not args.no_cache)
-        else:
-            cards = load_cards_from_api(args.level, use_cache=not args.no_cache)
+        deck = build_deck(
+            args.level,
+            args.deck_type,
+            use_cache=not args.no_cache,
+            with_cover=not args.no_cover,
+            sample=args.sample,
+        )
     except WaniKaniError as exc:
         print(f"Fehler: {exc}", file=sys.stderr)
         return 1
 
-    if not cards:
+    if not deck:
         print("Keine Karten zu erzeugen.", file=sys.stderr)
         return 1
 
-    deck: list[Card | CoverCard | RadicalCard] = list(cards)
-    if not args.no_cover:
-        level_label = "1" if args.sample else args.level
-        cover = (
-            build_cover_radicals(level_label, cards)
-            if radicals
-            else build_cover(level_label, cards)
-        )
-        deck.insert(0, cover)
-
-    profile = dict(LAYOUTS[args.layout])
-    if args.layout == "a4-4up":
-        profile["paper"] = args.paper  # a4/letter erlaubt
-
-    out = render_pdf(
+    out = render_deck(
         deck,
         args.output,
-        kanji_font=Path(args.font),
+        layout=args.layout,
+        paper=args.paper,
         duplex=args.duplex,
-        paper=profile["paper"],
-        landscape=profile["landscape"],
-        cols=profile["cols"],
-        rows=profile["rows"],
-        margin=profile["margin"],
         cut_marks=not args.no_cut_marks,
+        kanji_font=args.font,
     )
+    profile = LAYOUTS[args.layout]
     per_page = profile["cols"] * profile["rows"]
     n_sheets = ((len(deck) + per_page - 1) // per_page) * 2
     cover_note = "" if args.no_cover else " inkl. Deckkarte"
     kind = "Radicals" if radicals else "Kanji"
+    paper_label = (args.paper if args.layout == "a4-4up" else profile["paper"]).upper()
     print(
         f"{len(deck)} {kind}-Karten{cover_note} → {out} ({n_sheets} Seiten, "
-        f"{per_page}/Seite, {profile['paper'].upper()} quer, "
-        f"Duplex: {args.duplex})."
+        f"{per_page}/Seite, {paper_label} quer, Duplex: {args.duplex})."
     )
     return 0
 

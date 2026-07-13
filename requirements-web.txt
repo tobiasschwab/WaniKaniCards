@@ -1,0 +1,3 @@
+# Zusätzliche Abhängigkeiten für das Web-Frontend (webapp.py)
+Flask>=3.0
+gunicorn>=21.2

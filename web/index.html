@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WaniKani Card Studio</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🈷️%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">字</div>
+        <div>
+          <h1>WaniKani <span>Card Studio</span></h1>
+          <p class="tagline">Druckfertige Kanji- &amp; Radical-Karteikarten als PDF</p>
+        </div>
+      </div>
+      <button id="settingsToggle" class="icon-btn" title="Einstellungen" aria-label="Einstellungen">
+        <span class="gear">⚙</span>
+        <span id="tokenPill" class="pill pill-warn">Kein Token</span>
+      </button>
+    </header>
+
+    <!-- Einstellungen -->
+    <section id="settingsPanel" class="panel settings hidden">
+      <h2>Einstellungen</h2>
+      <label class="field">
+        <span class="label">WaniKani API-Token <em>(read-only genügt)</em></span>
+        <div class="token-row">
+          <input id="tokenInput" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="z. B. 20b059b1-eeca-…">
+          <button id="tokenShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+        </div>
+        <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert – keine Datenbank.</span>
+      </label>
+      <div class="row gap">
+        <button id="tokenSave" class="btn primary">Speichern</button>
+        <button id="tokenTest" class="btn">Verbindung testen</button>
+        <span id="tokenStatus" class="status"></span>
+      </div>
+    </section>
+
+    <main class="grid">
+      <!-- Export-Formular -->
+      <section class="panel form">
+        <h2>Neuer Export</h2>
+
+        <label class="field">
+          <span class="label">Level</span>
+          <input id="level" type="number" min="1" max="60" value="1" class="num">
+        </label>
+
+        <div class="field">
+          <span class="label">Stapel</span>
+          <div class="segmented" id="type" data-value="kanji">
+            <button data-v="kanji" class="active">Kanji</button>
+            <button data-v="radicals">Radicals</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label">Layout</span>
+          <div class="segmented" id="layout" data-value="a4-4up">
+            <button data-v="a4-4up" class="active">A4 · 4 Karten <em>(schneiden)</em></button>
+            <button data-v="a6">A6 · 1 Karte <em>(kein Schnitt)</em></button>
+          </div>
+        </div>
+
+        <label class="field" id="paperField">
+          <span class="label">Papier</span>
+          <select id="paper" class="select">
+            <option value="a4">A4</option>
+            <option value="letter">Letter</option>
+          </select>
+        </label>
+
+        <div class="field">
+          <span class="label">Duplex-Wendekante</span>
+          <div class="segmented" id="duplex" data-value="long-edge">
+            <button data-v="long-edge" class="active">Lange Kante</button>
+            <button data-v="short-edge">Kurze Kante</button>
+          </div>
+        </div>
+
+        <div class="toggles">
+          <label class="switch"><input type="checkbox" id="cover" checked><span></span>Deckkarte</label>
+          <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span>Schnittmarken</label>
+          <label class="switch"><input type="checkbox" id="nocache"><span></span>Cache umgehen</label>
+          <label class="switch"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
+        </div>
+
+        <button id="generate" class="btn primary big">PDF erzeugen</button>
+        <div id="progress" class="progress hidden">
+          <div class="spinner"></div>
+          <span id="progressText">Wird erzeugt…</span>
+        </div>
+        <div id="formError" class="error hidden"></div>
+      </section>
+
+      <!-- Vorschau -->
+      <section class="panel preview">
+        <div class="preview-head">
+          <h2>Vorschau</h2>
+          <div class="row gap">
+            <a id="downloadBtn" class="btn small hidden" download>Download</a>
+          </div>
+        </div>
+        <div id="previewEmpty" class="preview-empty">
+          <div class="ph-icon">📄</div>
+          <p>Noch kein PDF – links Parameter wählen und <strong>erzeugen</strong>.</p>
+        </div>
+        <iframe id="previewFrame" class="preview-frame hidden" title="PDF-Vorschau"></iframe>
+      </section>
+    </main>
+
+    <!-- Verlauf -->
+    <section class="panel history">
+      <h2>Verlauf</h2>
+      <ul id="historyList" class="history-list"></ul>
+      <p id="historyEmpty" class="muted">Noch keine Exporte.</p>
+    </section>
+
+    <footer class="foot">Dateibasiert · keine Datenbank · <span id="ver">WaniKani Card Studio</span></footer>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

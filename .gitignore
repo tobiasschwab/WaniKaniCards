@@ -9,6 +9,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Web-Frontend: dateibasierte Laufzeitdaten (Token, PDFs, Jobs)
+data/
+
 # Erzeugte PDFs (Beispiel-Previews unter previews/ sind ausgenommen)
 *.pdf
 !previews/*.pdf
