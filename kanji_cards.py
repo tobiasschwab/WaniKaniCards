@@ -901,7 +901,7 @@ def render_subjects(
     subject_ids: Iterable[int],
     output: str | Path,
     *,
-    layout: str = "a4-4up",
+    layout: str = "a6",
     paper: str = "a4",
     duplex: str = "long-edge",
     cut_marks: bool = True,
@@ -984,7 +984,7 @@ def render_deck(
     deck: Sequence[Card | CoverCard | RadicalCard | VocabCard],
     output: str | Path,
     *,
-    layout: str = "a4-4up",
+    layout: str = "a6",
     paper: str = "a4",
     duplex: str = "long-edge",
     cut_marks: bool = True,
@@ -1109,10 +1109,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--layout",
         choices=list(LAYOUTS),
-        default="a4-4up",
-        help="Druck-Layout: 'a4-4up' = 4 Karten pro A4-Blatt (quer) zum "
-        "Schneiden (Default); 'a6' = eine Karte pro A6-Seite, direkt auf "
-        "A6-Karten drucken (kein Schneiden).",
+        default="a6",
+        help="Druck-Layout: 'a6' = eine Karte pro A6-Seite, direkt auf "
+        "A6-Karten drucken (Default, kein Schneiden); 'a4-4up' = 4 Karten pro "
+        "A4-Blatt (quer) zum Schneiden.",
     )
     parser.add_argument(
         "--paper",

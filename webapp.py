@@ -38,7 +38,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "defaults": {
         "level": 1,
         "type": "kanji",
-        "layout": "a4-4up",
+        "layout": "a6",
         "paper": "a4",
         "duplex": "long-edge",
         "cut_marks": True,
