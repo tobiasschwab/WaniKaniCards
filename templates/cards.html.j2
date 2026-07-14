@@ -108,15 +108,18 @@
   }
 
   /* ---------- Tags (oben rechts auf der Rückseite) ---------- */
+  /* Kein Flexbox hier: absolut positionierte Flex-Container zeichnen in
+     WeasyPrint die Ränder der Items doppelt. inline-block + margin vermeidet das. */
   .tags {
     position: absolute;
     top: 4.5mm;
     right: {{ 15 if (show_hole and duplex != "short-edge") else 6 }}mm;
-    display: flex;
-    gap: 1.4mm;
+    text-align: right;
+    white-space: nowrap;
     z-index: 2;
   }
   .tag {
+    display: inline-block;
     font-family: "SansJP", sans-serif;
     font-size: 6.6pt;
     font-weight: 700;
@@ -129,6 +132,7 @@
     background: #fff;
     white-space: nowrap;
   }
+  .tag + .tag { margin-left: 1.4mm; }
 
   /* Dezenter Benutzername unten rechts auf der Rückseite. */
   .username {
