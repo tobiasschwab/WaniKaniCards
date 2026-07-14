@@ -254,15 +254,6 @@
   }
 
   /* ---------- Radical: Rückseite ---------- */
-  .radical-image-back {
-    text-align: center;
-    margin: 1.5mm 0 2mm;
-  }
-  .radical-image-back img {
-    max-height: 16mm;
-    max-width: 45mm;
-    object-fit: contain;
-  }
   .rk-title {
     font-family: "SansJP", sans-serif;
     font-weight: 700;
@@ -378,6 +369,35 @@
     font-weight: 400;
     font-size: 10pt;
     color: #666;
+  }
+
+  /* ---------- Referenz-Zeichen auf der Rückseite ----------
+     Damit man nicht umdrehen muss: das Zeichen der Vorderseite (Kanji/Radical/
+     Vokabel) steht auch hinten oben, deutlich kleiner als vorne, aber etwas
+     größer als der übrige Text. Kopfzeile: Zeichen links, Bedeutung daneben. */
+  .back-head {
+    display: flex;
+    align-items: baseline;
+    gap: 3mm;
+    margin-bottom: 2mm;
+  }
+  .back-head.has-img { align-items: center; }
+  .back-head .meanings { margin-bottom: 0; }
+  .back-char {
+    flex: 0 0 auto;
+    font-family: "KanjiFont", "SansJP", serif;
+    font-weight: 600;
+    font-size: 30pt;
+    line-height: 1;
+    color: #111;
+  }
+  .back-char.vocab-char { font-size: 24pt; }
+  .back-char-img {
+    flex: 0 0 auto;
+    height: 13mm;
+    width: auto;
+    max-width: 32mm;
+    object-fit: contain;
   }
 
   .readings {
@@ -585,17 +605,15 @@
         <div class="card back radical-back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
-          {% if cell.meaning %}<div class="meanings">{{ cell.meaning }}</div>{% endif %}
+          <div class="back-head{% if not cell.radical and cell.image_uri %} has-img{% endif %}">
+            {% if cell.radical %}<div class="back-char">{{ cell.radical }}</div>
+            {% elif cell.image_uri %}<img class="back-char-img" src="{{ cell.image_uri }}" alt="{{ cell.meaning }}">{% endif %}
+            {% if cell.meaning %}<div class="meanings">{{ cell.meaning }}</div>{% endif %}
+          </div>
 
           {% if cell.mnemonic %}
           <div class="mnemonics">
             <div class="mnemonic"><span class="mlabel meaning">Mnemonic</span>{{ cell.mnemonic }}</div>
-          </div>
-          {% endif %}
-
-          {% if cell.image_uri %}
-          <div class="radical-image-back">
-            <img src="{{ cell.image_uri }}" alt="{{ cell.meaning }}">
           </div>
           {% endif %}
 
@@ -614,11 +632,14 @@
         <div class="card back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
-          {% if cell.meanings %}
-          <div class="meanings">
-            {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
+          <div class="back-head">
+            {% if cell.vocab %}<div class="back-char vocab-char">{{ cell.vocab }}</div>{% endif %}
+            {% if cell.meanings %}
+            <div class="meanings">
+              {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
+            </div>
+            {% endif %}
           </div>
-          {% endif %}
           {% if cell.parts_of_speech %}<div class="pos">{{ cell.parts_of_speech | join(", ") }}</div>{% endif %}
 
           {% if cell.readings %}
@@ -660,11 +681,14 @@
         <div class="card back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
-          {% if cell.meanings %}
-          <div class="meanings">
-            {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
+          <div class="back-head">
+            {% if cell.kanji %}<div class="back-char">{{ cell.kanji }}</div>{% endif %}
+            {% if cell.meanings %}
+            <div class="meanings">
+              {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
+            </div>
+            {% endif %}
           </div>
-          {% endif %}
 
           <div class="readings">
             {% if cell.onyomi %}

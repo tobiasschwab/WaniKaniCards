@@ -10,20 +10,26 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 **Kanji-Karten**
 
 - **Vorderseite:** nur das Kanji, groß und zentriert.
-- **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Mnemonic
-  & Reading) · eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
+- **Rückseite:** das Kanji als Referenz (oben, etwas größer als der Text) ·
+  Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Mnemonic & Reading) ·
+  eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
 
 **Radical-Karten**
 
 - **Vorderseite:** das Radical (Zeichen, oder – falls kein Unicode-Zeichen
   existiert – das WaniKani-Bild).
-- **Rückseite:** Bedeutung · **Mnemonic** · (falls vorhanden) das Radical-Bild ·
-  eine Liste der ersten zugehörigen Kanji mit Lesung und Bedeutung.
+- **Rückseite:** das Radical als Referenz (Zeichen oder Bild, oben) · Bedeutung ·
+  **Mnemonic** · eine Liste der ersten zugehörigen Kanji mit Lesung und Bedeutung.
 
 **Vokabel-Karten**
 
 - **Vorderseite:** das Wort, groß (automatisch an die Länge angepasst).
-- **Rückseite:** Bedeutungen · Wortart · Lesung · **Mnemonics** · Beispielsatz.
+- **Rückseite:** das Wort als Referenz (oben) · Bedeutungen · Wortart · Lesung ·
+  **Mnemonics** · Beispielsatz.
+
+Damit man zum Abfragen nicht umdrehen muss, steht das Zeichen der Vorderseite
+(Kanji/Radical/Vokabel) **auch auf der Rückseite oben** – deutlich kleiner als
+vorne, aber etwas größer als der übrige Text.
 
 Jede **Vorderseite** trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level,
 z. B. `KANJI` / `LV 1`); die Rückseite zeigt – sofern ein Token gesetzt ist –
