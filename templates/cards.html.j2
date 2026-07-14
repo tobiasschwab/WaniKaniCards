@@ -357,6 +357,7 @@
     padding-top: 1pt;
   }
   .reading-row.kun .label { color: #2e5aa2; }  /* Blau für Kun */
+  .reading-row.gen .label { color: #444; }     /* neutral (freie Karten) */
   .reading-row .value {
     font-family: "KanjiFont", "SansJP", serif;
     font-size: 13pt;
@@ -505,6 +506,19 @@
           {% if show_hole %}<div class="hole"></div>{% endif %}
           <div class="vword" style="font-size: {{ vfs }}pt;">{{ cell.vocab }}</div>
         </div>
+        {% elif cell.type == "custom" %}
+        {% set fl = (cell.front_text or "") | length %}
+        {% if fl <= 1 %}{% set vfs = 128 %}{% elif fl == 2 %}{% set vfs = 106 %}
+        {% elif fl == 3 %}{% set vfs = 84 %}{% elif fl == 4 %}{% set vfs = 66 %}
+        {% elif fl <= 6 %}{% set vfs = 48 %}{% else %}{% set vfs = 34 %}{% endif %}
+        <div class="card front vocab-front" style="{{ pos }}">
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {% if cell.front_image %}
+          <img class="radical-img" src="{{ cell.front_image }}" alt="">
+          {% elif cell.front_text %}
+          <div class="vword" style="font-size: {{ vfs }}pt;">{{ cell.front_text }}</div>
+          {% endif %}
+        </div>
         {% else %}
         <div class="card front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
@@ -594,6 +608,60 @@
           {% if cell.sentence_ja %}
           <div class="sentence">
             <div class="ja">{{ cell.sentence_ja }}</div>
+            {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+      {% elif cell.type == "custom" %}
+        <div class="card back" style="{{ pos }}">
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
+          {% if username %}<div class="username">{{ username }}</div>{% endif %}
+          {% if cell.meanings %}
+          <div class="meanings">
+            {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
+          </div>
+          {% endif %}
+          {% if cell.subline %}<div class="pos">{{ cell.subline }}</div>{% endif %}
+
+          {% if cell.readings %}
+          <div class="readings">
+            {% for r in cell.readings %}
+            <div class="reading-row gen">
+              <div class="label">{{ r.label }}</div>
+              <div class="value">{{ r.value }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if cell.mnemonics %}
+          <div class="mnemonics">
+            {% for m in cell.mnemonics %}
+            <div class="mnemonic"><span class="mlabel meaning">{{ m.label or "Mnemonic" }}</span>{{ m.text }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if cell.back_image %}
+          <div class="radical-image-back"><img src="{{ cell.back_image }}" alt=""></div>
+          {% endif %}
+
+          {% if cell.example %}
+          <hr class="divider">
+          <div class="vocab">
+            <div class="head">
+              <span class="word">{{ cell.example.word }}</span>
+              {% if cell.example.reading %}<span class="vreading">{{ cell.example.reading }}</span>{% endif %}
+              {% if cell.example.meaning %}<span class="gloss">{{ cell.example.meaning }}</span>{% endif %}
+            </div>
+          </div>
+          {% endif %}
+
+          {% if cell.sentence_ja or cell.sentence_en %}
+          <div class="sentence">
+            {% if cell.sentence_ja %}<div class="ja">{{ cell.sentence_ja }}</div>{% endif %}
             {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
           </div>
           {% endif %}

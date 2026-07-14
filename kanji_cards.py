@@ -118,6 +118,27 @@ class VocabCard:
     tags: list[str] = field(default_factory=list)
 
 
+@dataclass
+class CustomCard:
+    """Selbst erstellte Karte („semi-frei"): feste Slots, Inhalt frei befüllbar.
+
+    Alle Slots sind optional – leere werden beim Rendern weggelassen. Die Optik
+    entspricht exakt den übrigen Karten (dieselben Bereiche/CSS).
+    """
+
+    front_text: str = ""
+    front_image: str | None = None                 # data:-URI (statt Text)
+    tags: list[str] = field(default_factory=list)
+    meanings: list[str] = field(default_factory=list)          # Überschrift
+    subline: str | None = None                     # kleine Zeile (z. B. Wortart)
+    readings: list[tuple[str, str]] = field(default_factory=list)   # (Label, Wert)
+    mnemonics: list[tuple[str, str]] = field(default_factory=list)  # (Label, Text)
+    example: tuple[str, str, str] | None = None    # (Wort, Lesung, Bedeutung)
+    sentence_ja: str | None = None
+    sentence_en: str | None = None
+    back_image: str | None = None                  # data:-URI
+
+
 # --------------------------------------------------------------------------- #
 # Hilfsfunktionen
 # --------------------------------------------------------------------------- #
@@ -519,6 +540,42 @@ def build_vocab_card(vocab: dict[str, Any]) -> VocabCard:
     return card
 
 
+def build_custom_card(d: dict[str, Any]) -> CustomCard:
+    """Aus einem Formular-/JSON-Dict eine CustomCard bauen (leere Slots ignoriert)."""
+    def s(x: Any) -> str:
+        return (str(x).strip() if x is not None else "")
+
+    readings = [
+        (s(r.get("label")), s(r.get("value")))
+        for r in (d.get("readings") or [])
+        if s(r.get("label")) or s(r.get("value"))
+    ]
+    mnemonics = [
+        (s(m.get("label")), s(m.get("text")))
+        for m in (d.get("mnemonics") or [])
+        if s(m.get("text"))
+    ]
+    ex = d.get("example") or {}
+    example = None
+    if s(ex.get("word")) or s(ex.get("meaning")):
+        example = (s(ex.get("word")), s(ex.get("reading")), s(ex.get("meaning")))
+    meanings = [m for m in (d.get("meanings") or []) if s(m)]
+    tags = [t for t in (d.get("tags") or []) if s(t)]
+    return CustomCard(
+        front_text=s(d.get("front_text")),
+        front_image=d.get("front_image") or None,
+        tags=tags,
+        meanings=meanings,
+        subline=s(d.get("subline")) or None,
+        readings=readings,
+        mnemonics=mnemonics,
+        example=example,
+        sentence_ja=s(d.get("sentence_ja")) or None,
+        sentence_en=s(d.get("sentence_en")) or None,
+        back_image=d.get("back_image") or None,
+    )
+
+
 def build_cover_radicals(
     level: int | str, cards: Sequence[RadicalCard]
 ) -> CoverCard:
@@ -534,10 +591,10 @@ def build_cover_radicals(
 # --------------------------------------------------------------------------- #
 
 def paginate(
-    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | None], per_page: int = 6
-) -> list[list[Card | CoverCard | RadicalCard | VocabCard | None]]:
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None], per_page: int = 6
+) -> list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None]]:
     """Karten in Seiten à `per_page` aufteilen; letzte Seite mit None auffüllen."""
-    pages: list[list[Card | CoverCard | RadicalCard | VocabCard | None]] = []
+    pages: list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None]] = []
     for start in range(0, len(cards), per_page):
         chunk: list[Card | None] = list(cards[start : start + per_page])
         while len(chunk) < per_page:
@@ -606,7 +663,7 @@ PAGE_MARGIN_MM = 8.0
 
 
 def _card_to_dict(
-    card: Card | CoverCard | RadicalCard | VocabCard | None,
+    card: Card | CoverCard | RadicalCard | VocabCard | CustomCard | None,
 ) -> dict[str, Any] | None:
     if card is None:
         return None
@@ -645,6 +702,24 @@ def _card_to_dict(
             "sentence_en": card.sentence_en,
             "tags": card.tags,
         }
+    if isinstance(card, CustomCard):
+        return {
+            "type": "custom",
+            "front_text": card.front_text,
+            "front_image": card.front_image,
+            "tags": card.tags,
+            "meanings": card.meanings,
+            "subline": card.subline,
+            "readings": [{"label": l, "value": v} for l, v in card.readings],
+            "mnemonics": [{"label": l, "text": t} for l, t in card.mnemonics],
+            "example": (
+                {"word": card.example[0], "reading": card.example[1],
+                 "meaning": card.example[2]} if card.example else None
+            ),
+            "sentence_ja": card.sentence_ja,
+            "sentence_en": card.sentence_en,
+            "back_image": card.back_image,
+        }
     return {
         "type": "kanji",
         "kanji": card.kanji,
@@ -663,7 +738,7 @@ def _card_to_dict(
 
 
 def build_sheets(
-    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | None],
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None],
     *,
     cols: int = 2,
     rows: int = 2,
@@ -680,7 +755,7 @@ def build_sheets(
 
 
 def render_pdf(
-    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | None],
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None],
     output: str | Path,
     *,
     template_dir: Path = DEFAULT_TEMPLATE_DIR,
@@ -938,6 +1013,28 @@ def render_subjects(
             deck.append(build_any_card(s, reg, image_fetcher))
     if not deck:
         raise WaniKaniError("Keine gültigen Karten für die Auswahl gefunden.")
+    path = render_deck(
+        deck, output, layout=layout, paper=paper, duplex=duplex,
+        cut_marks=cut_marks, hole=hole, username=username,
+    )
+    return path, len(deck)
+
+
+def render_custom(
+    cards_data: Sequence[dict[str, Any]],
+    output: str | Path,
+    *,
+    layout: str = "a6",
+    paper: str = "a4",
+    duplex: str = "long-edge",
+    cut_marks: bool = True,
+    hole: bool = False,
+    username: str = "",
+) -> tuple[Path, int]:
+    """Selbst erstellte Karten (Dict-Form) als ein PDF rendern."""
+    deck = [build_custom_card(d) for d in cards_data]
+    if not deck:
+        raise WaniKaniError("Keine Karten ausgewählt.")
     path = render_deck(
         deck, output, layout=layout, paper=paper, duplex=duplex,
         cut_marks=cut_marks, hole=hole, username=username,

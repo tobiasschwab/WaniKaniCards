@@ -192,6 +192,19 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .tag-mini.radical { color: #0891b2; border-color: #bae6f2; background: rgba(0,180,216,.08); }
 .tag-mini.vocabulary { color: #a2792e; border-color: #ecd9b0; background: rgba(162,121,46,.08); }
 
+.c-act { width: 74px; text-align: right; white-space: nowrap; }
+.c-act .chip-btn { padding: 4px 8px; }
+
+/* Frei-Editor */
+.editor-form { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.ed-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.ed-row > * { flex: 1; min-width: 140px; }
+.file { width: 100%; font-size: 13px; color: var(--muted); }
+.dyn { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.dyn-row { display: flex; gap: 8px; align-items: center; }
+.dyn-row .dl { flex: 0 0 32%; }
+.dyn-row .dv, .dyn-row .dt { flex: 1; }
+
 /* Render-Leiste */
 .render-bar { margin-top: 16px; }
 .render-opts { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }

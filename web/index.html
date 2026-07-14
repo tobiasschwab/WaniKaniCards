@@ -47,6 +47,7 @@
       <div class="tabs" id="modeTabs" data-value="level">
         <button data-v="level" class="active">Level-Stapel</button>
         <button data-v="compose">Vokabel / Kanji (rekursiv)</button>
+        <button data-v="custom">Frei erstellen</button>
       </div>
 
       <!-- Level-Modus -->
@@ -79,6 +80,63 @@
         <div id="searchResults" class="search-results"></div>
         <p class="hint">Treffer anklicken → alle enthaltenen Kanji &amp; Radicals werden rekursiv aufgelöst.</p>
       </div>
+
+      <!-- Frei-Modus: Karten-Editor -->
+      <div id="modeCustom" class="mode hidden">
+        <div class="editor">
+          <div class="editor-form">
+            <input type="hidden" id="cfId">
+            <div class="ed-row">
+              <label class="field inline grow"><span class="label">Vorderseite (Text)</span>
+                <input id="cfFront" type="text" class="text" placeholder="z. B. 勉強"></label>
+              <label class="field inline"><span class="label">oder Bild</span>
+                <input id="cfFrontImg" type="file" accept="image/*" class="file"></label>
+            </div>
+            <label class="field"><span class="label">Tags <em>(Komma-getrennt)</em></span>
+              <input id="cfTags" type="text" class="text" placeholder="Vocab, Eigene"></label>
+            <label class="field"><span class="label">Bedeutung <em>(erste = Überschrift; Komma-getrennt)</em></span>
+              <input id="cfMeaning" type="text" class="text" placeholder="Study, Diligence"></label>
+            <label class="field"><span class="label">Kleine Zeile <em>(optional, z. B. Wortart)</em></span>
+              <input id="cfSubline" type="text" class="text" placeholder="noun, する-verb"></label>
+
+            <div class="field"><span class="label">Lesungen <em>(Label → Wert)</em></span>
+              <div id="cfReadings" class="dyn"></div>
+              <button type="button" class="btn small" id="cfAddReading">+ Lesung</button>
+            </div>
+            <div class="field"><span class="label">Eselsbrücken <em>(Label → Text)</em></span>
+              <div id="cfMnemonics" class="dyn"></div>
+              <button type="button" class="btn small" id="cfAddMnemonic">+ Eselsbrücke</button>
+            </div>
+
+            <div class="field"><span class="label">Beispiel <em>(optional)</em></span>
+              <div class="ed-row">
+                <input id="cfExWord" type="text" class="text" placeholder="Wort">
+                <input id="cfExReading" type="text" class="text" placeholder="Lesung">
+                <input id="cfExMeaning" type="text" class="text" placeholder="Bedeutung">
+              </div>
+            </div>
+            <div class="ed-row">
+              <label class="field inline grow"><span class="label">Beispielsatz (JA)</span>
+                <input id="cfSentJa" type="text" class="text"></label>
+              <label class="field inline grow"><span class="label">Übersetzung (EN)</span>
+                <input id="cfSentEn" type="text" class="text"></label>
+            </div>
+            <label class="field"><span class="label">Bild auf Rückseite <em>(optional)</em></span>
+              <input id="cfBackImg" type="file" accept="image/*" class="file"></label>
+
+            <div class="row gap" style="margin-top:6px">
+              <button id="cfSave" class="btn primary">Karte speichern</button>
+              <button id="cfClear" class="btn">Leeren / Neu</button>
+              <span style="margin-left:auto"></span>
+              <input id="cfPrefill" type="text" class="text" style="max-width:150px" placeholder="aus WaniKani…">
+              <button id="cfLoadWk" class="btn small">Laden</button>
+            </div>
+            <div id="cfStatus" class="status" style="margin-top:6px"></div>
+          </div>
+        </div>
+        <p class="hint">Gespeicherte Karten erscheinen unten in der Tabelle – dort auswählen und als PDF erzeugen.</p>
+      </div>
+
       <div id="resolveError" class="error hidden"></div>
     </section>
 
@@ -100,6 +158,7 @@
               <th>Typ</th>
               <th>Bedeutung</th>
               <th class="c-lvl">Level</th>
+              <th class="c-act hidden" id="thActions"></th>
             </tr>
           </thead>
           <tbody id="tableBody"></tbody>

@@ -10,10 +10,9 @@ const api = async (url, opts) => {
 };
 
 let cards = [];                 // aktuelle Tabellenzeilen (Descriptors)
-const selected = new Set();     // ausgewählte subject-ids
+const selected = new Set();     // ausgewählte ids (als String)
+let tableMode = "subject";      // "subject" | "custom"
 let pollTimer = null;
-
-const KIND_LABEL = { kanji: "Kanji", radical: "Radical", vocabulary: "Vocab" };
 
 // ---------- Helpers ----------
 function toast(msg, isErr) {
@@ -28,6 +27,13 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 const isSample = () => $("#sample").checked;
+function fileToDataUri(file) {
+  return new Promise((res, rej) => {
+    if (!file) { res(null); return; }
+    const r = new FileReader();
+    r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
+  });
+}
 
 function initSegmented(id, onChange) {
   const el = document.getElementById(id);
@@ -58,7 +64,7 @@ async function loadSettings() {
   if (d.paper) $("#paper").value = d.paper;
   if (d.duplex) segSet("duplex", d.duplex);
   $("#cutmarks").checked = d.cut_marks !== false;
-  $("#hole").checked = d.hole !== false;
+  $("#hole").checked = d.hole === true;
   applyLayoutState();
 }
 async function saveDefaults() {
@@ -71,8 +77,8 @@ async function saveDefaults() {
 }
 function applyLayoutState() { $("#paperOpt").classList.toggle("hidden", segValue("layout") === "a6"); }
 
-// ---------- Resolve (Tabelle füllen) ----------
-async function resolve(body, title) {
+// ---------- Resolve / Tabelle ----------
+async function resolve(body) {
   $("#resolveError").classList.add("hidden");
   body.sample = isSample();
   try {
@@ -83,79 +89,174 @@ async function resolve(body, title) {
 }
 function showResolveError(m) { const el = $("#resolveError"); el.textContent = "⚠ " + m; el.classList.remove("hidden"); }
 
-function renderTable(list, title) {
-  cards = list; selected.clear();
+function renderTable(list, title, mode) {
+  cards = list; tableMode = mode || "subject"; selected.clear();
   $("#tableTitle").textContent = title + ` (${list.length})`;
+  $("#thActions").classList.toggle("hidden", tableMode !== "custom");
   const tb = $("#tableBody"); tb.innerHTML = "";
   for (const c of list) {
+    const id = String(c.id);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="c-check"><input type="checkbox" data-id="${c.id}"></td>
+      <td class="c-check"><input type="checkbox" data-id="${escapeHtml(id)}"></td>
       <td class="c-char">${escapeHtml(c.characters || (c.has_image ? "🖼" : "—"))}</td>
       <td><span class="tag-mini ${c.object}">${escapeHtml(c.kind)}</span></td>
       <td>${escapeHtml(c.meaning)}</td>
-      <td class="c-lvl">${c.level ?? ""}</td>`;
+      <td class="c-lvl">${c.level ?? ""}</td>
+      <td class="c-act ${tableMode === "custom" ? "" : "hidden"}"></td>`;
     const cb = tr.querySelector("input");
-    cb.addEventListener("change", () => { toggle(c.id, cb.checked); });
-    tr.addEventListener("click", (e) => { if (e.target.tagName !== "INPUT") { cb.checked = !cb.checked; toggle(c.id, cb.checked); } });
+    cb.addEventListener("change", () => toggle(id, cb.checked));
+    tr.addEventListener("click", (e) => { if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") { cb.checked = !cb.checked; toggle(id, cb.checked); } });
+    if (tableMode === "custom") {
+      const act = tr.querySelector(".c-act");
+      const ed = document.createElement("button"); ed.className = "chip-btn"; ed.textContent = "✎"; ed.title = "Bearbeiten";
+      ed.onclick = () => editCustom(id);
+      const del = document.createElement("button"); del.className = "chip-btn danger"; del.textContent = "✕"; del.title = "Löschen";
+      del.onclick = async () => { await api(`/api/customcards/${id}`, { method: "DELETE" }); loadCustoms(); };
+      act.append(ed, del);
+    }
     tb.append(tr);
   }
-  // Standardmäßig alles auswählen
   selectAll(true);
   $("#tablePanel").classList.remove("hidden");
-  $("#tablePanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function toggle(id, on) { if (on) selected.add(id); else selected.delete(id); syncChecks(); updateRenderBtn(); }
 function selectAll(on) {
-  selected.clear();
-  if (on) cards.forEach((c) => selected.add(c.id));
+  selected.clear(); if (on) cards.forEach((c) => selected.add(String(c.id)));
   syncChecks(); updateRenderBtn();
 }
 function syncChecks() {
-  document.querySelectorAll("#tableBody input[data-id]").forEach((cb) => {
-    cb.checked = selected.has(parseInt(cb.dataset.id, 10));
-  });
+  document.querySelectorAll("#tableBody input[data-id]").forEach((cb) => { cb.checked = selected.has(cb.dataset.id); });
   $("#checkAll").checked = cards.length > 0 && selected.size === cards.length;
 }
 function updateRenderBtn() {
-  const n = selected.size;
-  const b = $("#btnRender"); b.textContent = `PDF erzeugen (${n})`; b.disabled = n === 0;
+  const n = selected.size; const b = $("#btnRender");
+  b.textContent = `PDF erzeugen (${n})`; b.disabled = n === 0;
 }
 
 // ---------- Suche (Kompositions-Modus) ----------
 async function doSearch() {
-  const q = $("#searchInput").value.trim();
-  if (!q) return;
+  const q = $("#searchInput").value.trim(); if (!q) return;
   $("#searchResults").innerHTML = '<span class="muted">Suche…</span>';
   const list = await resolve({ mode: "search", q });
   const box = $("#searchResults"); box.innerHTML = "";
-  if (!list) { box.innerHTML = ""; return; }
-  if (list.length === 0) { box.innerHTML = '<span class="muted">Keine Treffer.</span>'; return; }
+  if (!list) return;
   for (const c of list) {
-    const b = document.createElement("button");
-    b.className = "result-chip";
+    const b = document.createElement("button"); b.className = "result-chip";
     b.innerHTML = `<span class="rc-char">${escapeHtml(c.characters || "🖼")}</span>
       <span class="rc-meta"><span class="tag-mini ${c.object}">${escapeHtml(c.kind)}</span> ${escapeHtml(c.meaning)}</span>`;
     b.onclick = async () => {
       const comp = await resolve({ mode: "compose", subject_ids: [c.id] });
-      if (comp) renderTable(comp, `Komposition: ${c.characters || c.meaning}`);
+      if (comp) renderTable(comp, `Komposition: ${c.characters || c.meaning}`, "subject");
     };
     box.append(b);
   }
 }
 
+// ---------- Frei-Modus: Editor ----------
+function dynRow(kind, label, value, text) {
+  const wrap = document.createElement("div"); wrap.className = "dyn-row";
+  if (kind === "reading") {
+    wrap.innerHTML = `<input class="text dl" placeholder="Label (On/Kun/…)" value="${escapeHtml(label || "")}">
+      <input class="text dv" placeholder="Wert" value="${escapeHtml(value || "")}">`;
+  } else {
+    wrap.innerHTML = `<input class="text dl" placeholder="Label (Meaning/Reading)" value="${escapeHtml(label || "")}">
+      <input class="text dt" placeholder="Text" value="${escapeHtml(text || "")}">`;
+  }
+  const rm = document.createElement("button"); rm.type = "button"; rm.className = "chip-btn danger"; rm.textContent = "✕";
+  rm.onclick = () => wrap.remove();
+  wrap.append(rm);
+  return wrap;
+}
+function clearEditor() {
+  $("#cfId").value = ""; $("#cfFront").value = ""; $("#cfFrontImg").value = "";
+  $("#cfTags").value = ""; $("#cfMeaning").value = ""; $("#cfSubline").value = "";
+  $("#cfReadings").innerHTML = ""; $("#cfMnemonics").innerHTML = "";
+  $("#cfExWord").value = ""; $("#cfExReading").value = ""; $("#cfExMeaning").value = "";
+  $("#cfSentJa").value = ""; $("#cfSentEn").value = ""; $("#cfBackImg").value = "";
+  $("#cfFront").dataset.img = ""; $("#cfBackImg").dataset.img = "";
+  $("#cfStatus").textContent = "";
+}
+function editorToJSON() {
+  const csv = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  const readings = [...$("#cfReadings").children].map((w) => ({ label: w.querySelector(".dl").value, value: w.querySelector(".dv").value }));
+  const mnemonics = [...$("#cfMnemonics").children].map((w) => ({ label: w.querySelector(".dl").value, text: w.querySelector(".dt").value }));
+  return {
+    id: $("#cfId").value || undefined,
+    front_text: $("#cfFront").value,
+    front_image: $("#cfFront").dataset.img || null,
+    tags: csv($("#cfTags").value),
+    meanings: csv($("#cfMeaning").value),
+    subline: $("#cfSubline").value,
+    readings, mnemonics,
+    example: { word: $("#cfExWord").value, reading: $("#cfExReading").value, meaning: $("#cfExMeaning").value },
+    sentence_ja: $("#cfSentJa").value, sentence_en: $("#cfSentEn").value,
+    back_image: $("#cfBackImg").dataset.img || null,
+  };
+}
+function fillEditor(c) {
+  clearEditor();
+  $("#cfId").value = c.id || "";
+  $("#cfFront").value = c.front_text || "";
+  if (c.front_image) $("#cfFront").dataset.img = c.front_image;
+  $("#cfTags").value = (c.tags || []).join(", ");
+  $("#cfMeaning").value = (c.meanings || []).join(", ");
+  $("#cfSubline").value = c.subline || "";
+  (c.readings || []).forEach((r) => $("#cfReadings").append(dynRow("reading", r.label, r.value)));
+  (c.mnemonics || []).forEach((m) => $("#cfMnemonics").append(dynRow("mnemonic", m.label, null, m.text)));
+  const ex = c.example || {};
+  $("#cfExWord").value = ex.word || ""; $("#cfExReading").value = ex.reading || ""; $("#cfExMeaning").value = ex.meaning || "";
+  $("#cfSentJa").value = c.sentence_ja || ""; $("#cfSentEn").value = c.sentence_en || "";
+  if (c.back_image) $("#cfBackImg").dataset.img = c.back_image;
+}
+async function editCustom(id) {
+  const c = await api(`/api/customcards/${id}`);
+  fillEditor(c);
+  $("#modeCustom").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function saveCustom() {
+  const body = editorToJSON();
+  if (!body.front_text && !body.front_image && !(body.meanings || []).length) {
+    $("#cfStatus").textContent = "Bitte mindestens Vorderseite oder Bedeutung angeben."; $("#cfStatus").className = "status err"; return;
+  }
+  try {
+    await api("/api/customcards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    clearEditor(); toast("Karte gespeichert"); loadCustoms();
+  } catch (e) { $("#cfStatus").textContent = e.message; $("#cfStatus").className = "status err"; }
+}
+async function loadCustoms() {
+  let list = [];
+  try { list = await api("/api/customcards"); } catch (_) {}
+  renderTable(list, "Eigene Karten", "custom");
+}
+async function prefillFromWk() {
+  const q = $("#cfPrefill").value.trim(); if (!q) return;
+  const list = await resolve({ mode: "search", q });
+  if (!list || !list.length) { $("#cfStatus").textContent = "Kein Treffer."; $("#cfStatus").className = "status err"; return; }
+  // vollständige Karte über Komposition-Resolver? Nein – wir nehmen den ersten Treffer
+  // und rendern die Detailfelder via /api/render nicht; wir füllen aus dem Descriptor
+  // plus einem gezielten Nachladen wäre nötig. Einfach: Grundfelder aus Descriptor.
+  const c = list[0];
+  clearEditor();
+  $("#cfFront").value = c.characters || "";
+  $("#cfMeaning").value = c.meaning || "";
+  $("#cfTags").value = [c.kind, c.level ? "Lv " + c.level : ""].filter(Boolean).join(", ");
+  $("#cfStatus").textContent = "Grunddaten übernommen – Details ergänzen."; $("#cfStatus").className = "status ok";
+}
+
 // ---------- Rendern ----------
 async function doRender() {
   $("#renderError").classList.add("hidden");
-  const ids = cards.filter((c) => selected.has(c.id)).map((c) => c.id);
+  const ids = cards.filter((c) => selected.has(String(c.id))).map((c) => c.id);
   if (!ids.length) return;
-  const chosen = cards.filter((c) => selected.has(c.id));
+  const chosen = cards.filter((c) => selected.has(String(c.id)));
   const title = ids.length === 1 ? (chosen[0].characters || chosen[0].meaning) : `${ids.length} Karten`;
   const body = {
-    subject_ids: ids, title, sample: isSample(),
+    title, sample: isSample(),
     layout: segValue("layout"), paper: $("#paper").value, duplex: segValue("duplex"),
     cut_marks: $("#cutmarks").checked, hole: $("#hole").checked,
   };
+  if (tableMode === "custom") body.custom_ids = ids.map(String); else body.subject_ids = ids;
   $("#btnRender").disabled = true;
   $("#progress").classList.remove("hidden"); $("#progressText").textContent = "Wird erzeugt…";
   try {
@@ -167,14 +268,13 @@ async function doRender() {
     const el = $("#renderError"); el.textContent = "⚠ " + e.message; el.classList.remove("hidden");
   }
 }
-
 function pollJob(id) {
   clearTimeout(pollTimer);
   const tick = async () => {
     let job;
     try { job = await api(`/api/jobs/${id}`); } catch (_) { pollTimer = setTimeout(tick, 1500); return; }
     if (job.status === "queued") $("#progressText").textContent = "In Warteschlange…";
-    else if (job.status === "running") $("#progressText").textContent = "WaniKani wird abgefragt & PDF gebaut…";
+    else if (job.status === "running") $("#progressText").textContent = "PDF wird gebaut…";
     if (job.status === "done" || job.status === "error") {
       updateRenderBtn(); $("#progress").classList.add("hidden");
       if (job.status === "done") { showPreview(job); toast(`Fertig: ${job.n_cards} Karten`); }
@@ -221,14 +321,14 @@ async function loadHistory() {
 
 // ---------- Wire up ----------
 document.addEventListener("DOMContentLoaded", () => {
-  initSegmented("type"); initSegmented("duplex");
-  initSegmented("layout", applyLayoutState);
-
+  initSegmented("type"); initSegmented("duplex"); initSegmented("layout", applyLayoutState);
   initSegmented("modeTabs", (v) => {
     $("#modeLevel").classList.toggle("hidden", v !== "level");
     $("#modeCompose").classList.toggle("hidden", v !== "compose");
+    $("#modeCustom").classList.toggle("hidden", v !== "custom");
+    $("#tablePanel").classList.add("hidden");
+    if (v === "custom") loadCustoms();
   });
-  // Tabs nutzen dieselbe Segmented-Logik, aber sind größer gestylt.
 
   $("#settingsToggle").addEventListener("click", () => $("#settingsPanel").classList.toggle("hidden"));
   $("#tokenShow").addEventListener("click", () => { const i = $("#tokenInput"); i.type = i.type === "password" ? "text" : "password"; });
@@ -251,10 +351,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isSample() && !(level >= 1 && level <= 60)) { showResolveError("Level 1–60 angeben."); return; }
     const type = segValue("type");
     const list = await resolve({ mode: "level", level, type });
-    if (list) renderTable(list, `Level ${level} · ${type === "radicals" ? "Radicals" : "Kanji"}`);
+    if (list) renderTable(list, `Level ${level} · ${type === "radicals" ? "Radicals" : "Kanji"}`, "subject");
   });
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+
+  // Editor
+  $("#cfAddReading").addEventListener("click", () => $("#cfReadings").append(dynRow("reading")));
+  $("#cfAddMnemonic").addEventListener("click", () => $("#cfMnemonics").append(dynRow("mnemonic")));
+  $("#cfFrontImg").addEventListener("change", async (e) => { $("#cfFront").dataset.img = (await fileToDataUri(e.target.files[0])) || ""; if ($("#cfFront").dataset.img) toast("Vorderseiten-Bild geladen"); });
+  $("#cfBackImg").addEventListener("change", async (e) => { $("#cfBackImg").dataset.img = (await fileToDataUri(e.target.files[0])) || ""; if ($("#cfBackImg").dataset.img) toast("Rückseiten-Bild geladen"); });
+  $("#cfSave").addEventListener("click", saveCustom);
+  $("#cfClear").addEventListener("click", clearEditor);
+  $("#cfLoadWk").addEventListener("click", prefillFromWk);
 
   $("#checkAll").addEventListener("change", (e) => selectAll(e.target.checked));
   $("#selAll").addEventListener("click", () => selectAll(true));

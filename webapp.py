@@ -25,9 +25,10 @@ DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
 SETTINGS_FILE = DATA_DIR / "settings.json"
 OUTPUT_DIR = DATA_DIR / "output"
 JOBS_DIR = DATA_DIR / "jobs"
+CUSTOM_DIR = DATA_DIR / "customcards"
 WEB_DIR = HERE / "web"
 
-for _d in (DATA_DIR, OUTPUT_DIR, JOBS_DIR):
+for _d in (DATA_DIR, OUTPUT_DIR, JOBS_DIR, CUSTOM_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 _export_lock = threading.Lock()
@@ -128,6 +129,53 @@ def list_jobs() -> list[dict[str, Any]]:
     return jobs
 
 
+# ---------- Eigene Karten (customcards/) ------------------------------------ #
+
+def _custom_path(cid: str) -> Path:
+    safe = "".join(c for c in cid if c.isalnum())
+    return CUSTOM_DIR / f"{safe}.json"
+
+
+def read_custom(cid: str) -> dict[str, Any] | None:
+    p = _custom_path(cid)
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_custom(card: dict[str, Any]) -> None:
+    _custom_path(card["id"]).write_text(
+        json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def list_customs() -> list[dict[str, Any]]:
+    out = []
+    for p in CUSTOM_DIR.glob("*.json"):
+        try:
+            out.append(json.loads(p.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    out.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+    return out
+
+
+def _custom_descriptor(card: dict[str, Any]) -> dict[str, Any]:
+    meanings = card.get("meanings") or []
+    return {
+        "id": card["id"],
+        "object": "custom",
+        "kind": "Frei",
+        "characters": card.get("front_text", "") or ("🖼" if card.get("front_image") else ""),
+        "meaning": meanings[0] if meanings else "",
+        "level": None,
+        "has_image": bool(card.get("front_image")),
+    }
+
+
 # ---------- Render-Worker ---------------------------------------------------- #
 
 def _run_render(job_id: str) -> None:
@@ -143,23 +191,36 @@ def _run_render(job_id: str) -> None:
 
         pdf_path = OUTPUT_DIR / f"{job_id}.pdf"
         try:
-            if not p.get("sample"):
-                if not _apply_token_env():
-                    raise kc.WaniKaniError(
-                        "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
-                    )
-            _, n = kc.render_subjects(
-                p["subject_ids"],
-                pdf_path,
-                layout=p.get("layout", "a4-4up"),
+            # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-Karten,
+            # kein Demo-Modus) gerendert werden.
+            needs_token = bool(p.get("subject_ids")) and not p.get("sample")
+            if needs_token and not _apply_token_env():
+                raise kc.WaniKaniError(
+                    "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
+                )
+            _apply_token_env()
+            common = dict(
+                layout=p.get("layout", "a6"),
                 paper=p.get("paper", "a4"),
                 duplex=p.get("duplex", "long-edge"),
                 cut_marks=p.get("cut_marks", True),
                 hole=p.get("hole", False),
-                username=load_settings().get("username", "") if not p.get("sample") else "",
-                use_cache=p.get("use_cache", True),
-                sample=p.get("sample", False),
+                username=load_settings().get("username", ""),
             )
+            if p.get("custom_ids"):
+                datas = [read_custom(cid) for cid in p["custom_ids"]]
+                datas = [d for d in datas if d]
+                _, n = kc.render_custom(datas, pdf_path, **common)
+            else:
+                if not p.get("sample") and not common["username"]:
+                    common["username"] = ""  # kein Token → kein Name
+                _, n = kc.render_subjects(
+                    p["subject_ids"],
+                    pdf_path,
+                    use_cache=p.get("use_cache", True),
+                    sample=p.get("sample", False),
+                    **common,
+                )
             job["status"] = "done"
             job["n_cards"] = n
             job["filename"] = pdf_path.name
@@ -265,24 +326,27 @@ def api_resolve() -> Any:
 @app.post("/api/render")
 def api_render() -> Any:
     body = request.get_json(silent=True) or {}
-    ids = body.get("subject_ids") or []
-    if not isinstance(ids, list) or not ids:
+    subject_ids = body.get("subject_ids") or []
+    custom_ids = body.get("custom_ids") or []
+    if not (subject_ids or custom_ids):
         return jsonify({"error": "Keine Karten ausgewählt."}), 400
-    layout = body.get("layout", "a4-4up")
+    layout = body.get("layout", "a6")
     if layout not in kc.LAYOUTS:
         return jsonify({"error": "Ungültiges Layout."}), 400
 
     params = {
-        "subject_ids": [int(i) for i in ids],
+        "subject_ids": [int(i) for i in subject_ids] if subject_ids else [],
+        "custom_ids": [str(i) for i in custom_ids] if custom_ids else [],
         "layout": layout,
         "paper": body.get("paper", "a4"),
         "duplex": body.get("duplex", "long-edge"),
         "cut_marks": bool(body.get("cut_marks", True)),
-        "hole": bool(body.get("hole", True)),
+        "hole": bool(body.get("hole", False)),
         "use_cache": not bool(body.get("no_cache", False)),
         "sample": bool(body.get("sample", False)),
     }
-    title = body.get("title") or f"{len(params['subject_ids'])} Karten"
+    n = len(params["custom_ids"]) + len(params["subject_ids"])
+    title = body.get("title") or f"{n} Karten"
 
     job_id = uuid.uuid4().hex[:12]
     job = {
@@ -298,6 +362,50 @@ def api_render() -> Any:
 
 
 # ---------- API: Jobs -------------------------------------------------------- #
+
+@app.get("/api/customcards")
+def api_customcards() -> Any:
+    return jsonify([_custom_descriptor(c) for c in list_customs()])
+
+
+@app.get("/api/customcards/<cid>")
+def api_customcard(cid: str) -> Any:
+    card = read_custom(cid)
+    if card is None:
+        abort(404)
+    return jsonify(card)
+
+
+@app.post("/api/customcards")
+def api_save_customcard() -> Any:
+    body = request.get_json(silent=True) or {}
+    cid = body.get("id") or uuid.uuid4().hex[:12]
+    card = {
+        "id": cid,
+        "front_text": str(body.get("front_text", "")).strip(),
+        "front_image": body.get("front_image") or None,
+        "tags": [str(t).strip() for t in (body.get("tags") or []) if str(t).strip()],
+        "meanings": [str(m).strip() for m in (body.get("meanings") or []) if str(m).strip()],
+        "subline": str(body.get("subline", "")).strip(),
+        "readings": body.get("readings") or [],
+        "mnemonics": body.get("mnemonics") or [],
+        "example": body.get("example") or None,
+        "sentence_ja": str(body.get("sentence_ja", "")).strip(),
+        "sentence_en": str(body.get("sentence_en", "")).strip(),
+        "back_image": body.get("back_image") or None,
+        "updated_at": _now(),
+    }
+    write_custom(card)
+    return jsonify(card)
+
+
+@app.delete("/api/customcards/<cid>")
+def api_delete_customcard(cid: str) -> Any:
+    if read_custom(cid) is None:
+        abort(404)
+    _custom_path(cid).unlink(missing_ok=True)
+    return jsonify({"ok": True})
+
 
 @app.get("/api/jobs")
 def api_jobs() -> Any:

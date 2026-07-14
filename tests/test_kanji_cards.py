@@ -12,9 +12,11 @@ from kanji_cards import (  # noqa: E402
     LAYOUTS,
     Card,
     CoverCard,
+    CustomCard,
     RadicalCard,
     VocabCard,
     build_card,
+    build_custom_card,
     build_cover,
     build_cover_radicals,
     build_radical_card,
@@ -314,6 +316,28 @@ def test_resolve_composition_sample():
     assert cards[0]["characters"] == "一人"
     assert "Kanji" in kinds and "Radical" in kinds
     assert len(cards) == 5
+
+
+def test_build_custom_card_filters_empty():
+    d = {
+        "front_text": "  勉強 ",
+        "tags": ["Vocab", "", "  "],
+        "meanings": ["Study", " "],
+        "subline": "noun",
+        "readings": [{"label": "Reading", "value": "べんきょう"}, {"label": "", "value": ""}],
+        "mnemonics": [{"label": "Meaning", "text": "bench"}, {"label": "X", "text": ""}],
+        "example": {"word": "勉強する", "reading": "", "meaning": "to study"},
+        "sentence_ja": "", "sentence_en": "I study.",
+    }
+    c = build_custom_card(d)
+    assert isinstance(c, CustomCard)
+    assert c.front_text == "勉強"
+    assert c.tags == ["Vocab"]
+    assert c.meanings == ["Study"]
+    assert c.readings == [("Reading", "べんきょう")]        # leere Zeile entfernt
+    assert c.mnemonics == [("Meaning", "bench")]          # ohne Text entfernt
+    assert c.example == ("勉強する", "", "to study")
+    assert c.sentence_ja is None and c.sentence_en == "I study."
 
 
 def test_build_cover_radicals_kind():

@@ -29,22 +29,26 @@ Jede Rückseite trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level, z. 
 `KANJI` / `LV 1`) und – sofern ein Token gesetzt ist – dezent unten rechts den
 **WaniKani-Benutzernamen**.
 
-## Zwei Wege zu den Karten (Web)
+## Drei Wege zu den Karten (Web)
 
 1. **Level-Stapel:** alle **Kanji** oder **Radicals** eines Levels auflisten.
 2. **Vokabel / Kanji (rekursiv):** eine Vokabel oder ein Kanji suchen und über
    die **Komposition absteigen** – die enthaltenen Kanji und Radicals werden
    rekursiv mit aufgelöst (Vokabel → Kanji → Radicals).
+3. **Frei erstellen (semi-frei):** eigene Karten in einem Editor anlegen. Die
+   Bereiche sind dieselben wie sonst (feste Slots), aber Inhalte, Labels und
+   Sichtbarkeit sind **frei** – optional aus WaniKani vorbefüllen und Bilder
+   hochladen. Bleibt bewusst im bestehenden Karten-Rahmen.
 
-Beide Wege füllen dieselbe **Tabelle**; dort wählt man ein oder mehrere
+Alle drei Wege füllen dieselbe **Tabelle**; dort wählt man ein oder mehrere
 Elemente aus und erzeugt daraus **ein PDF**.
 
 ## Druck-Layouts (`--layout`)
 
 | Layout | Beschreibung |
 |---|---|
-| `a4-4up` (Default) | 4 Karten pro **A4-Blatt** (quer). Nur die mittige Kreuzlinie wird geschnitten → 4 Karten. |
-| `a6` | **Eine Karte pro A6-Seite** (quer). Zum **direkten Bedrucken von A6-Karten** – kein Schneiden. |
+| `a6` (Default) | **Eine Karte pro A6-Seite** (quer). Zum **direkten Bedrucken von A6-Karten** – kein Schneiden. |
+| `a4-4up` | 4 Karten pro **A4-Blatt** (quer). Nur die mittige Kreuzlinie wird geschnitten → 4 Karten. |
 
 Weitere Eigenschaften:
 
@@ -78,6 +82,12 @@ Weitere Eigenschaften:
 | Radical (hinten) | A6-Karte (hinten) |
 |---|---|
 | ![Radicals hinten](previews/radicals_back.png) | ![A6 Rückseite](previews/a6_back.png) |
+
+**Frei erstellte Karte** (semi-frei, eigener Inhalt):
+
+| Vorderseite | Rückseite |
+|---|---|
+| ![Frei vorne](previews/custom_front.png) | ![Frei hinten](previews/custom_back.png) |
 
 Fertige PDFs: [`sample_level1.pdf`](previews/sample_level1.pdf) ·
 [`sample_composition.pdf`](previews/sample_composition.pdf) ·
