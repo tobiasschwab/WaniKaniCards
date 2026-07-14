@@ -122,14 +122,24 @@
     font-weight: 700;
     letter-spacing: .4px;
     text-transform: uppercase;
-    color: #6b7280;
-    border: 0.3mm solid #d5d8de;
-    border-radius: 999px;
+    color: #111;
+    border: 0.3mm solid #111;
+    border-radius: 1mm;          /* Rechteck mit leicht abgerundeten Ecken */
     padding: 0.5mm 2.2mm;
     background: #fff;
     white-space: nowrap;
   }
-  .tag.type { color: #6d3bf5; border-color: #d8ccfb; background: #f6f2ff; }
+
+  /* Dezenter Benutzername unten rechts auf der Rückseite. */
+  .username {
+    position: absolute;
+    bottom: {{ 15 if (show_hole and duplex == "short-edge") else 3.5 }}mm;
+    right: 6mm;
+    font-family: "SansJP", sans-serif;
+    font-size: 6.2pt;
+    letter-spacing: .3px;
+    color: #b6b6b6;
+  }
 
   /* ---------- Vorderseite: nur das Kanji, riesig & zentriert ---------- */
   .card.front {
@@ -519,6 +529,7 @@
         <div class="card back radical-back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {{ tags(cell) }}
+          {% if username %}<div class="username">{{ username }}</div>{% endif %}
           {% if cell.meaning %}<div class="meanings">{{ cell.meaning }}</div>{% endif %}
 
           {% if cell.mnemonic %}
@@ -548,6 +559,7 @@
         <div class="card back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {{ tags(cell) }}
+          {% if username %}<div class="username">{{ username }}</div>{% endif %}
           {% if cell.meanings %}
           <div class="meanings">
             {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
@@ -587,6 +599,7 @@
         <div class="card back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {{ tags(cell) }}
+          {% if username %}<div class="username">{{ username }}</div>{% endif %}
           {% if cell.meanings %}
           <div class="meanings">
             {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}

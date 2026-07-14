@@ -25,8 +25,9 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 - **Vorderseite:** das Wort, groß (automatisch an die Länge angepasst).
 - **Rückseite:** Bedeutungen · Wortart · Lesung · **Mnemonics** · Beispielsatz.
 
-Jede Rückseite trägt oben rechts **Tags** (Typ + WaniKani-Level, z. B.
-`KANJI · LV 1`).
+Jede Rückseite trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level, z. B.
+`KANJI` / `LV 1`) und – sofern ein Token gesetzt ist – dezent unten rechts den
+**WaniKani-Benutzernamen**.
 
 ## Zwei Wege zu den Karten (Web)
 
@@ -47,9 +48,9 @@ Elemente aus und erzeugt daraus **ein PDF**.
 
 Weitere Eigenschaften:
 
-- **Optionaler Lochbereich** (`--no-hole` bzw. Toggle im Web): oben links auf
-  der Vorderseite, mit dezenter Loch-Markierung zum Aufhängen an einem Ring.
-  Der Bereich ist auf der Rückseite spiegelbildlich reserviert, sodass ein
+- **Optionales Stanzloch** (Default **aus**; `--hole` bzw. Toggle im Web): oben
+  links auf der Vorderseite, mit dezenter Loch-Markierung zum Aufhängen an einem
+  Ring. Der Bereich ist auf der Rückseite spiegelbildlich reserviert, sodass ein
   einziges Loch durch beide Seiten passt.
 - Beim `a4-4up`-Layout wird die mittige Kreuzlinie als einzige Schnittkante
   gedruckt (abschaltbar mit `--no-cut-marks`).
@@ -143,7 +144,7 @@ python kanji_cards.py --sample --layout a6        # A6, eine Karte pro Seite
 | `--font PFAD` | `fonts/NotoSerifJP-SemiBold.ttf` | Schrift für das große Kanji |
 | `--no-cache` | – | API-Cache unter `.cache/` umgehen |
 | `--no-cut-marks` | – | Kreuz-Schnittlinien weglassen |
-| `--no-hole` | – | keinen Lochbereich reservieren |
+| `--hole` | – | Stanzloch-Bereich reservieren (Default: aus) |
 | `--no-cover` | – | keine Deckkarte voranstellen (CLI-only) |
 | `--sample` | – | Beispieldaten ohne API-Token verwenden |
 

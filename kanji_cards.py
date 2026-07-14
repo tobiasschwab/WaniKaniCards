@@ -694,7 +694,8 @@ def render_pdf(
     rows: int = 2,
     margin: float = PAGE_MARGIN_MM,
     cut_marks: bool = True,
-    hole: bool = True,
+    hole: bool = False,
+    username: str = "",
 ) -> Path:
     """Karten als doppelseitiges PDF rendern (HTML/CSS via WeasyPrint)."""
     from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -730,6 +731,7 @@ def render_pdf(
         # Schnittkreuz nur, wenn mehrere Karten pro Blatt geschnitten werden.
         show_cross=cut_marks and (cols * rows > 1),
         show_hole=hole,
+        username=username,
         kanji_font_url=Path(kanji_font).resolve().as_uri(),
         sans_font_url=Path(sans_font).resolve().as_uri(),
         sans_bold_font_url=Path(sans_bold_font).resolve().as_uri(),
@@ -903,7 +905,8 @@ def render_subjects(
     paper: str = "a4",
     duplex: str = "long-edge",
     cut_marks: bool = True,
-    hole: bool = True,
+    hole: bool = False,
+    username: str = "",
     use_cache: bool = True,
     sample: bool = False,
 ) -> tuple[Path, int]:
@@ -937,7 +940,7 @@ def render_subjects(
         raise WaniKaniError("Keine gültigen Karten für die Auswahl gefunden.")
     path = render_deck(
         deck, output, layout=layout, paper=paper, duplex=duplex,
-        cut_marks=cut_marks, hole=hole,
+        cut_marks=cut_marks, hole=hole, username=username,
     )
     return path, len(deck)
 
@@ -985,7 +988,8 @@ def render_deck(
     paper: str = "a4",
     duplex: str = "long-edge",
     cut_marks: bool = True,
-    hole: bool = True,
+    hole: bool = False,
+    username: str = "",
     kanji_font: str | Path = DEFAULT_KANJI_FONT,
 ) -> Path:
     """Einen Stapel gemäß Layout-Profil als PDF rendern."""
@@ -1004,6 +1008,7 @@ def render_deck(
         margin=profile["margin"],
         cut_marks=cut_marks,
         hole=hole,
+        username=username,
     )
 
 
@@ -1128,9 +1133,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cut-marks", action="store_true", help="Keine Schnittmarken zeichnen."
     )
     parser.add_argument(
-        "--no-hole",
+        "--hole",
         action="store_true",
-        help="Kein Lochbereich/keine Loch-Markierung reservieren.",
+        help="Lochbereich/Loch-Markierung reservieren (Default: aus).",
     )
     parser.add_argument(
         "--no-cover",
@@ -1176,7 +1181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         paper=args.paper,
         duplex=args.duplex,
         cut_marks=not args.no_cut_marks,
-        hole=not args.no_hole,
+        hole=args.hole,
         kanji_font=args.font,
     )
     profile = LAYOUTS[args.layout]

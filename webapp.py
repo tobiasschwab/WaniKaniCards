@@ -34,6 +34,7 @@ _export_lock = threading.Lock()
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "token": "",
+    "username": "",
     "defaults": {
         "level": 1,
         "type": "kanji",
@@ -41,7 +42,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "paper": "a4",
         "duplex": "long-edge",
         "cut_marks": True,
-        "hole": True,
+        "hole": False,
     },
 }
 
@@ -77,6 +78,17 @@ def _apply_token_env() -> str:
     token = load_settings().get("token", "")
     os.environ["WANIKANI_API_TOKEN"] = token or ""
     return token
+
+
+def _fetch_username(token: str) -> str:
+    """Benutzernamen zum Token holen (best-effort, still bei Fehler)."""
+    if not token:
+        return ""
+    try:
+        data = kc.WaniKaniClient(token, use_cache=False)._request("user")  # noqa: SLF001
+        return (data.get("data") or {}).get("username", "") or ""
+    except kc.WaniKaniError:
+        return ""
 
 
 # ---------- Jobs (ein JSON pro Job) ----------------------------------------- #
@@ -143,7 +155,8 @@ def _run_render(job_id: str) -> None:
                 paper=p.get("paper", "a4"),
                 duplex=p.get("duplex", "long-edge"),
                 cut_marks=p.get("cut_marks", True),
-                hole=p.get("hole", True),
+                hole=p.get("hole", False),
+                username=load_settings().get("username", "") if not p.get("sample") else "",
                 use_cache=p.get("use_cache", True),
                 sample=p.get("sample", False),
             )
@@ -189,10 +202,11 @@ def api_post_settings() -> Any:
     s = load_settings()
     if isinstance(body.get("token"), str):
         s["token"] = body["token"].strip()
+        s["username"] = _fetch_username(s["token"])  # für den Kartenaufdruck
     if isinstance(body.get("defaults"), dict):
         s["defaults"] = {**s["defaults"], **body["defaults"]}
     save_settings(s)
-    return jsonify({"ok": True, "token_set": bool(s.get("token"))})
+    return jsonify({"ok": True, "token_set": bool(s.get("token")), "username": s.get("username", "")})
 
 
 @app.post("/api/test-token")
@@ -205,6 +219,10 @@ def api_test_token() -> Any:
     try:
         data = kc.WaniKaniClient(token, use_cache=False)._request("user")  # noqa: SLF001
         d = data.get("data") or {}
+        # Benutzernamen für den Kartenaufdruck merken.
+        s = load_settings()
+        s["username"] = d.get("username", "") or ""
+        save_settings(s)
         return jsonify({"ok": True, "username": d.get("username", "?"), "level": d.get("level")})
     except kc.WaniKaniError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
