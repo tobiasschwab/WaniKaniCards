@@ -241,7 +241,7 @@ def api_config() -> Any:
         {
             "layouts": list(kc.LAYOUTS),
             "types": ["kanji", "radicals"],
-            "papers": ["a4", "letter"],
+            "papers": ["a4", "letter", "a6"],
             "duplex": ["long-edge", "short-edge"],
             "defaults": load_settings()["defaults"],
         }

@@ -1213,7 +1213,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--paper",
-        choices=["a4", "letter"],
+        choices=["a4", "letter", "a6"],
         default="a4",
         help="Papierformat für Layout 'a4-4up' (Default: a4). Bei '--layout a6' "
         "ohne Wirkung.",
