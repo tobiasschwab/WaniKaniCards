@@ -4,7 +4,7 @@ services:
     image: wanikani-card-studio
     container_name: wkcards
     ports:
-      - "9008:8000"
+      - "9020:8000"
     volumes:
       # Alle Daten (Einstellungen inkl. Token, erzeugte PDFs, Jobs, API-Cache)
       # liegen dateibasiert im Host-Ordner ./data – keine Datenbank.
