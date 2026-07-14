@@ -120,23 +120,15 @@ class VocabCard:
 
 @dataclass
 class CustomCard:
-    """Selbst erstellte Karte („semi-frei"): feste Slots, Inhalt frei befüllbar.
+    """Frei erstellte Karte: Vorder- und Rückseite als frei formatiertes HTML.
 
-    Alle Slots sind optional – leere werden beim Rendern weggelassen. Die Optik
-    entspricht exakt den übrigen Karten (dieselben Bereiche/CSS).
+    Formatierung und Bilder stecken direkt im HTML (aus dem Editor). Nur die
+    Tags werden separat geführt und immer vorne oben rechts gedruckt.
     """
 
-    front_text: str = ""
-    front_image: str | None = None                 # data:-URI (statt Text)
+    front_html: str = ""
+    back_html: str = ""
     tags: list[str] = field(default_factory=list)
-    meanings: list[str] = field(default_factory=list)          # Überschrift
-    subline: str | None = None                     # kleine Zeile (z. B. Wortart)
-    readings: list[tuple[str, str]] = field(default_factory=list)   # (Label, Wert)
-    mnemonics: list[tuple[str, str]] = field(default_factory=list)  # (Label, Text)
-    example: tuple[str, str, str] | None = None    # (Wort, Lesung, Bedeutung)
-    sentence_ja: str | None = None
-    sentence_en: str | None = None
-    back_image: str | None = None                  # data:-URI
 
 
 # --------------------------------------------------------------------------- #
@@ -541,38 +533,12 @@ def build_vocab_card(vocab: dict[str, Any]) -> VocabCard:
 
 
 def build_custom_card(d: dict[str, Any]) -> CustomCard:
-    """Aus einem Formular-/JSON-Dict eine CustomCard bauen (leere Slots ignoriert)."""
-    def s(x: Any) -> str:
-        return (str(x).strip() if x is not None else "")
-
-    readings = [
-        (s(r.get("label")), s(r.get("value")))
-        for r in (d.get("readings") or [])
-        if s(r.get("label")) or s(r.get("value"))
-    ]
-    mnemonics = [
-        (s(m.get("label")), s(m.get("text")))
-        for m in (d.get("mnemonics") or [])
-        if s(m.get("text"))
-    ]
-    ex = d.get("example") or {}
-    example = None
-    if s(ex.get("word")) or s(ex.get("meaning")):
-        example = (s(ex.get("word")), s(ex.get("reading")), s(ex.get("meaning")))
-    meanings = [m for m in (d.get("meanings") or []) if s(m)]
-    tags = [t for t in (d.get("tags") or []) if s(t)]
+    """Aus einem Formular-/JSON-Dict eine CustomCard bauen (freies HTML)."""
+    tags = [str(t).strip() for t in (d.get("tags") or []) if str(t).strip()]
     return CustomCard(
-        front_text=s(d.get("front_text")),
-        front_image=d.get("front_image") or None,
+        front_html=str(d.get("front_html") or ""),
+        back_html=str(d.get("back_html") or ""),
         tags=tags,
-        meanings=meanings,
-        subline=s(d.get("subline")) or None,
-        readings=readings,
-        mnemonics=mnemonics,
-        example=example,
-        sentence_ja=s(d.get("sentence_ja")) or None,
-        sentence_en=s(d.get("sentence_en")) or None,
-        back_image=d.get("back_image") or None,
     )
 
 
@@ -705,20 +671,9 @@ def _card_to_dict(
     if isinstance(card, CustomCard):
         return {
             "type": "custom",
-            "front_text": card.front_text,
-            "front_image": card.front_image,
+            "front_html": card.front_html,
+            "back_html": card.back_html,
             "tags": card.tags,
-            "meanings": card.meanings,
-            "subline": card.subline,
-            "readings": [{"label": l, "value": v} for l, v in card.readings],
-            "mnemonics": [{"label": l, "text": t} for l, t in card.mnemonics],
-            "example": (
-                {"word": card.example[0], "reading": card.example[1],
-                 "meaning": card.example[2]} if card.example else None
-            ),
-            "sentence_ja": card.sentence_ja,
-            "sentence_en": card.sentence_en,
-            "back_image": card.back_image,
         }
     return {
         "type": "kanji",

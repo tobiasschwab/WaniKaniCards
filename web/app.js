@@ -153,61 +153,78 @@ async function doSearch() {
   }
 }
 
-// ---------- Frei-Modus: Editor ----------
-function dynRow(kind, label, value, text) {
-  const wrap = document.createElement("div"); wrap.className = "dyn-row";
-  if (kind === "reading") {
-    wrap.innerHTML = `<input class="text dl" placeholder="Label (On/Kun/…)" value="${escapeHtml(label || "")}">
-      <input class="text dv" placeholder="Wert" value="${escapeHtml(value || "")}">`;
-  } else {
-    wrap.innerHTML = `<input class="text dl" placeholder="Label (Meaning/Reading)" value="${escapeHtml(label || "")}">
-      <input class="text dt" placeholder="Text" value="${escapeHtml(text || "")}">`;
-  }
-  const rm = document.createElement("button"); rm.type = "button"; rm.className = "chip-btn danger"; rm.textContent = "✕";
-  rm.onclick = () => wrap.remove();
-  wrap.append(rm);
-  return wrap;
+// ---------- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) ----------
+const FRONT_TEMPLATE = '<div class="free-big">Vorderseite</div>';
+const BACK_TEMPLATE =
+  '<div class="c-title">Titel</div>' +
+  '<p>Freitext – hier kannst du frei formulieren, formatieren und Bilder einfügen.</p>' +
+  '<div class="c-box">Notiz / Merkhilfe …</div>';
+
+function setTemplates() {
+  $("#cfFront").innerHTML = FRONT_TEMPLATE;
+  $("#cfBack").innerHTML = BACK_TEMPLATE;
 }
 function clearEditor() {
-  $("#cfId").value = ""; $("#cfFront").value = ""; $("#cfFrontImg").value = "";
-  $("#cfTags").value = ""; $("#cfMeaning").value = ""; $("#cfSubline").value = "";
-  $("#cfReadings").innerHTML = ""; $("#cfMnemonics").innerHTML = "";
-  $("#cfExWord").value = ""; $("#cfExReading").value = ""; $("#cfExMeaning").value = "";
-  $("#cfSentJa").value = ""; $("#cfSentEn").value = ""; $("#cfBackImg").value = "";
-  $("#cfFront").dataset.img = ""; $("#cfBackImg").dataset.img = "";
+  $("#cfId").value = "";
+  setTemplates();
+  $("#cfTags").value = "";
   $("#cfStatus").textContent = "";
 }
 function editorToJSON() {
   const csv = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
-  const readings = [...$("#cfReadings").children].map((w) => ({ label: w.querySelector(".dl").value, value: w.querySelector(".dv").value }));
-  const mnemonics = [...$("#cfMnemonics").children].map((w) => ({ label: w.querySelector(".dl").value, text: w.querySelector(".dt").value }));
   return {
     id: $("#cfId").value || undefined,
-    front_text: $("#cfFront").value,
-    front_image: $("#cfFront").dataset.img || null,
+    front_html: $("#cfFront").innerHTML,
+    back_html: $("#cfBack").innerHTML,
     tags: csv($("#cfTags").value),
-    meanings: csv($("#cfMeaning").value),
-    subline: $("#cfSubline").value,
-    readings, mnemonics,
-    example: { word: $("#cfExWord").value, reading: $("#cfExReading").value, meaning: $("#cfExMeaning").value },
-    sentence_ja: $("#cfSentJa").value, sentence_en: $("#cfSentEn").value,
-    back_image: $("#cfBackImg").dataset.img || null,
   };
 }
 function fillEditor(c) {
-  clearEditor();
   $("#cfId").value = c.id || "";
-  $("#cfFront").value = c.front_text || "";
-  if (c.front_image) $("#cfFront").dataset.img = c.front_image;
+  $("#cfFront").innerHTML = c.front_html || FRONT_TEMPLATE;
+  $("#cfBack").innerHTML = c.back_html || BACK_TEMPLATE;
   $("#cfTags").value = (c.tags || []).join(", ");
-  $("#cfMeaning").value = (c.meanings || []).join(", ");
-  $("#cfSubline").value = c.subline || "";
-  (c.readings || []).forEach((r) => $("#cfReadings").append(dynRow("reading", r.label, r.value)));
-  (c.mnemonics || []).forEach((m) => $("#cfMnemonics").append(dynRow("mnemonic", m.label, null, m.text)));
-  const ex = c.example || {};
-  $("#cfExWord").value = ex.word || ""; $("#cfExReading").value = ex.reading || ""; $("#cfExMeaning").value = ex.meaning || "";
-  $("#cfSentJa").value = c.sentence_ja || ""; $("#cfSentEn").value = c.sentence_en || "";
-  if (c.back_image) $("#cfBackImg").dataset.img = c.back_image;
+  $("#cfStatus").textContent = "";
+}
+// Toolbar: Formatierung auf das jeweilige contenteditable-Feld anwenden.
+async function runToolbar(btn) {
+  const target = $("#" + btn.dataset.t);
+  target.focus();
+  const cmd = btn.dataset.cmd;
+  switch (cmd) {
+    case "bold": case "italic": case "underline":
+      document.execCommand(cmd, false, null); break;
+    case "ul":
+      document.execCommand("insertUnorderedList", false, null); break;
+    case "big": {
+      const sel = document.getSelection();
+      const text = sel && sel.toString() ? sel.toString() : "Großer Text";
+      document.execCommand("insertHTML", false, `<span class="free-big">${escapeHtml(text)}</span>`);
+      break;
+    }
+    case "title": {
+      const sel = document.getSelection();
+      const text = sel && sel.toString() ? sel.toString() : "Titel";
+      document.execCommand("insertHTML", false, `<div class="c-title">${escapeHtml(text)}</div>`);
+      break;
+    }
+    case "box": {
+      const sel = document.getSelection();
+      const text = sel && sel.toString() ? sel.toString() : "Notiz / Merkhilfe …";
+      document.execCommand("insertHTML", false, `<div class="c-box">${escapeHtml(text)}</div>`);
+      break;
+    }
+    case "image": {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/*";
+      inp.onchange = async () => {
+        const uri = await fileToDataUri(inp.files[0]);
+        if (uri) { target.focus(); document.execCommand("insertHTML", false, `<img src="${uri}">`); }
+      };
+      inp.click();
+      break;
+    }
+  }
 }
 async function editCustom(id) {
   const c = await api(`/api/customcards/${id}`);
@@ -216,8 +233,8 @@ async function editCustom(id) {
 }
 async function saveCustom() {
   const body = editorToJSON();
-  if (!body.front_text && !body.front_image && !(body.meanings || []).length) {
-    $("#cfStatus").textContent = "Bitte mindestens Vorderseite oder Bedeutung angeben."; $("#cfStatus").className = "status err"; return;
+  if (!$("#cfFront").textContent.trim() && !$("#cfFront").querySelector("img")) {
+    $("#cfStatus").textContent = "Bitte die Vorderseite ausfüllen."; $("#cfStatus").className = "status err"; return;
   }
   try {
     await api("/api/customcards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -233,15 +250,15 @@ async function prefillFromWk() {
   const q = $("#cfPrefill").value.trim(); if (!q) return;
   const list = await resolve({ mode: "search", q });
   if (!list || !list.length) { $("#cfStatus").textContent = "Kein Treffer."; $("#cfStatus").className = "status err"; return; }
-  // vollständige Karte über Komposition-Resolver? Nein – wir nehmen den ersten Treffer
-  // und rendern die Detailfelder via /api/render nicht; wir füllen aus dem Descriptor
-  // plus einem gezielten Nachladen wäre nötig. Einfach: Grundfelder aus Descriptor.
   const c = list[0];
-  clearEditor();
-  $("#cfFront").value = c.characters || "";
-  $("#cfMeaning").value = c.meaning || "";
+  $("#cfId").value = "";
+  $("#cfFront").innerHTML = `<div class="free-big">${escapeHtml(c.characters || "")}</div>`;
+  $("#cfBack").innerHTML =
+    `<div class="c-title">${escapeHtml(c.meaning || "")}</div>` +
+    '<p>Freitext ergänzen …</p>' +
+    '<div class="c-box">Merkhilfe …</div>';
   $("#cfTags").value = [c.kind, c.level ? "Lv " + c.level : ""].filter(Boolean).join(", ");
-  $("#cfStatus").textContent = "Grunddaten übernommen – Details ergänzen."; $("#cfStatus").className = "status ok";
+  $("#cfStatus").textContent = "Grunddaten übernommen – frei ergänzen."; $("#cfStatus").className = "status ok";
 }
 
 // ---------- Rendern ----------
@@ -356,11 +373,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
 
-  // Editor
-  $("#cfAddReading").addEventListener("click", () => $("#cfReadings").append(dynRow("reading")));
-  $("#cfAddMnemonic").addEventListener("click", () => $("#cfMnemonics").append(dynRow("mnemonic")));
-  $("#cfFrontImg").addEventListener("change", async (e) => { $("#cfFront").dataset.img = (await fileToDataUri(e.target.files[0])) || ""; if ($("#cfFront").dataset.img) toast("Vorderseiten-Bild geladen"); });
-  $("#cfBackImg").addEventListener("change", async (e) => { $("#cfBackImg").dataset.img = (await fileToDataUri(e.target.files[0])) || ""; if ($("#cfBackImg").dataset.img) toast("Rückseiten-Bild geladen"); });
+  // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)
+  document.querySelectorAll(".rt-toolbar button").forEach((b) => {
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); runToolbar(b); });
+  });
+  setTemplates();
   $("#cfSave").addEventListener("click", saveCustom);
   $("#cfClear").addEventListener("click", clearEditor);
   $("#cfLoadWk").addEventListener("click", prefillFromWk);

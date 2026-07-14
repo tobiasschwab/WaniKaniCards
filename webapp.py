@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -163,16 +164,24 @@ def list_customs() -> list[dict[str, Any]]:
     return out
 
 
+def _strip_html(html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    text = re.sub(r"&nbsp;", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _custom_descriptor(card: dict[str, Any]) -> dict[str, Any]:
-    meanings = card.get("meanings") or []
+    front = _strip_html(card.get("front_html", ""))
+    back = _strip_html(card.get("back_html", ""))
+    has_img = "<img" in (card.get("front_html", "") or "")
     return {
         "id": card["id"],
         "object": "custom",
         "kind": "Frei",
-        "characters": card.get("front_text", "") or ("🖼" if card.get("front_image") else ""),
-        "meaning": meanings[0] if meanings else "",
+        "characters": (front[:6] or ("🖼" if has_img else "—")),
+        "meaning": back[:48],
         "level": None,
-        "has_image": bool(card.get("front_image")),
+        "has_image": has_img,
     }
 
 
@@ -382,17 +391,9 @@ def api_save_customcard() -> Any:
     cid = body.get("id") or uuid.uuid4().hex[:12]
     card = {
         "id": cid,
-        "front_text": str(body.get("front_text", "")).strip(),
-        "front_image": body.get("front_image") or None,
+        "front_html": str(body.get("front_html", "")),
+        "back_html": str(body.get("back_html", "")),
         "tags": [str(t).strip() for t in (body.get("tags") or []) if str(t).strip()],
-        "meanings": [str(m).strip() for m in (body.get("meanings") or []) if str(m).strip()],
-        "subline": str(body.get("subline", "")).strip(),
-        "readings": body.get("readings") or [],
-        "mnemonics": body.get("mnemonics") or [],
-        "example": body.get("example") or None,
-        "sentence_ja": str(body.get("sentence_ja", "")).strip(),
-        "sentence_en": str(body.get("sentence_en", "")).strip(),
-        "back_image": body.get("back_image") or None,
         "updated_at": _now(),
     }
     write_custom(card)

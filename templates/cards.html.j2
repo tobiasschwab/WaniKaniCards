@@ -103,17 +103,18 @@
   /* Rückseite: oben ein Band für die Tags; bei aktivem Loch (long-edge) mehr
      Platz, da das Loch dann oben rechts sitzt. */
   .card.back {
-    padding-top: {{ 15 if (show_hole and duplex != "short-edge") else 9 }}mm;
+    padding-top: {{ 15 if (show_hole and duplex != "short-edge") else 7 }}mm;
     {% if show_hole and duplex == "short-edge" %}padding-bottom: 15mm;{% endif %}
   }
 
-  /* ---------- Tags (oben rechts auf der Rückseite) ---------- */
-  /* Kein Flexbox hier: absolut positionierte Flex-Container zeichnen in
-     WeasyPrint die Ränder der Items doppelt. inline-block + margin vermeidet das. */
+  /* ---------- Tags (oben rechts auf der VORDERSEITE) ----------
+     Das Loch sitzt vorne oben links → Tags oben rechts kollidieren nie damit.
+     Kein Flexbox: absolut positionierte Flex-Container zeichnen in WeasyPrint
+     die Ränder doppelt; inline-block + margin vermeidet das. */
   .tags {
     position: absolute;
-    top: 4.5mm;
-    right: {{ 15 if (show_hole and duplex != "short-edge") else 6 }}mm;
+    top: 5mm;
+    right: 6mm;
     text-align: right;
     white-space: nowrap;
     z-index: 2;
@@ -317,6 +318,47 @@
     margin: -0.5mm 0 2mm;
   }
 
+  /* ---------- Freie Karte (Rich-Text) ---------- */
+  .free-front {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .free-front .free-html { width: 100%; }
+  /* Standard-Optik Vorderseite: groß & zentriert (im Editor gleiche Klasse). */
+  .free-front .free-big, .free-html .free-big {
+    font-family: "KanjiFont", "SansJP", serif;
+    font-weight: 600;
+    font-size: 60pt;
+    line-height: 1.08;
+  }
+  .free-back { display: block; }
+  .free-html { font-family: "SansJP", sans-serif; font-size: 10.5pt; line-height: 1.4; color: #1a1a1a; }
+  .free-html p { margin: 0 0 1.6mm; }
+  .free-html img { max-width: 100%; max-height: 45mm; object-fit: contain; }
+  .free-html ul, .free-html ol { margin: 1mm 0 1.6mm; padding-left: 5mm; }
+  /* Titel (wie Kanji-Karte: fett & etwas größer) */
+  .free-html .c-title {
+    display: block;
+    font-family: "SansJP", sans-serif;
+    font-weight: 700;
+    font-size: 15pt;
+    line-height: 1.15;
+    color: #111;
+    margin-bottom: 2mm;
+  }
+  /* Textbox wie MNEMONIC */
+  .free-html .c-box {
+    background: #faf7f1;
+    border-left: 0.7mm solid #e2d6c2;
+    border-radius: 0.6mm;
+    padding: 1.8mm 2.4mm;
+    margin: 2mm 0;
+    font-size: 9pt;
+    line-height: 1.3;
+    color: #5a544c;
+  }
+
   /* ---------- Rückseite ----------
      Normaler Blockfluss (kein Flex): so kann kein Abschnitt flex-geschrumpft
      werden und Texte überlappen nie; zu viel Inhalt wird am Kartenrand
@@ -489,6 +531,7 @@
         {% elif cell.type == "radical" %}
         <div class="card front radical-front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
           {% if cell.radical %}
           <div class="kanji">{{ cell.radical }}</div>
           {% elif cell.image_uri %}
@@ -504,24 +547,19 @@
         {% else %}{% set vfs = 54 %}{% endif %}
         <div class="card front vocab-front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
           <div class="vword" style="font-size: {{ vfs }}pt;">{{ cell.vocab }}</div>
         </div>
         {% elif cell.type == "custom" %}
-        {% set fl = (cell.front_text or "") | length %}
-        {% if fl <= 1 %}{% set vfs = 128 %}{% elif fl == 2 %}{% set vfs = 106 %}
-        {% elif fl == 3 %}{% set vfs = 84 %}{% elif fl == 4 %}{% set vfs = 66 %}
-        {% elif fl <= 6 %}{% set vfs = 48 %}{% else %}{% set vfs = 34 %}{% endif %}
-        <div class="card front vocab-front" style="{{ pos }}">
+        <div class="card front free-front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
-          {% if cell.front_image %}
-          <img class="radical-img" src="{{ cell.front_image }}" alt="">
-          {% elif cell.front_text %}
-          <div class="vword" style="font-size: {{ vfs }}pt;">{{ cell.front_text }}</div>
-          {% endif %}
+          {{ tags(cell) }}
+          <div class="free-html">{{ cell.front_html | safe }}</div>
         </div>
         {% else %}
         <div class="card front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
           <div class="kanji">{{ cell.kanji }}</div>
         </div>
         {% endif %}
@@ -546,7 +584,6 @@
       {% elif cell.type == "radical" %}
         <div class="card back radical-back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
-          {{ tags(cell) }}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
           {% if cell.meaning %}<div class="meanings">{{ cell.meaning }}</div>{% endif %}
 
@@ -576,7 +613,6 @@
       {% elif cell.type == "vocab" %}
         <div class="card back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
-          {{ tags(cell) }}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
           {% if cell.meanings %}
           <div class="meanings">
@@ -614,63 +650,15 @@
         </div>
 
       {% elif cell.type == "custom" %}
-        <div class="card back" style="{{ pos }}">
+        <div class="card back free-back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
-          {{ tags(cell) }}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
-          {% if cell.meanings %}
-          <div class="meanings">
-            {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
-          </div>
-          {% endif %}
-          {% if cell.subline %}<div class="pos">{{ cell.subline }}</div>{% endif %}
-
-          {% if cell.readings %}
-          <div class="readings">
-            {% for r in cell.readings %}
-            <div class="reading-row gen">
-              <div class="label">{{ r.label }}</div>
-              <div class="value">{{ r.value }}</div>
-            </div>
-            {% endfor %}
-          </div>
-          {% endif %}
-
-          {% if cell.mnemonics %}
-          <div class="mnemonics">
-            {% for m in cell.mnemonics %}
-            <div class="mnemonic"><span class="mlabel meaning">{{ m.label or "Mnemonic" }}</span>{{ m.text }}</div>
-            {% endfor %}
-          </div>
-          {% endif %}
-
-          {% if cell.back_image %}
-          <div class="radical-image-back"><img src="{{ cell.back_image }}" alt=""></div>
-          {% endif %}
-
-          {% if cell.example %}
-          <hr class="divider">
-          <div class="vocab">
-            <div class="head">
-              <span class="word">{{ cell.example.word }}</span>
-              {% if cell.example.reading %}<span class="vreading">{{ cell.example.reading }}</span>{% endif %}
-              {% if cell.example.meaning %}<span class="gloss">{{ cell.example.meaning }}</span>{% endif %}
-            </div>
-          </div>
-          {% endif %}
-
-          {% if cell.sentence_ja or cell.sentence_en %}
-          <div class="sentence">
-            {% if cell.sentence_ja %}<div class="ja">{{ cell.sentence_ja }}</div>{% endif %}
-            {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
-          </div>
-          {% endif %}
+          <div class="free-html">{{ cell.back_html | safe }}</div>
         </div>
 
       {% else %}
         <div class="card back" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
-          {{ tags(cell) }}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
           {% if cell.meanings %}
           <div class="meanings">

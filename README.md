@@ -25,9 +25,9 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 - **Vorderseite:** das Wort, groß (automatisch an die Länge angepasst).
 - **Rückseite:** Bedeutungen · Wortart · Lesung · **Mnemonics** · Beispielsatz.
 
-Jede Rückseite trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level, z. B.
-`KANJI` / `LV 1`) und – sofern ein Token gesetzt ist – dezent unten rechts den
-**WaniKani-Benutzernamen**.
+Jede **Vorderseite** trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level,
+z. B. `KANJI` / `LV 1`); die Rückseite zeigt – sofern ein Token gesetzt ist –
+dezent unten rechts den **WaniKani-Benutzernamen**.
 
 ## Drei Wege zu den Karten (Web)
 
@@ -35,10 +35,12 @@ Jede Rückseite trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level, z. 
 2. **Vokabel / Kanji (rekursiv):** eine Vokabel oder ein Kanji suchen und über
    die **Komposition absteigen** – die enthaltenen Kanji und Radicals werden
    rekursiv mit aufgelöst (Vokabel → Kanji → Radicals).
-3. **Frei erstellen (semi-frei):** eigene Karten in einem Editor anlegen. Die
-   Bereiche sind dieselben wie sonst (feste Slots), aber Inhalte, Labels und
-   Sichtbarkeit sind **frei** – optional aus WaniKani vorbefüllen und Bilder
-   hochladen. Bleibt bewusst im bestehenden Karten-Rahmen.
+3. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
+   (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
+   Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
+   starten mit einem **Layout-Vorschlag** (Vorderseite: groß & zentriert;
+   Rückseite: Titel · Freitext · Merk-Box). Die **Tags** werden separat eingegeben
+   und immer vorne oben rechts gedruckt. Optional aus WaniKani vorbefüllen.
 
 Alle drei Wege füllen dieselbe **Tabelle**; dort wählt man ein oder mehrere
 Elemente aus und erzeugt daraus **ein PDF**.
@@ -67,7 +69,7 @@ Weitere Eigenschaften:
 
 **Kanji (A4, 4 Karten/Seite):**
 
-| Vorderseite | Rückseite (mit Tags) |
+| Vorderseite (mit Tags) | Rückseite |
 |---|---|
 | ![Vorderseite](previews/sample_page1_front.png) | ![Rückseite](previews/sample_page2_back.png) |
 
@@ -83,7 +85,7 @@ Weitere Eigenschaften:
 |---|---|
 | ![Radicals hinten](previews/radicals_back.png) | ![A6 Rückseite](previews/a6_back.png) |
 
-**Frei erstellte Karte** (semi-frei, eigener Inhalt):
+**Frei erstellte Karte** (freier Inhalt, Tags vorne):
 
 | Vorderseite | Rückseite |
 |---|---|

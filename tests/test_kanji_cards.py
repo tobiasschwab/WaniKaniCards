@@ -318,26 +318,17 @@ def test_resolve_composition_sample():
     assert len(cards) == 5
 
 
-def test_build_custom_card_filters_empty():
+def test_build_custom_card_html():
     d = {
-        "front_text": "  勉強 ",
+        "front_html": '<div class="free-big">勉強</div>',
+        "back_html": '<div class="c-title">Study</div><div class="c-box">bench + study</div>',
         "tags": ["Vocab", "", "  "],
-        "meanings": ["Study", " "],
-        "subline": "noun",
-        "readings": [{"label": "Reading", "value": "べんきょう"}, {"label": "", "value": ""}],
-        "mnemonics": [{"label": "Meaning", "text": "bench"}, {"label": "X", "text": ""}],
-        "example": {"word": "勉強する", "reading": "", "meaning": "to study"},
-        "sentence_ja": "", "sentence_en": "I study.",
     }
     c = build_custom_card(d)
     assert isinstance(c, CustomCard)
-    assert c.front_text == "勉強"
-    assert c.tags == ["Vocab"]
-    assert c.meanings == ["Study"]
-    assert c.readings == [("Reading", "べんきょう")]        # leere Zeile entfernt
-    assert c.mnemonics == [("Meaning", "bench")]          # ohne Text entfernt
-    assert c.example == ("勉強する", "", "to study")
-    assert c.sentence_ja is None and c.sentence_en == "I study."
+    assert c.front_html == '<div class="free-big">勉強</div>'
+    assert "c-title" in c.back_html
+    assert c.tags == ["Vocab"]  # leere Tags entfernt
 
 
 def test_build_cover_radicals_kind():
