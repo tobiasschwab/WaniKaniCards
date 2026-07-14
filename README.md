@@ -13,12 +13,30 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 - **Rückseite:** Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Mnemonic
   & Reading) · eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
 
-**Radical-Karten** (`--type radicals`)
+**Radical-Karten**
 
 - **Vorderseite:** das Radical (Zeichen, oder – falls kein Unicode-Zeichen
   existiert – das WaniKani-Bild).
 - **Rückseite:** Bedeutung · **Mnemonic** · (falls vorhanden) das Radical-Bild ·
   eine Liste der ersten zugehörigen Kanji mit Lesung und Bedeutung.
+
+**Vokabel-Karten**
+
+- **Vorderseite:** das Wort, groß (automatisch an die Länge angepasst).
+- **Rückseite:** Bedeutungen · Wortart · Lesung · **Mnemonics** · Beispielsatz.
+
+Jede Rückseite trägt oben rechts **Tags** (Typ + WaniKani-Level, z. B.
+`KANJI · LV 1`).
+
+## Zwei Wege zu den Karten (Web)
+
+1. **Level-Stapel:** alle **Kanji** oder **Radicals** eines Levels auflisten.
+2. **Vokabel / Kanji (rekursiv):** eine Vokabel oder ein Kanji suchen und über
+   die **Komposition absteigen** – die enthaltenen Kanji und Radicals werden
+   rekursiv mit aufgelöst (Vokabel → Kanji → Radicals).
+
+Beide Wege füllen dieselbe **Tabelle**; dort wählt man ein oder mehrere
+Elemente aus und erzeugt daraus **ein PDF**.
 
 ## Druck-Layouts (`--layout`)
 
@@ -29,44 +47,41 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 
 Weitere Eigenschaften:
 
-- **Deckkarte** als erste Karte (**schwarze Schrift auf weißem Grund** –
-  tintensparend): vorne „WaniKani – Level N" mit Untertitel **Kanji** bzw.
-  **Radicals**, hinten eine Übersicht aller Einträge mit Bedeutung. Abschaltbar
-  mit `--no-cover`.
-- Jedes Layout (`a4-4up` / `a6`) funktioniert mit beiden Stapel-Typen –
-  Radicals lassen sich also mit `--type radicals --layout a6` ebenfalls **ohne
-  Schneiden** direkt auf A6-Karten drucken.
-- **Lochbereich oben links** auf jeder Karte (mit dezenter Loch-Markierung) –
-  zum Lochen und Aufhängen an einem Ring. Der Bereich ist auf der Rückseite
-  spiegelbildlich reserviert, sodass ein einziges Loch durch beide Seiten passt.
-- Beim `a4-4up`-Layout wird zusätzlich die mittige Kreuzlinie als einzige
-  Schnittkante gedruckt.
+- **Optionaler Lochbereich** (`--no-hole` bzw. Toggle im Web): oben links auf
+  der Vorderseite, mit dezenter Loch-Markierung zum Aufhängen an einem Ring.
+  Der Bereich ist auf der Rückseite spiegelbildlich reserviert, sodass ein
+  einziges Loch durch beide Seiten passt.
+- Beim `a4-4up`-Layout wird die mittige Kreuzlinie als einzige Schnittkante
+  gedruckt (abschaltbar mit `--no-cut-marks`).
+- Jedes Layout funktioniert mit allen Kartentypen – mit `--layout a6` lässt sich
+  jede Karte einzeln **ohne Schneiden** direkt auf A6-Karten drucken.
 - Die Rückseite wird für den Duplexdruck automatisch gespiegelt, sodass
   Vorder- und Rückseite exakt zusammenpassen.
 
 ## Vorschau
 
-**A4, 4 Karten/Seite** (`--sample`, Standard):
+**Kanji (A4, 4 Karten/Seite):**
 
-| Vorderseite | Rückseite |
+| Vorderseite | Rückseite (mit Tags) |
 |---|---|
 | ![Vorderseite](previews/sample_page1_front.png) | ![Rückseite](previews/sample_page2_back.png) |
 
-**A6, eine Karte/Seite** (`--sample --layout a6`):
-
-| Deckkarte (vorne) | Kanji-Karte (hinten) |
-|---|---|
-| ![A6 Deckkarte](previews/a6_cover_front.png) | ![A6 Rückseite](previews/a6_card_back.png) |
-
-**Radicals** (`--sample --type radicals`):
+**Rekursive Komposition** (Vokabel 一人 → Kanji 一, 人 → Radicals):
 
 | Vorderseite | Rückseite |
 |---|---|
-| ![Radicals vorne](previews/radicals_front.png) | ![Radicals hinten](previews/radicals_back.png) |
+| ![Komposition vorne](previews/composition_front.png) | ![Komposition hinten](previews/composition_back.png) |
 
-Fertige PDFs: [`previews/sample_level1.pdf`](previews/sample_level1.pdf) (Kanji, A4) ·
-[`previews/sample_a6.pdf`](previews/sample_a6.pdf) (A6) ·
-[`previews/sample_radicals.pdf`](previews/sample_radicals.pdf) (Radicals).
+**Radicals** und **A6 (eine Karte/Seite)**:
+
+| Radical (hinten) | A6-Karte (hinten) |
+|---|---|
+| ![Radicals hinten](previews/radicals_back.png) | ![A6 Rückseite](previews/a6_back.png) |
+
+Fertige PDFs: [`sample_level1.pdf`](previews/sample_level1.pdf) ·
+[`sample_composition.pdf`](previews/sample_composition.pdf) ·
+[`sample_radicals.pdf`](previews/sample_radicals.pdf) ·
+[`sample_a6.pdf`](previews/sample_a6.pdf).
 
 ## Setup
 
@@ -127,9 +142,13 @@ python kanji_cards.py --sample --layout a6        # A6, eine Karte pro Seite
 | `--paper {a4,letter}` | `a4` | Papierformat (nur für `a4-4up`) |
 | `--font PFAD` | `fonts/NotoSerifJP-SemiBold.ttf` | Schrift für das große Kanji |
 | `--no-cache` | – | API-Cache unter `.cache/` umgehen |
-| `--no-cut-marks` | – | Schnitt-/Loch-Markierungen weglassen |
-| `--no-cover` | – | keine Deckkarte (Titel + Kanji-Übersicht) voranstellen |
+| `--no-cut-marks` | – | Kreuz-Schnittlinien weglassen |
+| `--no-hole` | – | keinen Lochbereich reservieren |
+| `--no-cover` | – | keine Deckkarte voranstellen (CLI-only) |
 | `--sample` | – | Beispieldaten ohne API-Token verwenden |
+
+> Hinweis: Die **Deckkarte** gibt es nur noch im CLI (Default an, `--no-cover`
+> zum Abschalten). Das Web-Frontend erzeugt bewusst **keine** Deckkarte.
 
 ## Drucken
 
@@ -160,10 +179,11 @@ Licht halten, um die Ausrichtung der Wende-Kante zu prüfen. Passt es nicht,
 
 ## Web-Frontend (Docker)
 
-Ein modernes Web-Frontend (`webapp.py`, Flask) bietet dieselben Funktionen
-grafisch: **API-Token setzen**, Level/Typ/Layout wählen, **PDF-Vorschau** direkt
-im Browser und einen **Verlauf** aller Exporte. Es gibt **keine Datenbank** –
-alles wird dateibasiert im Ordner `data/` gespeichert:
+Ein modernes Web-Frontend (`webapp.py`, Flask): **API-Token setzen**, Karten
+über **Level-Stapel** oder **rekursive Komposition** auflisten, in einer
+**Tabelle auswählen**, daraus **ein PDF** erzeugen, **PDF-Vorschau** im Browser
+und ein **Verlauf**. Es gibt **keine Datenbank** – alles wird dateibasiert im
+Ordner `data/` gespeichert:
 
 ```
 data/

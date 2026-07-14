@@ -79,11 +79,11 @@
     line-height: 1.3;
   }
 
-  /* ---------- Lochbereich (oben links auf der Vorderseite) ----------
-     Das Loch wird durch die fertige Karte gestanzt und muss auf beiden
-     Seiten frei bleiben. Die reservierte Zone liegt vorne oben LINKS;
-     hinten je nach Wende-Kante gespiegelt, damit dasselbe physische Eck
-     getroffen wird (long-edge → oben rechts, short-edge → unten links). */
+  /* ---------- Lochbereich (optional) ----------
+     Das Loch wird durch die fertige Karte gestanzt und muss auf beiden Seiten
+     frei bleiben. Vorne oben LINKS; hinten je nach Wende-Kante gespiegelt
+     (long-edge → oben rechts, short-edge → unten links). */
+  {% if show_hole %}
   .hole {
     position: absolute;
     width: 6mm;
@@ -94,12 +94,42 @@
   .card.front .hole { top: 6mm; left: 6mm; }
   {% if duplex == "short-edge" %}
   .card.back .hole { bottom: 6mm; left: 6mm; }
-  .card.back { padding-bottom: 15mm; }
   {% else %}
   .card.back .hole { top: 6mm; right: 6mm; }
-  .card.back { padding-top: 15mm; }
   {% endif %}
   .card.empty .hole { display: none; }
+  {% endif %}
+
+  /* Rückseite: oben ein Band für die Tags; bei aktivem Loch (long-edge) mehr
+     Platz, da das Loch dann oben rechts sitzt. */
+  .card.back {
+    padding-top: {{ 15 if (show_hole and duplex != "short-edge") else 9 }}mm;
+    {% if show_hole and duplex == "short-edge" %}padding-bottom: 15mm;{% endif %}
+  }
+
+  /* ---------- Tags (oben rechts auf der Rückseite) ---------- */
+  .tags {
+    position: absolute;
+    top: 4.5mm;
+    right: {{ 15 if (show_hole and duplex != "short-edge") else 6 }}mm;
+    display: flex;
+    gap: 1.4mm;
+    z-index: 2;
+  }
+  .tag {
+    font-family: "SansJP", sans-serif;
+    font-size: 6.6pt;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+    color: #6b7280;
+    border: 0.3mm solid #d5d8de;
+    border-radius: 999px;
+    padding: 0.5mm 2.2mm;
+    background: #fff;
+    white-space: nowrap;
+  }
+  .tag.type { color: #6d3bf5; border-color: #d8ccfb; background: #f6f2ff; }
 
   /* ---------- Vorderseite: nur das Kanji, riesig & zentriert ---------- */
   .card.front {
@@ -257,6 +287,22 @@
     line-height: 1.12;
   }
 
+  /* ---------- Vokabel: Vorderseite ---------- */
+  .vocab-front { align-items: center; justify-content: center; }
+  .vocab-front .vword {
+    font-family: "KanjiFont", "SansJP", serif;
+    font-weight: 600;
+    line-height: 1.05;
+    text-align: center;
+  }
+  /* ---------- Vokabel: Rückseite ---------- */
+  .back .pos {
+    font-size: 8.5pt;
+    color: #8a8f98;
+    font-style: italic;
+    margin: -0.5mm 0 2mm;
+  }
+
   /* ---------- Rückseite ----------
      Normaler Blockfluss (kein Flex): so kann kein Abschnitt flex-geschrumpft
      werden und Texte überlappen nie; zu viel Inhalt wird am Kartenrand
@@ -399,6 +445,13 @@
   {% endif %}
 </style>
 </head>
+{% macro tags(cell) %}
+  {% if cell.tags %}
+  <div class="tags">
+    {% for t in cell.tags %}<span class="tag {% if loop.first %}type{% endif %}">{{ t }}</span>{% endfor %}
+  </div>
+  {% endif %}
+{% endmacro %}
 <body>
 {% for sheet in sheets %}
   <div class="sheet">
@@ -408,10 +461,11 @@
       {% set pos = "left:" ~ (col * cell_w) ~ "mm; top:" ~ (row * cell_h) ~ "mm;" %}
       {% if cell is none %}
         <div class="card empty" style="{{ pos }}"></div>
+
       {% elif sheet.side == "front" %}
         {% if cell.type == "cover" %}
         <div class="card front cover-front" style="{{ pos }}">
-          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          {% if show_hole %}<div class="hole"></div>{% endif %}
           <div class="cover-brand">{{ cell.title }}</div>
           <div class="cover-level">{{ cell.subtitle }}</div>
           <div class="cover-kind">{{ cell.kind }}</div>
@@ -419,7 +473,7 @@
         </div>
         {% elif cell.type == "radical" %}
         <div class="card front radical-front" style="{{ pos }}">
-          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          {% if show_hole %}<div class="hole"></div>{% endif %}
           {% if cell.radical %}
           <div class="kanji">{{ cell.radical }}</div>
           {% elif cell.image_uri %}
@@ -428,15 +482,23 @@
           <div class="radical-fallback">{{ cell.meaning }}</div>
           {% endif %}
         </div>
+        {% elif cell.type == "vocab" %}
+        {% set vl = cell.vocab | length %}
+        {% if vl <= 1 %}{% set vfs = 128 %}{% elif vl == 2 %}{% set vfs = 108 %}
+        {% elif vl == 3 %}{% set vfs = 86 %}{% elif vl == 4 %}{% set vfs = 70 %}
+        {% else %}{% set vfs = 54 %}{% endif %}
+        <div class="card front vocab-front" style="{{ pos }}">
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          <div class="vword" style="font-size: {{ vfs }}pt;">{{ cell.vocab }}</div>
+        </div>
         {% else %}
         <div class="card front" style="{{ pos }}">
-          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          {% if show_hole %}<div class="hole"></div>{% endif %}
           <div class="kanji">{{ cell.kanji }}</div>
         </div>
         {% endif %}
+
       {% elif cell.type == "cover" %}
-        {# Spalten & Schriftgröße an die Kanji-Anzahl anpassen, damit auch
-           volle Level vollständig auf die Karte passen. #}
         {% set n = cell.count %}
         {% if n <= 10 %}{% set lcols, lfs = 2, 11 %}
         {% elif n <= 21 %}{% set lcols, lfs = 3, 9.5 %}
@@ -444,7 +506,7 @@
         {% elif n <= 44 %}{% set lcols, lfs = 4, 7.5 %}
         {% else %}{% set lcols, lfs = 4, 6.5 %}{% endif %}
         <div class="card back cover-back" style="{{ pos }}">
-          {% if cut_marks %}<div class="hole"></div>{% endif %}
+          {% if show_hole %}<div class="hole"></div>{% endif %}
           <div class="cover-back-title">{{ cell.subtitle }} · Übersicht</div>
           <ul class="cover-list" style="columns: {{ lcols }}; font-size: {{ lfs }}pt;">
             {% for e in cell.entries %}
@@ -452,11 +514,11 @@
             {% endfor %}
           </ul>
         </div>
+
       {% elif cell.type == "radical" %}
         <div class="card back radical-back" style="{{ pos }}">
-          {% if cut_marks %}<div class="hole"></div>{% endif %}
-          {% if cell.radical %}<div class="kanji-mini">{{ cell.radical }}</div>{% endif %}
-
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
           {% if cell.meaning %}<div class="meanings">{{ cell.meaning }}</div>{% endif %}
 
           {% if cell.mnemonic %}
@@ -481,11 +543,50 @@
           </ul>
           {% endif %}
         </div>
+
+      {% elif cell.type == "vocab" %}
+        <div class="card back" style="{{ pos }}">
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
+          {% if cell.meanings %}
+          <div class="meanings">
+            {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}
+          </div>
+          {% endif %}
+          {% if cell.parts_of_speech %}<div class="pos">{{ cell.parts_of_speech | join(", ") }}</div>{% endif %}
+
+          {% if cell.readings %}
+          <div class="readings">
+            <div class="reading-row on">
+              <div class="label">Reading</div>
+              <div class="value">{{ cell.readings | join("、") }}</div>
+            </div>
+          </div>
+          {% endif %}
+
+          {% if cell.meaning_mnemonic or cell.reading_mnemonic %}
+          <div class="mnemonics">
+            {% if cell.meaning_mnemonic %}
+            <div class="mnemonic"><span class="mlabel meaning">Mnemonic</span>{{ cell.meaning_mnemonic }}</div>
+            {% endif %}
+            {% if cell.reading_mnemonic %}
+            <div class="mnemonic"><span class="mlabel reading">Reading</span>{{ cell.reading_mnemonic }}</div>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if cell.sentence_ja %}
+          <div class="sentence">
+            <div class="ja">{{ cell.sentence_ja }}</div>
+            {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
+          </div>
+          {% endif %}
+        </div>
+
       {% else %}
         <div class="card back" style="{{ pos }}">
-          {% if cut_marks %}<div class="hole"></div>{% endif %}
-          <div class="kanji-mini">{{ cell.kanji }}</div>
-
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
           {% if cell.meanings %}
           <div class="meanings">
             {{ cell.meanings[0] }}{% if cell.meanings[1:] %}<span class="secondary">&nbsp;· {{ cell.meanings[1:] | join(", ") }}</span>{% endif %}

@@ -64,7 +64,7 @@ class WaniKaniError(RuntimeError):
 
 @dataclass
 class Card:
-    """Alle Daten, die eine einzelne Karteikarte benötigt."""
+    """Alle Daten, die eine einzelne Kanji-Karteikarte benötigt."""
 
     kanji: str
     meanings: list[str] = field(default_factory=list)
@@ -77,6 +77,7 @@ class Card:
     vocab_meaning: str | None = None
     sentence_ja: str | None = None
     sentence_en: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,6 +100,22 @@ class RadicalCard:
     mnemonic: str | None = None
     # (Kanji, primäre Lesung, primäre Bedeutung) der ersten zugehörigen Kanji
     kanji_examples: list[tuple[str, str, str]] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class VocabCard:
+    """Karte für eine Vokabel: vorne das Wort, hinten Lesung/Bedeutung/Merkhilfe."""
+
+    vocab: str = ""
+    readings: list[str] = field(default_factory=list)
+    meanings: list[str] = field(default_factory=list)
+    parts_of_speech: list[str] = field(default_factory=list)
+    meaning_mnemonic: str | None = None
+    reading_mnemonic: str | None = None
+    sentence_ja: str | None = None
+    sentence_en: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -218,6 +235,17 @@ class WaniKaniClient:
         return results
 
     # -- öffentliche API --------------------------------------------------- #
+
+    def search_subjects(self, query: str) -> list[dict[str, Any]]:
+        """Subjects über den `slugs`-Filter suchen.
+
+        Für Kanji/Vokabeln entspricht der Slug den Zeichen (z. B. „一人"), für
+        Radicals dem englischen Namen (z. B. „ground"). Nicht gecacht.
+        """
+        query = query.strip()
+        if not query:
+            return []
+        return self._fetch_all("subjects", {"slugs": query})
 
     def fetch_kanji(self, level: int) -> list[dict[str, Any]]:
         """Alle Kanji-Subjects eines Levels holen (mit Cache)."""
@@ -343,6 +371,15 @@ def pick_example_vocab(
     return candidates[0][2]
 
 
+def _default_tags(kind: str, data: dict[str, Any]) -> list[str]:
+    """Standard-Tags einer Karte: Typ + WaniKani-Level (aus dem Subject)."""
+    tags = [kind]
+    level = data.get("level")
+    if level is not None:
+        tags.append(f"Lv {level}")
+    return tags
+
+
 def build_card(kanji: dict[str, Any], vocab_map: dict[int, dict[str, Any]]) -> Card:
     """Aus einem Kanji-Subject (+ Vokabel-Map) eine Card bauen."""
     data = kanji.get("data", {})
@@ -361,6 +398,7 @@ def build_card(kanji: dict[str, Any], vocab_map: dict[int, dict[str, Any]]) -> C
         kunyomi=kunyomi,
         meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
+        tags=_default_tags("Kanji", data),
     )
 
     vocab = pick_example_vocab(kanji, vocab_map)
@@ -417,6 +455,7 @@ def build_radical_card(
         radical=strip_markup(data.get("characters")) or "",
         meaning=meanings[0] if meanings else "",
         mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
+        tags=_default_tags("Radical", data),
     )
 
     # Bild: bereits eingebettete data-URI (Sample) oder per Fetcher nachladen.
@@ -461,6 +500,25 @@ def build_radical_cards(
     return [build_radical_card(r, kanji_map, image_fetcher) for r in radical_list]
 
 
+def build_vocab_card(vocab: dict[str, Any]) -> VocabCard:
+    """Aus einem Vokabel-Subject eine VocabCard bauen."""
+    data = vocab.get("data", {})
+    sentences = data.get("context_sentences") or []
+    card = VocabCard(
+        vocab=strip_markup(data.get("characters")) or "",
+        readings=_primary_first(data.get("readings", []), "reading"),
+        meanings=_primary_first(data.get("meanings", []), "meaning"),
+        parts_of_speech=[p for p in (data.get("parts_of_speech") or []) if p],
+        meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
+        reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
+        tags=_default_tags("Vocab", data),
+    )
+    if sentences:
+        card.sentence_ja = strip_markup(sentences[0].get("ja"))
+        card.sentence_en = strip_markup(sentences[0].get("en"))
+    return card
+
+
 def build_cover_radicals(
     level: int | str, cards: Sequence[RadicalCard]
 ) -> CoverCard:
@@ -476,10 +534,10 @@ def build_cover_radicals(
 # --------------------------------------------------------------------------- #
 
 def paginate(
-    cards: Sequence[Card | CoverCard | RadicalCard | None], per_page: int = 6
-) -> list[list[Card | CoverCard | RadicalCard | None]]:
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | None], per_page: int = 6
+) -> list[list[Card | CoverCard | RadicalCard | VocabCard | None]]:
     """Karten in Seiten à `per_page` aufteilen; letzte Seite mit None auffüllen."""
-    pages: list[list[Card | CoverCard | RadicalCard | None]] = []
+    pages: list[list[Card | CoverCard | RadicalCard | VocabCard | None]] = []
     for start in range(0, len(cards), per_page):
         chunk: list[Card | None] = list(cards[start : start + per_page])
         while len(chunk) < per_page:
@@ -548,7 +606,7 @@ PAGE_MARGIN_MM = 8.0
 
 
 def _card_to_dict(
-    card: Card | CoverCard | RadicalCard | None,
+    card: Card | CoverCard | RadicalCard | VocabCard | None,
 ) -> dict[str, Any] | None:
     if card is None:
         return None
@@ -572,6 +630,20 @@ def _card_to_dict(
                 {"kanji": k, "reading": r, "meaning": m}
                 for k, r, m in card.kanji_examples
             ],
+            "tags": card.tags,
+        }
+    if isinstance(card, VocabCard):
+        return {
+            "type": "vocab",
+            "vocab": card.vocab,
+            "readings": card.readings,
+            "meanings": card.meanings,
+            "parts_of_speech": card.parts_of_speech,
+            "meaning_mnemonic": card.meaning_mnemonic,
+            "reading_mnemonic": card.reading_mnemonic,
+            "sentence_ja": card.sentence_ja,
+            "sentence_en": card.sentence_en,
+            "tags": card.tags,
         }
     return {
         "type": "kanji",
@@ -586,11 +658,12 @@ def _card_to_dict(
         "vocab_meaning": card.vocab_meaning,
         "sentence_ja": card.sentence_ja,
         "sentence_en": card.sentence_en,
+        "tags": card.tags,
     }
 
 
 def build_sheets(
-    cards: Sequence[Card | CoverCard | RadicalCard | None],
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | None],
     *,
     cols: int = 2,
     rows: int = 2,
@@ -607,7 +680,7 @@ def build_sheets(
 
 
 def render_pdf(
-    cards: Sequence[Card | CoverCard | RadicalCard | None],
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | None],
     output: str | Path,
     *,
     template_dir: Path = DEFAULT_TEMPLATE_DIR,
@@ -621,6 +694,7 @@ def render_pdf(
     rows: int = 2,
     margin: float = PAGE_MARGIN_MM,
     cut_marks: bool = True,
+    hole: bool = True,
 ) -> Path:
     """Karten als doppelseitiges PDF rendern (HTML/CSS via WeasyPrint)."""
     from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -655,6 +729,7 @@ def render_pdf(
         cell_h=content_h / rows,
         # Schnittkreuz nur, wenn mehrere Karten pro Blatt geschnitten werden.
         show_cross=cut_marks and (cols * rows > 1),
+        show_hole=hole,
         kanji_font_url=Path(kanji_font).resolve().as_uri(),
         sans_font_url=Path(sans_font).resolve().as_uri(),
         sans_bold_font_url=Path(sans_bold_font).resolve().as_uri(),
@@ -741,6 +816,132 @@ def load_radicals_from_api(level: int, *, use_cache: bool = True) -> list[Radica
     return build_radical_cards(radical_list, kanji_map, client.fetch_image_data_uri)
 
 
+def _sample_registry() -> dict[int, dict[str, Any]]:
+    """Alle Beispiel-Subjects (Radicals, Kanji, Vokabeln) als {id: subject}."""
+    raw = _load_sample_raw()
+    reg: dict[int, dict[str, Any]] = {}
+    for key in ("radicals", "kanji", "vocab"):
+        for s in raw.get(key, []):
+            reg[int(s["id"])] = s
+    return reg
+
+
+# ---- Web-Tabellen-Modus: auflisten (resolve) und rendern (by ids) --------- #
+
+def resolve_level(
+    level: int, deck_type: str, *, use_cache: bool = True, sample: bool = False
+) -> list[dict[str, Any]]:
+    """Alle Kanji bzw. Radicals eines Levels als Tabellen-Beschreibungen."""
+    if sample:
+        raw = _load_sample_raw()
+        items = raw.get("radicals" if deck_type == "radicals" else "kanji", [])
+    else:
+        client = _make_client(use_cache=use_cache)
+        items = (
+            client.fetch_radicals(level)
+            if deck_type == "radicals"
+            else client.fetch_kanji(level)
+        )
+    if not items:
+        raise WaniKaniError(f"Nichts für Level {level} gefunden.")
+    return [_subject_descriptor(s) for s in items]
+
+
+def search_subjects(
+    query: str, *, use_cache: bool = True, sample: bool = False
+) -> list[dict[str, Any]]:
+    """Subjects per Zeichen/Namen suchen → Tabellen-Beschreibungen."""
+    if sample:
+        q = query.strip().lower()
+        out = []
+        for s in _sample_registry().values():
+            data = s.get("data", {})
+            chars = (data.get("characters") or "").lower()
+            meanings = [
+                (m.get("meaning") or "").lower() for m in data.get("meanings", [])
+            ]
+            if q and (q == chars or q in meanings):
+                out.append(s)
+        return [_subject_descriptor(s) for s in out]
+    client = _make_client(use_cache=use_cache)
+    return [_subject_descriptor(s) for s in client.search_subjects(query)]
+
+
+def resolve_composition(
+    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False
+) -> list[dict[str, Any]]:
+    """Rekursiv über die Komposition absteigen (Vokabel→Kanji→Radicals)."""
+    root_ids = [int(i) for i in subject_ids]
+    if sample:
+        reg = _sample_registry()
+    else:
+        client = _make_client(use_cache=use_cache)
+        reg = {}
+        frontier = list(root_ids)
+        while frontier:
+            need = [i for i in dict.fromkeys(frontier) if i not in reg]
+            if need:
+                reg.update(client.fetch_subjects(need))
+            nxt: list[int] = []
+            for i in need:
+                s = reg.get(i)
+                if not s:
+                    continue
+                for cid in s.get("data", {}).get("component_subject_ids") or []:
+                    if int(cid) not in reg:
+                        nxt.append(int(cid))
+            frontier = nxt
+    ordered = collect_composition(root_ids, reg)
+    return [_subject_descriptor(s) for s in ordered]
+
+
+def render_subjects(
+    subject_ids: Iterable[int],
+    output: str | Path,
+    *,
+    layout: str = "a4-4up",
+    paper: str = "a4",
+    duplex: str = "long-edge",
+    cut_marks: bool = True,
+    hole: bool = True,
+    use_cache: bool = True,
+    sample: bool = False,
+) -> tuple[Path, int]:
+    """Genau die gewählten Subjects (nach ID) als ein PDF rendern (kein Deckblatt)."""
+    ids = [int(i) for i in subject_ids]
+    image_fetcher: "callable | None" = None
+    if sample:
+        reg = _sample_registry()
+    else:
+        client = _make_client(use_cache=use_cache)
+        reg = dict(client.fetch_subjects(ids))
+        # Bezüge nachladen: Kanji→Beispielvokabeln, Radical→Beispielkanji.
+        related: set[int] = set()
+        for i in ids:
+            s = reg.get(i)
+            if not s:
+                continue
+            for a in s.get("data", {}).get("amalgamation_subject_ids") or []:
+                related.add(int(a))
+        related -= set(reg)
+        if related:
+            reg.update(client.fetch_subjects(related))
+        image_fetcher = client.fetch_image_data_uri
+
+    deck: list[Card | RadicalCard | VocabCard] = []
+    for i in ids:
+        s = reg.get(i)
+        if s:
+            deck.append(build_any_card(s, reg, image_fetcher))
+    if not deck:
+        raise WaniKaniError("Keine gültigen Karten für die Auswahl gefunden.")
+    path = render_deck(
+        deck, output, layout=layout, paper=paper, duplex=duplex,
+        cut_marks=cut_marks, hole=hole,
+    )
+    return path, len(deck)
+
+
 # --------------------------------------------------------------------------- #
 # Orchestrierung (von CLI und Web-Frontend gemeinsam genutzt)
 # --------------------------------------------------------------------------- #
@@ -777,13 +978,14 @@ def build_deck(
 
 
 def render_deck(
-    deck: Sequence[Card | CoverCard | RadicalCard],
+    deck: Sequence[Card | CoverCard | RadicalCard | VocabCard],
     output: str | Path,
     *,
     layout: str = "a4-4up",
     paper: str = "a4",
     duplex: str = "long-edge",
     cut_marks: bool = True,
+    hole: bool = True,
     kanji_font: str | Path = DEFAULT_KANJI_FONT,
 ) -> Path:
     """Einen Stapel gemäß Layout-Profil als PDF rendern."""
@@ -801,7 +1003,70 @@ def render_deck(
         rows=profile["rows"],
         margin=profile["margin"],
         cut_marks=cut_marks,
+        hole=hole,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Subject-Registry, Suche & rekursive Komposition (für den Web-Tabellen-Modus)
+# --------------------------------------------------------------------------- #
+
+_OBJ_KIND = {"kanji": "Kanji", "radical": "Radical", "vocabulary": "Vocab"}
+
+
+def _subject_descriptor(subject: dict[str, Any]) -> dict[str, Any]:
+    """Kompakte Beschreibung eines Subjects für die Tabelle im Frontend."""
+    data = subject.get("data", {})
+    meanings = _primary_first(data.get("meanings", []), "meaning")
+    obj = subject.get("object", "")
+    return {
+        "id": int(subject.get("id")),
+        "object": obj,
+        "kind": _OBJ_KIND.get(obj, obj or "?"),
+        "characters": strip_markup(data.get("characters")) or "",
+        "meaning": meanings[0] if meanings else "",
+        "level": data.get("level"),
+        "has_image": bool(data.get("character_images") or data.get("_image_data_uri")),
+    }
+
+
+def collect_composition(
+    root_ids: Iterable[int], registry: dict[int, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Von den Wurzel-Subjects rekursiv über `component_subject_ids` absteigen.
+
+    Vokabel → Kanji → Radicals. Ergebnis in Entdeckungsreihenfolge, dedupliziert.
+    """
+    ordered: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    queue: list[int] = list(dict.fromkeys(int(i) for i in root_ids))
+    while queue:
+        sid = queue.pop(0)
+        if sid in seen:
+            continue
+        subject = registry.get(sid)
+        if not subject:
+            continue
+        seen.add(sid)
+        ordered.append(subject)
+        for cid in subject.get("data", {}).get("component_subject_ids") or []:
+            if int(cid) not in seen:
+                queue.append(int(cid))
+    return ordered
+
+
+def build_any_card(
+    subject: dict[str, Any],
+    registry: dict[int, dict[str, Any]],
+    image_fetcher: "callable | None" = None,
+) -> Card | RadicalCard | VocabCard:
+    """Passende Karte je nach Subject-Typ bauen (nutzt registry für Bezüge)."""
+    obj = subject.get("object")
+    if obj == "radical":
+        return build_radical_card(subject, registry, image_fetcher)
+    if obj == "vocabulary":
+        return build_vocab_card(subject)
+    return build_card(subject, registry)  # kanji
 
 
 # --------------------------------------------------------------------------- #
@@ -863,6 +1128,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cut-marks", action="store_true", help="Keine Schnittmarken zeichnen."
     )
     parser.add_argument(
+        "--no-hole",
+        action="store_true",
+        help="Kein Lochbereich/keine Loch-Markierung reservieren.",
+    )
+    parser.add_argument(
         "--no-cover",
         action="store_true",
         help="Keine Deckkarte (Titel + Kanji-Übersicht) voranstellen.",
@@ -906,6 +1176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         paper=args.paper,
         duplex=args.duplex,
         cut_marks=not args.no_cut_marks,
+        hole=not args.no_hole,
         kanji_font=args.font,
     )
     profile = LAYOUTS[args.layout]

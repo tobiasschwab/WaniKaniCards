@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Web-Frontend für den WaniKani-Karten-Generator.
 
-Leichtgewichtige Flask-App ohne Datenbank: Einstellungen (inkl. API-Token),
-Export-Jobs und die erzeugten PDFs werden als Dateien unter ``WKCARDS_DATA``
-(Default: ``./data``) abgelegt. Dieselbe Export-Logik wie das CLI (`kanji_cards`).
+Ablauf: Quelle *auflisten* (Level, Suche oder Komposition) → Elemente in einer
+Tabelle *auswählen* → ausgewählte Karten als **ein PDF** rendern. Keine
+Datenbank – Einstellungen (inkl. API-Token), Jobs und PDFs liegen als Dateien
+unter ``WKCARDS_DATA`` (Default: ``./data``).
 """
 from __future__ import annotations
 
@@ -19,10 +20,6 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 import kanji_cards as kc
 
-# --------------------------------------------------------------------------- #
-# Pfade & Verzeichnisse (alles im Datei-Volume)
-# --------------------------------------------------------------------------- #
-
 HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
 SETTINGS_FILE = DATA_DIR / "settings.json"
@@ -33,7 +30,6 @@ WEB_DIR = HERE / "web"
 for _d in (DATA_DIR, OUTPUT_DIR, JOBS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
-# Exporte werden serialisiert (Env-Token-Sicherheit + CPU schonen).
 _export_lock = threading.Lock()
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -44,17 +40,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "layout": "a4-4up",
         "paper": "a4",
         "duplex": "long-edge",
-        "cover": True,
         "cut_marks": True,
+        "hole": True,
     },
 }
 
 app = Flask(__name__, static_folder=None)
 
 
-# --------------------------------------------------------------------------- #
-# Einstellungen (settings.json)
-# --------------------------------------------------------------------------- #
+# ---------- Einstellungen ---------------------------------------------------- #
 
 def load_settings() -> dict[str, Any]:
     if SETTINGS_FILE.is_file():
@@ -76,14 +70,16 @@ def save_settings(data: dict[str, Any]) -> None:
 
 
 def _mask(token: str) -> str:
-    if not token:
-        return ""
-    return ("•" * max(0, len(token) - 4)) + token[-4:]
+    return (("•" * max(0, len(token) - 4)) + token[-4:]) if token else ""
 
 
-# --------------------------------------------------------------------------- #
-# Job-Speicher (ein JSON pro Job)
-# --------------------------------------------------------------------------- #
+def _apply_token_env() -> str:
+    token = load_settings().get("token", "")
+    os.environ["WANIKANI_API_TOKEN"] = token or ""
+    return token
+
+
+# ---------- Jobs (ein JSON pro Job) ----------------------------------------- #
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -120,64 +116,50 @@ def list_jobs() -> list[dict[str, Any]]:
     return jobs
 
 
-# --------------------------------------------------------------------------- #
-# Export-Worker
-# --------------------------------------------------------------------------- #
+# ---------- Render-Worker ---------------------------------------------------- #
 
-def _run_export(job_id: str) -> None:
+def _run_render(job_id: str) -> None:
     job = read_job(job_id)
     if job is None:
         return
-    params = job["params"]
+    p = job["params"]
     with _export_lock:
         job = read_job(job_id) or job
         job["status"] = "running"
         job["started_at"] = _now()
         write_job(job)
 
-        settings = load_settings()
-        token = settings.get("token", "")
         pdf_path = OUTPUT_DIR / f"{job_id}.pdf"
         try:
-            if not params.get("sample") and not token:
-                raise kc.WaniKaniError(
-                    "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
-                )
-            os.environ["WANIKANI_API_TOKEN"] = token or ""
-            deck = kc.build_deck(
-                params.get("level"),
-                params.get("type", "kanji"),
-                use_cache=params.get("use_cache", True),
-                with_cover=params.get("cover", True),
-                sample=params.get("sample", False),
-            )
-            if not deck:
-                raise kc.WaniKaniError("Keine Karten für diese Auswahl gefunden.")
-            kc.render_deck(
-                deck,
+            if not p.get("sample"):
+                if not _apply_token_env():
+                    raise kc.WaniKaniError(
+                        "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
+                    )
+            _, n = kc.render_subjects(
+                p["subject_ids"],
                 pdf_path,
-                layout=params.get("layout", "a4-4up"),
-                paper=params.get("paper", "a4"),
-                duplex=params.get("duplex", "long-edge"),
-                cut_marks=params.get("cut_marks", True),
+                layout=p.get("layout", "a4-4up"),
+                paper=p.get("paper", "a4"),
+                duplex=p.get("duplex", "long-edge"),
+                cut_marks=p.get("cut_marks", True),
+                hole=p.get("hole", True),
+                use_cache=p.get("use_cache", True),
+                sample=p.get("sample", False),
             )
             job["status"] = "done"
-            job["n_cards"] = len(deck)
+            job["n_cards"] = n
             job["filename"] = pdf_path.name
         except kc.WaniKaniError as exc:
-            job["status"] = "error"
-            job["error"] = str(exc)
-        except Exception as exc:  # noqa: BLE001 – Fehler sichtbar machen
-            job["status"] = "error"
-            job["error"] = f"Unerwarteter Fehler: {exc}"
+            job["status"], job["error"] = "error", str(exc)
+        except Exception as exc:  # noqa: BLE001
+            job["status"], job["error"] = "error", f"Unerwarteter Fehler: {exc}"
         finally:
             job["finished_at"] = _now()
             write_job(job)
 
 
-# --------------------------------------------------------------------------- #
-# API-Routen
-# --------------------------------------------------------------------------- #
+# ---------- API: Konfig & Einstellungen ------------------------------------- #
 
 @app.get("/api/config")
 def api_config() -> Any:
@@ -197,11 +179,7 @@ def api_get_settings() -> Any:
     s = load_settings()
     token = s.get("token", "")
     return jsonify(
-        {
-            "token_set": bool(token),
-            "token_hint": _mask(token),
-            "defaults": s["defaults"],
-        }
+        {"token_set": bool(token), "token_hint": _mask(token), "defaults": s["defaults"]}
     )
 
 
@@ -209,7 +187,7 @@ def api_get_settings() -> Any:
 def api_post_settings() -> Any:
     body = request.get_json(silent=True) or {}
     s = load_settings()
-    if "token" in body and isinstance(body["token"], str):
+    if isinstance(body.get("token"), str):
         s["token"] = body["token"].strip()
     if isinstance(body.get("defaults"), dict):
         s["defaults"] = {**s["defaults"], **body["defaults"]}
@@ -219,56 +197,74 @@ def api_post_settings() -> Any:
 
 @app.post("/api/test-token")
 def api_test_token() -> Any:
-    """Token gegen die WaniKani-API prüfen (GET /user)."""
-    token = (request.get_json(silent=True) or {}).get("token")
-    if not token:
-        token = load_settings().get("token", "")
+    token = (request.get_json(silent=True) or {}).get("token") or load_settings().get(
+        "token", ""
+    )
     if not token:
         return jsonify({"ok": False, "error": "Kein Token angegeben."}), 400
     try:
-        client = kc.WaniKaniClient(token, use_cache=False)
-        data = client._request("user")  # noqa: SLF001 – interner Helfer genügt
-        username = (data.get("data") or {}).get("username", "?")
-        level = (data.get("data") or {}).get("level")
-        return jsonify({"ok": True, "username": username, "level": level})
+        data = kc.WaniKaniClient(token, use_cache=False)._request("user")  # noqa: SLF001
+        d = data.get("data") or {}
+        return jsonify({"ok": True, "username": d.get("username", "?"), "level": d.get("level")})
     except kc.WaniKaniError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
-@app.post("/api/export")
-def api_export() -> Any:
+# ---------- API: Auflisten (resolve) ---------------------------------------- #
+
+@app.post("/api/resolve")
+def api_resolve() -> Any:
+    """Quelle in eine Kartenliste (Tabelle) auflösen.
+
+    body.mode: "level" | "search" | "compose"
+    """
     body = request.get_json(silent=True) or {}
+    mode = body.get("mode")
     sample = bool(body.get("sample"))
+    try:
+        if not sample:
+            _apply_token_env()
+        if mode == "level":
+            level = int(body.get("level"))
+            deck_type = body.get("type", "kanji")
+            cards = kc.resolve_level(level, deck_type, sample=sample)
+        elif mode == "search":
+            cards = kc.search_subjects(str(body.get("q", "")), sample=sample)
+        elif mode == "compose":
+            ids = body.get("subject_ids") or []
+            cards = kc.resolve_composition(ids, sample=sample)
+        else:
+            return jsonify({"error": "Unbekannter Modus."}), 400
+    except (TypeError, ValueError):
+        return jsonify({"error": "Ungültige Eingabe."}), 400
+    except kc.WaniKaniError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"cards": cards})
 
-    level = body.get("level")
-    if not sample:
-        try:
-            level = int(level)
-        except (TypeError, ValueError):
-            return jsonify({"error": "Bitte ein gültiges Level (1–60) angeben."}), 400
-        if not 1 <= level <= 60:
-            return jsonify({"error": "Level muss zwischen 1 und 60 liegen."}), 400
 
-    deck_type = body.get("type", "kanji")
-    if deck_type not in ("kanji", "radicals"):
-        return jsonify({"error": "Ungültiger Typ."}), 400
+# ---------- API: Rendern (by ids) ------------------------------------------- #
+
+@app.post("/api/render")
+def api_render() -> Any:
+    body = request.get_json(silent=True) or {}
+    ids = body.get("subject_ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "Keine Karten ausgewählt."}), 400
     layout = body.get("layout", "a4-4up")
     if layout not in kc.LAYOUTS:
         return jsonify({"error": "Ungültiges Layout."}), 400
 
     params = {
-        "level": level,
-        "type": deck_type,
+        "subject_ids": [int(i) for i in ids],
         "layout": layout,
         "paper": body.get("paper", "a4"),
         "duplex": body.get("duplex", "long-edge"),
-        "cover": bool(body.get("cover", True)),
         "cut_marks": bool(body.get("cut_marks", True)),
+        "hole": bool(body.get("hole", True)),
         "use_cache": not bool(body.get("no_cache", False)),
-        "sample": sample,
+        "sample": bool(body.get("sample", False)),
     }
-    kind = "Radicals" if deck_type == "radicals" else "Kanji"
-    title = f"{'Demo' if sample else 'Level ' + str(level)} · {kind}"
+    title = body.get("title") or f"{len(params['subject_ids'])} Karten"
 
     job_id = uuid.uuid4().hex[:12]
     job = {
@@ -279,9 +275,11 @@ def api_export() -> Any:
         "created_at": _now(),
     }
     write_job(job)
-    threading.Thread(target=_run_export, args=(job_id,), daemon=True).start()
+    threading.Thread(target=_run_render, args=(job_id,), daemon=True).start()
     return jsonify(job), 202
 
+
+# ---------- API: Jobs -------------------------------------------------------- #
 
 @app.get("/api/jobs")
 def api_jobs() -> Any:
@@ -298,11 +296,9 @@ def api_job(job_id: str) -> Any:
 
 @app.delete("/api/jobs/<job_id>")
 def api_delete_job(job_id: str) -> Any:
-    job = read_job(job_id)
-    if job is None:
+    if read_job(job_id) is None:
         abort(404)
-    pdf = OUTPUT_DIR / f"{job_id}.pdf"
-    pdf.unlink(missing_ok=True)
+    (OUTPUT_DIR / f"{job_id}.pdf").unlink(missing_ok=True)
     _job_path(job_id).unlink(missing_ok=True)
     return jsonify({"ok": True})
 
@@ -316,19 +312,17 @@ def api_job_pdf(job_id: str) -> Any:
     if not pdf.is_file():
         abort(404)
     download = request.args.get("download") == "1"
-    fname = f"wanikani-{job['title'].replace(' · ', '-').replace(' ', '')}.pdf"
+    safe = "".join(c for c in job.get("title", "cards") if c.isalnum() or c in " -_")
     return send_file(
         pdf,
         mimetype="application/pdf",
         as_attachment=download,
-        download_name=fname,
+        download_name=f"wanikani-{safe.strip() or 'cards'}.pdf",
         max_age=0,
     )
 
 
-# --------------------------------------------------------------------------- #
-# Frontend ausliefern
-# --------------------------------------------------------------------------- #
+# ---------- Frontend --------------------------------------------------------- #
 
 @app.get("/")
 def index() -> Any:

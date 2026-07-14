@@ -39,6 +39,9 @@
         "amalgamation_subject_ids": [
           2467,
           2468
+        ],
+        "component_subject_ids": [
+          1
         ]
       }
     },
@@ -80,6 +83,9 @@
         "amalgamation_subject_ids": [
           2480,
           2481
+        ],
+        "component_subject_ids": [
+          2
         ]
       }
     },
@@ -125,6 +131,10 @@
         "reading_mnemonic": "When something is really <reading>だい</reading> (dai) big, imagine it is so huge it could cause you to die.",
         "amalgamation_subject_ids": [
           2490
+        ],
+        "component_subject_ids": [
+          2,
+          4
         ]
       }
     },
@@ -170,6 +180,9 @@
         "reading_mnemonic": "Read <reading>じょう</reading> (jou): picture your friend Joe standing up above you on the roof.",
         "amalgamation_subject_ids": [
           2500
+        ],
+        "component_subject_ids": [
+          1
         ]
       }
     },
@@ -204,6 +217,9 @@
         "reading_mnemonic": "Read <reading>さん</reading> (san): the mountain is so grand you politely call it Mountain-san.",
         "amalgamation_subject_ids": [
           2510
+        ],
+        "component_subject_ids": [
+          5
         ]
       }
     },
@@ -244,6 +260,9 @@
         "reading_mnemonic": "Read <reading>こう</reading> (kou): open your mouth and out comes a loud cow-like 'kou' sound.",
         "amalgamation_subject_ids": [
           2520
+        ],
+        "component_subject_ids": [
+          3
         ]
       }
     }
@@ -274,7 +293,15 @@
             "ja": "一から始めましょう。",
             "en": "Let's start from the beginning."
           }
-        ]
+        ],
+        "component_subject_ids": [
+          440
+        ],
+        "parts_of_speech": [
+          "numeral"
+        ],
+        "meaning_mnemonic": "The vocab <vocabulary>一</vocabulary> is just the kanji for One, read the same way.",
+        "reading_mnemonic": "Same reading いち as the kanji."
       }
     },
     {
@@ -302,7 +329,15 @@
             "ja": "一つください。",
             "en": "One, please."
           }
-        ]
+        ],
+        "component_subject_ids": [
+          440
+        ],
+        "parts_of_speech": [
+          "numeral"
+        ],
+        "meaning_mnemonic": "<vocabulary>一つ</vocabulary> is one thing, using the kun'yomi.",
+        "reading_mnemonic": "The つ counter turns One into ひとつ."
       }
     },
     {
@@ -330,7 +365,15 @@
             "ja": "あの人は誰ですか。",
             "en": "Who is that person?"
           }
-        ]
+        ],
+        "component_subject_ids": [
+          449
+        ],
+        "parts_of_speech": [
+          "noun"
+        ],
+        "meaning_mnemonic": "<vocabulary>人</vocabulary> alone is a person, read ひと.",
+        "reading_mnemonic": "On its own the kanji is read ひと."
       }
     },
     {
@@ -358,7 +401,16 @@
             "ja": "一人で行きます。",
             "en": "I will go alone."
           }
-        ]
+        ],
+        "component_subject_ids": [
+          440,
+          449
+        ],
+        "parts_of_speech": [
+          "noun"
+        ],
+        "meaning_mnemonic": "<vocabulary>一人</vocabulary> means alone / one person.",
+        "reading_mnemonic": "Irregular reading ひとり – memorize it."
       }
     },
     {
@@ -386,7 +438,15 @@
             "ja": "大きい犬ですね。",
             "en": "That's a big dog, isn't it?"
           }
-        ]
+        ],
+        "component_subject_ids": [
+          450
+        ],
+        "parts_of_speech": [
+          "adjective"
+        ],
+        "meaning_mnemonic": "<vocabulary>大きい</vocabulary> is the い-adjective for big.",
+        "reading_mnemonic": "Kun'yomi おお plus きい."
       }
     },
     {
@@ -414,7 +474,15 @@
             "ja": "机の上に本があります。",
             "en": "There is a book on the desk."
           }
-        ]
+        ],
+        "component_subject_ids": [
+          448
+        ],
+        "parts_of_speech": [
+          "noun"
+        ],
+        "meaning_mnemonic": "<vocabulary>上</vocabulary> is the space above something.",
+        "reading_mnemonic": "Read うえ, the kun'yomi."
       }
     },
     {
@@ -442,7 +510,15 @@
             "ja": "山に登ります。",
             "en": "I climb the mountain."
           }
-        ]
+        ],
+        "component_subject_ids": [
+          451
+        ],
+        "parts_of_speech": [
+          "noun"
+        ],
+        "meaning_mnemonic": "<vocabulary>山</vocabulary> is a mountain, read やま.",
+        "reading_mnemonic": "Kun'yomi やま."
       }
     },
     {
@@ -470,7 +546,15 @@
             "ja": "口を大きく開けてください。",
             "en": "Please open your mouth wide."
           }
-        ]
+        ],
+        "component_subject_ids": [
+          452
+        ],
+        "parts_of_speech": [
+          "noun"
+        ],
+        "meaning_mnemonic": "<vocabulary>口</vocabulary> is a mouth, read くち.",
+        "reading_mnemonic": "Kun'yomi くち."
       }
     }
   ],

@@ -13,13 +13,17 @@ from kanji_cards import (  # noqa: E402
     Card,
     CoverCard,
     RadicalCard,
+    VocabCard,
     build_card,
     build_cover,
     build_cover_radicals,
     build_radical_card,
+    build_vocab_card,
+    collect_composition,
     mirror_backside,
     paginate,
     pick_example_vocab,
+    resolve_composition,
     strip_markup,
 )
 
@@ -258,6 +262,58 @@ def test_build_radical_card_image_only():
     assert card.radical == ""
     assert card.image_uri == "data:image/svg+xml;base64,AAA"
     assert card.kanji_examples == []
+
+
+def test_default_tags_type_and_level():
+    kanji = {"data": {"characters": "山", "level": 3,
+             "meanings": [{"meaning": "Mountain", "primary": True}], "readings": []}}
+    card = build_card(kanji, {})
+    assert card.tags == ["Kanji", "Lv 3"]
+
+
+def test_build_vocab_card():
+    vocab = {
+        "object": "vocabulary",
+        "data": {
+            "characters": "一人", "level": 3,
+            "meanings": [{"meaning": "Alone", "primary": True}],
+            "readings": [{"reading": "ひとり", "primary": True}],
+            "parts_of_speech": ["noun"],
+            "meaning_mnemonic": "<vocabulary>一人</vocabulary> is alone.",
+            "reading_mnemonic": "Read ひとり.",
+            "context_sentences": [{"ja": "一人で行く。", "en": "Go alone."}],
+        },
+    }
+    card = build_vocab_card(vocab)
+    assert isinstance(card, VocabCard)
+    assert card.vocab == "一人"
+    assert card.readings == ["ひとり"]
+    assert card.meanings == ["Alone"]
+    assert card.parts_of_speech == ["noun"]
+    assert card.meaning_mnemonic == "一人 is alone."  # Markup gestrippt
+    assert card.sentence_ja == "一人で行く。"
+    assert card.tags == ["Vocab", "Lv 3"]
+
+
+def test_collect_composition_recursive():
+    reg = {
+        1: {"id": 1, "object": "vocabulary", "data": {"component_subject_ids": [2, 3]}},
+        2: {"id": 2, "object": "kanji", "data": {"component_subject_ids": [4]}},
+        3: {"id": 3, "object": "kanji", "data": {"component_subject_ids": [4]}},
+        4: {"id": 4, "object": "radical", "data": {}},
+    }
+    order = [s["id"] for s in collect_composition([1], reg)]
+    # Wurzel zuerst, dann Kanji, dann (dedupliziert) das Radical
+    assert order == [1, 2, 3, 4]
+
+
+def test_resolve_composition_sample():
+    # 一人 (id 2481) → 一,人 (Kanji) → Ground,Person (Radicals)
+    cards = resolve_composition([2481], sample=True)
+    kinds = [c["kind"] for c in cards]
+    assert cards[0]["characters"] == "一人"
+    assert "Kanji" in kinds and "Radical" in kinds
+    assert len(cards) == 5
 
 
 def test_build_cover_radicals_kind():
