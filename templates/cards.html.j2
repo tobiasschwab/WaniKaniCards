@@ -420,11 +420,38 @@
   }
   .reading-row.kun .label { color: #2e5aa2; }  /* Blau für Kun */
   .reading-row.gen .label { color: #444; }     /* neutral (freie Karten) */
+  .reading-row.comp .label { color: #4a7a3a; } /* Grün für Zusammensetzung */
   .reading-row .value {
     font-family: "KanjiFont", "SansJP", serif;
     font-size: 13pt;
     line-height: 1.3;
     color: #1a1a1a;
+  }
+
+  /* ---------- Zusammensetzung (Radicals, aus denen das Kanji besteht) ---------- */
+  .comp-value {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5mm 2.4mm;
+  }
+  .comp-item { display: inline-flex; align-items: baseline; gap: 1mm; }
+  .comp-item .comp-k {
+    font-family: "KanjiFont", "SansJP", serif;
+    font-size: 12pt;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+  .comp-item .comp-img {
+    height: 4.5mm;
+    width: auto;
+    max-width: 9mm;
+    object-fit: contain;
+  }
+  .comp-item .comp-m {
+    font-family: "SansJP", sans-serif;
+    font-size: 8.5pt;
+    color: #555;
   }
 
   /* ---------- Eselsbrücken (Mnemonics) ---------- */
@@ -701,6 +728,14 @@
             <div class="reading-row kun">
               <div class="label">Kun</div>
               <div class="value">{{ cell.kunyomi | join("、") }}</div>
+            </div>
+            {% endif %}
+            {% if cell.components %}
+            <div class="reading-row comp">
+              <div class="label">Bausteine</div>
+              <div class="value comp-value">
+                {% for c in cell.components %}<span class="comp-item">{% if c.radical %}<span class="comp-k">{{ c.radical }}</span>{% elif c.image_uri %}<img class="comp-img" src="{{ c.image_uri }}" alt="{{ c.meaning }}">{% endif %}<span class="comp-m">{{ c.meaning }}</span></span>{% endfor %}
+              </div>
             </div>
             {% endif %}
           </div>

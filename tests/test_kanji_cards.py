@@ -208,6 +208,41 @@ def test_build_card_full():
     assert card.sentence_en == "Climb a mountain."
 
 
+def test_build_card_resolves_composition():
+    kanji = {
+        "data": {
+            "characters": "大",
+            "meanings": [{"meaning": "Big", "primary": True}],
+            "readings": [{"reading": "だい", "primary": True, "type": "onyomi"}],
+            "component_subject_ids": [2, 4],
+        }
+    }
+    subject_map = {
+        2: {
+            "id": 2,
+            "object": "radical",
+            "data": {
+                "characters": "人",
+                "meanings": [{"meaning": "Person", "primary": True}],
+            },
+        },
+        4: {
+            "id": 4,
+            "object": "radical",
+            "data": {  # bildbasiertes Radical ohne Unicode-Zeichen
+                "characters": None,
+                "meanings": [{"meaning": "Big", "primary": True}],
+                "_image_data_uri": "data:image/png;base64,AAA",
+            },
+        },
+    }
+    card = build_card(kanji, subject_map)
+    assert [c["radical"] for c in card.components] == ["人", ""]
+    assert [c["meaning"] for c in card.components] == ["Person", "Big"]
+    # Bild-Radical ohne Zeichen führt die eingebettete Bild-URI mit.
+    assert card.components[1]["image_uri"] == "data:image/png;base64,AAA"
+
+
 def test_build_cover_lists_kanji_and_meanings():
     cards = [
         Card(kanji="一", meanings=["One", "Primary"]),

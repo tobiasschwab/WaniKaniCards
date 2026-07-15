@@ -77,6 +77,9 @@ class Card:
     vocab_meaning: str | None = None
     sentence_ja: str | None = None
     sentence_en: str | None = None
+    # Zusammensetzung: die Radicals, aus denen das Kanji besteht.
+    # Je Eintrag: {"radical": str, "image_uri": str|None, "meaning": str}
+    components: list[dict[str, Any]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
 
 
@@ -393,8 +396,54 @@ def _default_tags(kind: str, data: dict[str, Any]) -> list[str]:
     return tags
 
 
-def build_card(kanji: dict[str, Any], vocab_map: dict[int, dict[str, Any]]) -> Card:
-    """Aus einem Kanji-Subject (+ Vokabel-Map) eine Card bauen."""
+def _build_components(
+    data: dict[str, Any],
+    subject_map: dict[int, dict[str, Any]],
+    image_fetcher: "callable | None" = None,
+) -> list[dict[str, Any]]:
+    """Die Radicals auflösen, aus denen ein Kanji zusammengesetzt ist.
+
+    Nutzt `component_subject_ids`. Je Radical Zeichen + Bedeutung; fehlt ein
+    Unicode-Zeichen, wird – sofern möglich – das eingebettete oder nachladbare
+    Bild verwendet.
+    """
+    components: list[dict[str, Any]] = []
+    for cid in data.get("component_subject_ids") or []:
+        comp = subject_map.get(int(cid))
+        if not comp:
+            continue
+        cdata = comp.get("data", {})
+        cmeanings = _primary_first(cdata.get("meanings", []), "meaning")
+        char = strip_markup(cdata.get("characters")) or ""
+        image_uri = cdata.get("_image_data_uri")
+        if not char and not image_uri and image_fetcher is not None:
+            images = cdata.get("character_images") or []
+            png = next(
+                (i for i in images if i.get("content_type") == "image/png"), None
+            )
+            chosen = png or (images[0] if images else None)
+            if chosen and chosen.get("url"):
+                image_uri = image_fetcher(chosen["url"])
+        components.append(
+            {
+                "radical": char,
+                "image_uri": image_uri,
+                "meaning": cmeanings[0] if cmeanings else "",
+            }
+        )
+    return components
+
+
+def build_card(
+    kanji: dict[str, Any],
+    vocab_map: dict[int, dict[str, Any]],
+    image_fetcher: "callable | None" = None,
+) -> Card:
+    """Aus einem Kanji-Subject (+ Subject-Map) eine Card bauen.
+
+    `vocab_map` dient sowohl den Beispielvokabeln (amalgamation) als auch den
+    Kompositions-Radicals (component); es genügt eine Map, die beide enthält.
+    """
     data = kanji.get("data", {})
     readings = data.get("readings", [])
     onyomi = _primary_first(
@@ -411,6 +460,7 @@ def build_card(kanji: dict[str, Any], vocab_map: dict[int, dict[str, Any]]) -> C
         kunyomi=kunyomi,
         meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
+        components=_build_components(data, vocab_map, image_fetcher),
         tags=_default_tags("Kanji", data),
     )
 
@@ -430,9 +480,11 @@ def build_card(kanji: dict[str, Any], vocab_map: dict[int, dict[str, Any]]) -> C
 
 
 def build_cards(
-    kanji_list: list[dict[str, Any]], vocab_map: dict[int, dict[str, Any]]
+    kanji_list: list[dict[str, Any]],
+    vocab_map: dict[int, dict[str, Any]],
+    image_fetcher: "callable | None" = None,
 ) -> list[Card]:
-    return [build_card(k, vocab_map) for k in kanji_list]
+    return [build_card(k, vocab_map, image_fetcher) for k in kanji_list]
 
 
 def build_cover(level: int | str, cards: Sequence[Card]) -> CoverCard:
@@ -688,6 +740,7 @@ def _card_to_dict(
         "vocab_meaning": card.vocab_meaning,
         "sentence_ja": card.sentence_ja,
         "sentence_en": card.sentence_en,
+        "components": card.components,
         "tags": card.tags,
     }
 
@@ -791,8 +844,10 @@ def load_sample_cards(path: Path | None = None) -> list[Card]:
     """
     raw = _load_sample_raw(path)
     kanji_list = raw["kanji"]
-    vocab_map = {int(v["id"]): v for v in raw.get("vocab", [])}
-    return build_cards(kanji_list, vocab_map)
+    # Map mit Vokabeln (Beispiele) UND Radicals (Komposition) – build_card nutzt beide.
+    subject_map = {int(v["id"]): v for v in raw.get("vocab", [])}
+    subject_map.update({int(r["id"]): r for r in raw.get("radicals", [])})
+    return build_cards(kanji_list, subject_map)
 
 
 def load_sample_radicals(path: Path | None = None) -> list[RadicalCard]:
@@ -823,13 +878,17 @@ def load_cards_from_api(level: int, *, use_cache: bool = True) -> list[Card]:
     if not kanji_list:
         raise WaniKaniError(f"Keine Kanji für Level {level} gefunden.")
 
-    # Alle amalgamation-IDs einsammeln und Vokabeln einmalig vorladen.
+    # Alle Bezug-IDs einsammeln: amalgamation (Beispielvokabeln) UND
+    # component (Kompositions-Radicals). Einmalig gebündelt vorladen.
     ids: set[int] = set()
     for k in kanji_list:
-        for sid in k.get("data", {}).get("amalgamation_subject_ids") or []:
+        kdata = k.get("data", {})
+        for sid in kdata.get("amalgamation_subject_ids") or []:
             ids.add(int(sid))
-    vocab_map = client.fetch_subjects(ids) if ids else {}
-    return build_cards(kanji_list, vocab_map)
+        for sid in kdata.get("component_subject_ids") or []:
+            ids.add(int(sid))
+    subject_map = client.fetch_subjects(ids) if ids else {}
+    return build_cards(kanji_list, subject_map, client.fetch_image_data_uri)
 
 
 def load_radicals_from_api(level: int, *, use_cache: bool = True) -> list[RadicalCard]:
@@ -954,8 +1013,11 @@ def render_subjects(
             s = reg.get(i)
             if not s:
                 continue
-            for a in s.get("data", {}).get("amalgamation_subject_ids") or []:
+            sdata = s.get("data", {})
+            for a in sdata.get("amalgamation_subject_ids") or []:
                 related.add(int(a))
+            for c in sdata.get("component_subject_ids") or []:
+                related.add(int(c))
         related -= set(reg)
         if related:
             reg.update(client.fetch_subjects(related))
@@ -1123,7 +1185,7 @@ def build_any_card(
         return build_radical_card(subject, registry, image_fetcher)
     if obj == "vocabulary":
         return build_vocab_card(subject)
-    return build_card(subject, registry)  # kanji
+    return build_card(subject, registry, image_fetcher)  # kanji
 
 
 # --------------------------------------------------------------------------- #

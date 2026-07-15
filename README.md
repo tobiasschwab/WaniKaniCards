@@ -11,7 +11,8 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 
 - **Vorderseite:** nur das Kanji, groß und zentriert.
 - **Rückseite:** das Kanji als Referenz (oben, etwas größer als der Text) ·
-  Bedeutungen · Lesungen (On/Kun) · **Eselsbrücken** (Mnemonic & Reading) ·
+  Bedeutungen · Lesungen (On/Kun) · **Zusammensetzung** (die Radicals, aus denen
+  das Kanji besteht, mit Bedeutung) · **Eselsbrücken** (Mnemonic & Reading) ·
   eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
 
 **Radical-Karten**
