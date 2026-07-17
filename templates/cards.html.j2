@@ -420,7 +420,6 @@
   }
   .reading-row.kun .label { color: #2e5aa2; }  /* Blau für Kun */
   .reading-row.gen .label { color: #444; }     /* neutral (freie Karten) */
-  .reading-row.comp .label { color: #4a7a3a; } /* Grün für Zusammensetzung */
   .reading-row .value {
     font-family: "KanjiFont", "SansJP", serif;
     font-size: 13pt;
@@ -428,14 +427,27 @@
     color: #1a1a1a;
   }
 
-  /* ---------- Zusammensetzung (Radicals, aus denen das Kanji besteht) ---------- */
-  .comp-value {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.5mm 2.4mm;
+  /* ---------- Composition (Radicals, aus denen das Kanji besteht) ----------
+     Nutzt die volle Kartenbreite: die Bausteine fließen nebeneinander und
+     brechen erst um, wenn die Zeile voll ist (spart vertikalen Platz). */
+  .composition {
+    margin-bottom: 2mm;
+    line-height: 1.55;   /* Luft zwischen umbrochenen Zeilen */
   }
-  .comp-item { display: inline-flex; align-items: baseline; gap: 1mm; }
+  .comp-label {
+    font-size: 8pt;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #4a7a3a;      /* Grün, hebt sich von On (rot) / Kun (blau) ab */
+    font-weight: 700;
+    margin-right: 2.5mm;
+  }
+  .comp-item {
+    display: inline-block;   /* fließt in der Zeile, umbricht als Ganzes */
+    white-space: nowrap;     /* Zeichen + Bedeutung bleiben zusammen */
+    margin-right: 3.5mm;     /* Abstand zwischen den Bausteinen */
+    vertical-align: middle;
+  }
   .comp-item .comp-k {
     font-family: "KanjiFont", "SansJP", serif;
     font-size: 12pt;
@@ -447,11 +459,13 @@
     width: auto;
     max-width: 9mm;
     object-fit: contain;
+    vertical-align: middle;
   }
   .comp-item .comp-m {
     font-family: "SansJP", sans-serif;
     font-size: 8.5pt;
     color: #555;
+    margin-left: 1mm;
   }
 
   /* ---------- Eselsbrücken (Mnemonics) ---------- */
@@ -730,15 +744,14 @@
               <div class="value">{{ cell.kunyomi | join("、") }}</div>
             </div>
             {% endif %}
-            {% if cell.components %}
-            <div class="reading-row comp">
-              <div class="label">Bausteine</div>
-              <div class="value comp-value">
-                {% for c in cell.components %}<span class="comp-item">{% if c.radical %}<span class="comp-k">{{ c.radical }}</span>{% elif c.image_uri %}<img class="comp-img" src="{{ c.image_uri }}" alt="{{ c.meaning }}">{% endif %}<span class="comp-m">{{ c.meaning }}</span></span>{% endfor %}
-              </div>
-            </div>
-            {% endif %}
           </div>
+
+          {% if cell.components %}
+          <div class="composition">
+            <span class="comp-label">Composition</span>
+            {% for c in cell.components %}<span class="comp-item">{% if c.radical %}<span class="comp-k">{{ c.radical }}</span>{% elif c.image_uri %}<img class="comp-img" src="{{ c.image_uri }}" alt="{{ c.meaning }}">{% endif %}<span class="comp-m">{{ c.meaning }}</span></span>{% endfor %}
+          </div>
+          {% endif %}
 
           {% if cell.meaning_mnemonic or cell.reading_mnemonic %}
           <div class="mnemonics">
