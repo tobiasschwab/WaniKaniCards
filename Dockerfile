@@ -24,10 +24,11 @@ WORKDIR /app
 COPY requirements.txt requirements-web.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 
-# App-Code (inkl. gebündelter Noto-JP-Schriften unter fonts/)
-COPY kanji_cards.py anki_export.py webapp.py sample_data.json ./
+# App-Code (inkl. gebündelter Noto-JP-Schriften unter fonts/ und WanaKana-JS unter vendor/)
+COPY kanji_cards.py anki_export.py webapp.py dictionary.py sample_data.json ./
 COPY templates/ ./templates/
 COPY fonts/ ./fonts/
+COPY vendor/ ./vendor/
 COPY web/ ./web/
 
 # Datenverzeichnis (Volume): settings.json, output/, jobs/, .cache/
