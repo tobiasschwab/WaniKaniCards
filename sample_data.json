@@ -42,7 +42,8 @@
         ],
         "component_subject_ids": [
           1
-        ]
+        ],
+        "document_url": "https://www.wanikani.com/kanji/%E4%B8%80"
       }
     },
     {
@@ -298,6 +299,10 @@
                 "content_type": "audio/wav"
               }
             ]
+          },
+          {
+            "ja": "一番になりたい。",
+            "en": "I want to be number one."
           }
         ],
         "component_subject_ids": [
@@ -316,7 +321,8 @@
               "voice_actor_name": "Demo (stumm)"
             }
           }
-        ]
+        ],
+        "document_url": "https://www.wanikani.com/vocabulary/%E4%B8%80"
       }
     },
     {
@@ -591,7 +597,8 @@
         "amalgamation_subject_ids": [
           440,
           448
-        ]
+        ],
+        "document_url": "https://www.wanikani.com/radicals/ground"
       }
     },
     {

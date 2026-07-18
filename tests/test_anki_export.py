@@ -76,9 +76,37 @@ def test_vocab_example_html_without_audio_has_no_player():
     assert "<audio" not in html
 
 
-def test_sentence_html_embeds_audio_player():
-    html = ae._sentence_html("一から始めましょう。", "Let's start from the beginning.", audio_url="https://example.test/s.mp3")
+def test_sentences_html_embeds_audio_player():
+    html = ae._sentences_html(
+        "一から始めましょう。", "Let's start from the beginning.", "https://example.test/s.mp3", []
+    )
     assert '<audio controls src="https://example.test/s.mp3"></audio>' in html
+
+
+def test_sentences_html_includes_extra_sentences():
+    html = ae._sentences_html(
+        "一から始めましょう。",
+        "Let's start from the beginning.",
+        None,
+        [{"ja": "一番になりたい。", "en": "I want to be number one.", "audio_url": None}],
+    )
+    assert "一から始めましょう。" in html
+    assert "一番になりたい。" in html
+    assert html.count('class="wk-sentence-item"') == 2
+
+
+def test_sentences_html_empty_without_primary():
+    assert ae._sentences_html(None, None, None, []) == ""
+
+
+def test_doclink_html_renders_link():
+    html = ae._doclink_html("https://www.wanikani.com/kanji/%E4%B8%80")
+    assert 'href="https://www.wanikani.com/kanji/%E4%B8%80"' in html
+    assert "WaniKani" in html
+
+
+def test_doclink_html_empty_without_url():
+    assert ae._doclink_html(None) == ""
 
 
 # --------------------------------------------------------------------------- #

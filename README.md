@@ -13,14 +13,20 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 - **Rückseite:** das Kanji als Referenz (oben, etwas größer als der Text) ·
   Bedeutungen · Lesungen (On/Kun) · **Zusammensetzung** (die Radicals, aus denen
   das Kanji besteht, mit Bedeutung) · **Eselsbrücken** (Mnemonic & Reading) ·
-  eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung – beide
-  optional mit **Vertonung** (`vocab_audio_url` / `sentence_audio_url` auf der
-  `Card`), die als abspielbarer Player **nur im Anki-Export** erscheint (im
-  PDF ohne Wirkung, da Papier nicht abspielbar ist). Vokabel-Audio wird
+  eine Beispielvokabel mit Lesung · **Beispielsätze** mit Übersetzung – WaniKani
+  liefert pro Vokabel oft mehrere `context_sentences`; das PDF zeigt aus
+  Platzgründen (feste Kartenhöhe) maximal **zwei**, der Anki-Export **alle**
+  vorhandenen. Vokabel + Sätze können optional mit **Vertonung**
+  (`vocab_audio_url` / `sentence_audio_url` je Satz auf der `Card`) versehen
+  sein, die als abspielbarer Player **nur im Anki-Export** erscheint (im PDF
+  ohne Wirkung, da Papier nicht abspielbar ist). Vokabel-Audio wird
   automatisch aus WaniKanis `pronunciation_audios` übernommen; für
   Beispielsätze liefert WaniKani selbst keine Vertonung – dieses Feld
-  (`context_sentences[0].audios`, gleiches Schema) lässt sich manuell in den
-  Subject-Daten nachtragen.
+  (`context_sentences[…].audios`, gleiches Schema) lässt sich manuell in den
+  Subject-Daten nachtragen. Im Anki-Export werden diese Audio-URLs als echte
+  MP3/OGG-Dateien heruntergeladen und direkt ins `.apkg` eingebettet (nicht
+  nur verlinkt) – die Karten sind danach vollständig offline abspielbar, ganz
+  ohne laufende Verbindung zu WaniKani.
 
 **Radical-Karten**
 
@@ -33,7 +39,13 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 
 - **Vorderseite:** das Wort, groß (automatisch an die Länge angepasst).
 - **Rückseite:** das Wort als Referenz (oben) · Bedeutungen · Wortart · Lesung ·
-  **Mnemonics** · Beispielsatz.
+  optional die eigene **Vertonung** (Anki-Export, s. o.) · **Mnemonics** ·
+  Beispielsätze (PDF max. zwei, Anki alle vorhandenen).
+
+Im Anki-Export trägt jede Rückseite (Radical/Kanji/Vokabel) außerdem einen
+dezenten Link **„WaniKani ↗"** zur Original-Seite des Subjects
+(`document_url`) – nur dort, das PDF verzichtet darauf (ein Link auf Papier
+wäre nutzlos).
 
 Damit man zum Abfragen nicht umdrehen muss, steht das Zeichen der Vorderseite
 (Kanji/Radical/Vokabel) **auch auf der Rückseite oben** – deutlich kleiner als

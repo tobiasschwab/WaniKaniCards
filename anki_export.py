@@ -161,9 +161,13 @@ _CSS = """
 .wk-vocab audio { display: block; margin-top: 5px; width: 100%; max-width: 260px; height: 30px; }
 
 .wk-sentence { margin-top: 8px; }
-.wk-sentence .ja { font-size: 15px; line-height: 1.4; word-break: break-word; }
-.wk-sentence .en { font-size: 13px; color: #808080; font-style: italic; margin-top: 3px; }
-.wk-sentence audio { display: block; margin-top: 5px; width: 100%; max-width: 260px; height: 30px; }
+.wk-sentence-item .ja { font-size: 15px; line-height: 1.4; word-break: break-word; }
+.wk-sentence-item .en { font-size: 13px; color: #808080; font-style: italic; margin-top: 3px; }
+.wk-sentence-item audio { display: block; margin-top: 5px; width: 100%; max-width: 260px; height: 30px; }
+.wk-sentence-item + .wk-sentence-item {
+  margin-top: 8px; padding-top: 7px; border-top: 1px dashed #e2e2e2;
+}
+.night_mode .wk-sentence-item + .wk-sentence-item { border-top-color: #444; }
 
 .wk-examples { margin-top: 8px; }
 .wk-examples .ttl { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #111; margin-bottom: 5px; }
@@ -172,6 +176,13 @@ _CSS = """
 .wk-ex-item .k { font-family: "WKSerif", "WKSans", serif; font-weight: 600; font-size: 16px; }
 .wk-ex-item .r { color: #c1584a; font-size: 12px; margin-left: 3px; }
 .wk-ex-item .m { color: #666; font-size: 12px; margin-left: 3px; }
+
+/* Link zur WaniKani-Seite des Subjects (Rückseite, unten). */
+.wk-doclink {
+  display: block; margin-top: 14px; padding-top: 8px; border-top: 1px solid #eee;
+  text-align: right; font-size: 11px; color: #999; text-decoration: none;
+}
+.night_mode .wk-doclink { border-top-color: #444; color: #888; }
 
 /* Frei erstellte Karten: dieselben Klassennamen wie im Web-Editor/Print-Template. */
 .wk-free-front { display: flex; align-items: center; justify-content: center; min-height: 110px; }
@@ -224,6 +235,7 @@ _RADICAL_BACK = """
   </div>
   {{MnemonicHtml}}
   {{ExamplesHtml}}
+  {{DocLinkHtml}}
 </div>
 """.strip()
 
@@ -276,6 +288,7 @@ _KANJI_BACK = """
   {{MnemonicsHtml}}
   {{VocabHtml}}
   {{SentenceHtml}}
+  {{DocLinkHtml}}
 </div>
 """.strip()
 
@@ -295,8 +308,10 @@ _VOCAB_BACK = """
   <div class="wk-refhead"><span class="wk-ref small">{{Vocab}}</span>{{MeaningsHtml}}</div>
   {{#PartsOfSpeech}}<div class="wk-pos">{{PartsOfSpeech}}</div>{{/PartsOfSpeech}}
   {{#Readings}}<div class="wk-row gen"><div class="lbl">Reading</div><div class="val">{{Readings}}</div></div>{{/Readings}}
+  {{AudioHtml}}
   {{MnemonicsHtml}}
   {{SentenceHtml}}
+  {{DocLinkHtml}}
 </div>
 """.strip()
 
@@ -319,7 +334,10 @@ def _build_models(genanki: Any) -> dict[str, Any]:
             "WaniKani Card Studio – Radical",
             fields=[
                 {"name": n}
-                for n in ("Radical", "RadicalImage", "Meaning", "MnemonicHtml", "ExamplesHtml", "TagsHtml")
+                for n in (
+                    "Radical", "RadicalImage", "Meaning", "MnemonicHtml", "ExamplesHtml",
+                    "TagsHtml", "DocLinkHtml",
+                )
             ],
             templates=[{"name": "Radical", "qfmt": _RADICAL_FRONT, "afmt": _RADICAL_BACK}],
             css=_css_with_accent("radical"),
@@ -333,7 +351,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 for n in (
                     "Kanji", "MeaningsHtml", "Onyomi", "Kunyomi", "CompositionHtml",
                     "MnemonicsHtml", "VocabHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
-                    "OnyomiPrimary", "KunyomiPrimary",
+                    "OnyomiPrimary", "KunyomiPrimary", "DocLinkHtml",
                 )
             ],
             templates=[
@@ -352,6 +370,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 for n in (
                     "Vocab", "VocabFontSize", "MeaningsHtml", "Readings",
                     "PartsOfSpeech", "MnemonicsHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
+                    "AudioHtml", "DocLinkHtml",
                 )
             ],
             templates=[{"name": "Vokabel", "qfmt": _VOCAB_FRONT, "afmt": _VOCAB_BACK}],
@@ -444,12 +463,20 @@ def _examples_html(examples: list[tuple[str, str, str]]) -> str:
 
 
 def _audio_html(url: str | None) -> str:
-    """Abspielbares <audio>-Element (referenziert die URL direkt statt sie in
-    die apkg-Medien einzubetten – schlank, funktioniert für WaniKani-CDN-URLs
-    und für manuell hinterlegte Audios gleichermaßen)."""
+    """Abspielbares <audio>-Element. `url` ist entweder bereits eine data-URI
+    (von kanji_cards.py heruntergeladen und eingebettet – spielt komplett
+    offline, ohne beim Lernen vom WaniKani-Server zu laden) oder eine externe
+    URL als Fallback (z. B. wenn kein Netzwerk zum Herunterladen bestand)."""
     if not url:
         return ""
     return f'<audio controls src="{_esc(url)}"></audio>'
+
+
+def _doclink_html(url: str | None) -> str:
+    """Dezenter Link zur WaniKani-Seite des Subjects (unten auf der Rückseite)."""
+    if not url:
+        return ""
+    return f'<a class="wk-doclink" href="{_esc(url)}">WaniKani ↗</a>'
 
 
 def _vocab_example_html(
@@ -465,14 +492,31 @@ def _vocab_example_html(
     return f'<div class="wk-vocab"><div class="head">{head}</div>{_audio_html(audio_url)}</div>'
 
 
-def _sentence_html(ja: str | None, en: str | None, audio_url: str | None = None) -> str:
+def _sentence_item_html(ja: str | None, en: str | None, audio_url: str | None = None) -> str:
     if not ja:
         return ""
-    out = f'<div class="wk-sentence"><div class="ja">{_esc(ja)}</div>'
+    out = f'<div class="wk-sentence-item"><div class="ja">{_esc(ja)}</div>'
     if en:
         out += f'<div class="en">{_esc(en)}</div>'
     out += _audio_html(audio_url)
     return out + "</div>"
+
+
+def _sentences_html(
+    sentence_ja: str | None,
+    sentence_en: str | None,
+    sentence_audio_url: str | None,
+    extra_sentences: list[dict[str, Any]] | None,
+) -> str:
+    """Primärer Beispielsatz + weitere zu einem Block zusammenfassen. Anders
+    als das PDF hat eine Anki-Karte keine feste Höhe, daher wird hier – im
+    Gegensatz zum Print-Template – nicht auf 2 Sätze begrenzt."""
+    items = _sentence_item_html(sentence_ja, sentence_en, sentence_audio_url)
+    for s in extra_sentences or []:
+        items += _sentence_item_html(s.get("ja"), s.get("en"), s.get("audio_url"))
+    if not items:
+        return ""
+    return f'<div class="wk-sentence">{items}</div>'
 
 
 # Grobe Skalierung wie bei den gedruckten Vokabelkarten (dort pt, hier px).
@@ -518,6 +562,7 @@ def _radical_note(genanki: Any, model: Any, card: kc.RadicalCard) -> Any:
         _mnemonics_html(card.mnemonic, None),
         _examples_html(card.kanji_examples),
         _tags_html(card.tags),
+        _doclink_html(card.document_url),
     ]
     guid = genanki.guid_for("wkcards", "radical", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
@@ -532,11 +577,12 @@ def _kanji_note(genanki: Any, model: Any, card: kc.Card) -> Any:
         _composition_html(card.components),
         _mnemonics_html(card.meaning_mnemonic, card.reading_mnemonic),
         _vocab_example_html(card.vocab, card.vocab_reading, card.vocab_meaning, card.vocab_audio_url),
-        _sentence_html(card.sentence_ja, card.sentence_en, card.sentence_audio_url),
+        _sentences_html(card.sentence_ja, card.sentence_en, card.sentence_audio_url, card.extra_sentences),
         _tags_html(card.tags),
         _first_plain(card.meanings),
         _esc(card.onyomi[0]) if card.onyomi else "",
         _esc(card.kunyomi[0]) if card.kunyomi else "",
+        _doclink_html(card.document_url),
     ]
     guid = genanki.guid_for("wkcards", "kanji", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
@@ -550,9 +596,11 @@ def _vocab_note(genanki: Any, model: Any, card: kc.VocabCard) -> Any:
         _esc("、".join(card.readings)),
         _esc(", ".join(card.parts_of_speech)),
         _mnemonics_html(card.meaning_mnemonic, card.reading_mnemonic),
-        _sentence_html(card.sentence_ja, card.sentence_en),
+        _sentences_html(card.sentence_ja, card.sentence_en, card.sentence_audio_url, card.extra_sentences),
         _tags_html(card.tags),
         _first_plain(card.meanings),
+        _audio_html(card.audio_url),
+        _doclink_html(card.document_url),
     ]
     guid = genanki.guid_for("wkcards", "vocab", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)

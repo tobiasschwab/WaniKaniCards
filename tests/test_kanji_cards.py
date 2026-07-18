@@ -15,6 +15,7 @@ from kanji_cards import (  # noqa: E402
     CustomCard,
     RadicalCard,
     VocabCard,
+    WaniKaniClient,
     build_card,
     build_custom_card,
     build_cover,
@@ -29,6 +30,7 @@ from kanji_cards import (  # noqa: E402
     resolve_composition,
     resolve_level,
     strip_markup,
+    _resolve_audio_url,
 )
 
 
@@ -254,6 +256,98 @@ def test_build_card_without_audio_fields_stays_none():
     assert card.sentence_audio_url is None
 
 
+def test_build_card_downloads_audio_via_fetcher_for_anki():
+    """Ohne Fetcher (PDF/Test) bleibt die rohe URL; mit Fetcher (Anki-Export)
+    wird heruntergeladen und als data-URI eingebettet (funktioniert offline)."""
+    kanji = {
+        "data": {
+            "characters": "山",
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+            "amalgamation_subject_ids": [77],
+        }
+    }
+    vmap = {
+        77: {
+            "id": 77,
+            "data": {
+                "level": 1,
+                "characters": "山",
+                "meanings": [{"meaning": "Mountain", "primary": True}],
+                "readings": [{"reading": "やま", "primary": True}],
+                "pronunciation_audios": [{"url": "https://example.test/vocab.mp3", "content_type": "audio/mpeg"}],
+            },
+        }
+    }
+    calls = []
+
+    def fake_fetcher(url):
+        calls.append(url)
+        return "data:audio/mpeg;base64,AAAA"
+
+    card = build_card(kanji, vmap, image_fetcher=fake_fetcher)
+    assert card.vocab_audio_url == "data:audio/mpeg;base64,AAAA"
+    assert calls == ["https://example.test/vocab.mp3"]
+
+
+def test_resolve_audio_url_passes_through_data_uri_without_fetching():
+    calls = []
+
+    def fetcher(url):
+        calls.append(url)
+        return "data:audio/mpeg;base64,SHOULD_NOT_BE_USED"
+
+    result = _resolve_audio_url("data:audio/wav;base64,AAAA", fetcher)
+    assert result == "data:audio/wav;base64,AAAA"
+    assert calls == []  # bereits eingebettet – kein Download nötig
+
+
+def test_resolve_audio_url_falls_back_to_raw_url_if_fetch_fails():
+    result = _resolve_audio_url("https://example.test/a.mp3", lambda url: None)
+    assert result == "https://example.test/a.mp3"  # funktioniert dann online weiter
+
+
+def test_build_card_collects_extra_sentences():
+    kanji = {
+        "data": {
+            "characters": "山",
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+            "amalgamation_subject_ids": [77],
+        }
+    }
+    vmap = {
+        77: {
+            "id": 77,
+            "data": {
+                "level": 1,
+                "characters": "山",
+                "meanings": [{"meaning": "Mountain", "primary": True}],
+                "context_sentences": [
+                    {"ja": "山に登る。", "en": "Climb a mountain."},
+                    {"ja": "高い山です。", "en": "It's a tall mountain."},
+                    {"ja": "三つ目の文。", "en": "Third sentence."},
+                    {"ja": "四つ目の文。", "en": "Fourth sentence (verworfen)."},
+                ],
+            },
+        }
+    }
+    card = build_card(kanji, vmap)
+    assert card.sentence_ja == "山に登る。"
+    # Nur 2 zusätzliche Sätze (MAX_EXTRA_SENTENCES) – der vierte fällt weg.
+    assert [s["ja"] for s in card.extra_sentences] == ["高い山です。", "三つ目の文。"]
+
+
+def test_build_card_document_url():
+    kanji = {
+        "data": {
+            "characters": "山",
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+            "document_url": "https://www.wanikani.com/kanji/%E5%B1%B1",
+        }
+    }
+    card = build_card(kanji, {})
+    assert card.document_url == "https://www.wanikani.com/kanji/%E5%B1%B1"
+
+
 def test_build_card_resolves_composition():
     kanji = {
         "data": {
@@ -378,6 +472,43 @@ def test_build_vocab_card():
     assert card.tags == ["Vocab", "Lv 3"]
 
 
+def test_build_vocab_card_own_audio_and_document_url():
+    vocab = {
+        "id": 99,
+        "data": {
+            "characters": "一人",
+            "meanings": [{"meaning": "Alone", "primary": True}],
+            "pronunciation_audios": [{"url": "https://example.test/hitori.mp3", "content_type": "audio/mpeg"}],
+            "document_url": "https://www.wanikani.com/vocabulary/%E4%B8%80%E4%BA%BA",
+            "context_sentences": [
+                {"ja": "一人で行く。", "en": "Go alone."},
+                {"ja": "二番目の文。", "en": "Second sentence."},
+            ],
+        },
+    }
+    card = build_vocab_card(vocab)  # ohne Fetcher: rohe URL bleibt (z. B. PDF-Modus)
+    assert card.audio_url == "https://example.test/hitori.mp3"
+    assert card.document_url == "https://www.wanikani.com/vocabulary/%E4%B8%80%E4%BA%BA"
+    assert [s["ja"] for s in card.extra_sentences] == ["二番目の文。"]
+
+    downloaded = []
+    card2 = build_vocab_card(vocab, image_fetcher=lambda u: downloaded.append(u) or "data:audio/mpeg;base64,BBBB")
+    assert card2.audio_url == "data:audio/mpeg;base64,BBBB"
+    assert downloaded == ["https://example.test/hitori.mp3"]
+
+
+def test_build_radical_card_document_url():
+    radical = {
+        "data": {
+            "characters": "山",
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+            "document_url": "https://www.wanikani.com/radicals/mountain",
+        }
+    }
+    card = build_radical_card(radical, {})
+    assert card.document_url == "https://www.wanikani.com/radicals/mountain"
+
+
 def test_collect_composition_recursive():
     reg = {
         1: {"id": 1, "object": "vocabulary", "data": {"component_subject_ids": [2, 3]}},
@@ -463,3 +594,54 @@ def test_build_card_without_vocab_still_builds():
     assert card.kanji == "口"
     assert card.vocab is None
     assert card.sentence_ja is None
+
+
+# --------------------------------------------------------------------------- #
+# WaniKaniClient.fetch_audio_data_uri (mockt HTTP – kein echtes Netzwerk nötig,
+# WaniKani ist in dieser Sandbox ohnehin geblockt; verifiziert aber, dass der
+# reale Download-Mechanismus für den Anki-Audio-Export funktioniert)
+# --------------------------------------------------------------------------- #
+
+class _FakeResponse:
+    def __init__(self, content: bytes, content_type: str, status_code: int = 200):
+        self.content = content
+        self.status_code = status_code
+        self.ok = status_code < 400
+        self.headers = {"Content-Type": content_type}
+
+
+class _FakeSession:
+    def __init__(self, response: "_FakeResponse"):
+        self.response = response
+        self.calls: list[str] = []
+
+    def get(self, url: str, timeout: int = 30):
+        self.calls.append(url)
+        return self.response
+
+
+def test_fetch_audio_data_uri_downloads_and_embeds_as_data_uri():
+    """Simuliert einen echten WaniKani-Audio-Download: MP3-Bytes rein, korrekt
+    kodierte data:-URI raus – derselbe Mechanismus, der real gegen WaniKanis
+    Audio-CDN läuft, hier nur mit einer Fake-Session statt echtem Netzwerk."""
+    fake_mp3_bytes = b"ID3\x03\x00\x00\x00fake-mp3-bytes"
+    session = _FakeSession(_FakeResponse(fake_mp3_bytes, "audio/mpeg"))
+    client = WaniKaniClient("dummy-token", use_cache=False, session=session)
+
+    uri = client.fetch_audio_data_uri("https://api.wanikani.com/audio/hitori.mp3")
+
+    assert session.calls == ["https://api.wanikani.com/audio/hitori.mp3"]
+    assert uri.startswith("data:audio/mpeg;base64,")
+    import base64
+    assert base64.b64decode(uri.split(",", 1)[1]) == fake_mp3_bytes
+
+
+def test_fetch_audio_data_uri_is_same_function_as_image_fetcher():
+    # Bewusst derselbe (content-type-agnostische) Fetcher für Bilder und Audio.
+    assert WaniKaniClient.fetch_audio_data_uri is WaniKaniClient.fetch_image_data_uri
+
+
+def test_fetch_audio_data_uri_returns_none_on_persistent_failure():
+    session = _FakeSession(_FakeResponse(b"", "text/html", status_code=404))
+    client = WaniKaniClient("dummy-token", use_cache=False, session=session)
+    assert client.fetch_audio_data_uri("https://example.test/missing.mp3") is None

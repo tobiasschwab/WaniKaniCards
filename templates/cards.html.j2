@@ -530,21 +530,30 @@
   .sentence {
     margin-top: 1.6mm;
   }
+  /* Zweiter Beispielsatz: dezent abgesetzt und etwas kompakter, damit die
+     feste Kartenhöhe seltener knapp wird. */
+  .sentence + .sentence {
+    margin-top: 1.5mm;
+    padding-top: 1.2mm;
+    border-top: 0.25mm dotted #e2e2e2;
+  }
   .sentence .ja {
     font-family: "SansJP", sans-serif;
     font-size: 10pt;
-    line-height: 1.35;
+    line-height: 1.3;
     color: #1a1a1a;
     word-break: break-all;   /* sauberer CJK-Umbruch */
     line-break: strict;
   }
   .sentence .en {
     font-size: 8.5pt;
-    line-height: 1.35;
+    line-height: 1.3;
     color: #777;
     font-style: italic;
-    margin-top: 0.6mm;
+    margin-top: 0.5mm;
   }
+  .sentence + .sentence .ja { font-size: 8.5pt; }
+  .sentence + .sentence .en { font-size: 7.5pt; }
 
   /* Kleines Referenz-Kanji im reservierten Loch-Band (Gegenseite zum Loch). */
   .kanji-mini {
@@ -703,12 +712,12 @@
           </div>
           {% endif %}
 
-          {% if cell.sentence_ja %}
+          {% for s in cell.sentences[:2] %}
           <div class="sentence">
-            <div class="ja">{{ cell.sentence_ja }}</div>
-            {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
+            <div class="ja">{{ s.ja }}</div>
+            {% if s.en %}<div class="en">{{ s.en }}</div>{% endif %}
           </div>
-          {% endif %}
+          {% endfor %}
         </div>
 
       {% elif cell.type == "custom" %}
@@ -775,12 +784,12 @@
           </div>
           {% endif %}
 
-          {% if cell.sentence_ja %}
+          {% for s in cell.sentences[:2] %}
           <div class="sentence">
-            <div class="ja">{{ cell.sentence_ja }}</div>
-            {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
+            <div class="ja">{{ s.ja }}</div>
+            {% if s.en %}<div class="en">{{ s.en }}</div>{% endif %}
           </div>
-          {% endif %}
+          {% endfor %}
         </div>
       {% endif %}
     {% endfor %}

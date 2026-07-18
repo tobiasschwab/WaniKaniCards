@@ -79,6 +79,11 @@ class Card:
     sentence_ja: str | None = None
     sentence_en: str | None = None
     sentence_audio_url: str | None = None
+    # Weitere Beispielsätze (über den ersten hinaus). Je Eintrag:
+    # {"ja": str, "en": str, "audio_url": str|None}
+    extra_sentences: list[dict[str, Any]] = field(default_factory=list)
+    # Link zur WaniKani-Seite des Kanji.
+    document_url: str | None = None
     # Zusammensetzung: die Radicals, aus denen das Kanji besteht.
     # Je Eintrag: {"radical": str, "image_uri": str|None, "meaning": str}
     components: list[dict[str, Any]] = field(default_factory=list)
@@ -111,6 +116,8 @@ class RadicalCard:
     kanji_examples: list[tuple[str, str, str]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     subject_id: int | None = None
+    # Link zur WaniKani-Seite des Radicals.
+    document_url: str | None = None
 
 
 @dataclass
@@ -123,8 +130,12 @@ class VocabCard:
     parts_of_speech: list[str] = field(default_factory=list)
     meaning_mnemonic: str | None = None
     reading_mnemonic: str | None = None
+    audio_url: str | None = None
     sentence_ja: str | None = None
     sentence_en: str | None = None
+    sentence_audio_url: str | None = None
+    extra_sentences: list[dict[str, Any]] = field(default_factory=list)
+    document_url: str | None = None
     tags: list[str] = field(default_factory=list)
     subject_id: int | None = None
 
@@ -372,6 +383,12 @@ class WaniKaniClient:
             break
         return None
 
+    # Content-Type-agnostisch (nutzt den echten Content-Type-Header) – derselbe
+    # Fetcher lädt daher auch Vertonungen (mp3/ogg) als data:-URI herunter, die
+    # dann direkt im Anki-Feld abspielbar sind (voll offline, kein Streaming
+    # vom WaniKani-Server nötig).
+    fetch_audio_data_uri = fetch_image_data_uri
+
 
 # --------------------------------------------------------------------------- #
 # Modell-Aufbau
@@ -443,6 +460,43 @@ def _pick_audio_url(audios: list[dict[str, Any]] | None) -> str | None:
     return chosen.get("url") if chosen else None
 
 
+def _resolve_audio_url(url: str | None, fetcher: "callable | None") -> str | None:
+    """Audio-URL für den Anki-Export einbetten (herunterladen → data-URI).
+
+    So funktionieren die Karten im Anki-Review komplett offline, ohne bei
+    jeder Wiederholung vom WaniKani-Server zu streamen. Bereits eingebettete
+    data-URIs (Sample-Daten) oder fehlender Fetcher (kein Netzwerk/PDF-Modus)
+    lassen die URL unverändert; schlägt der Download fehl, bleibt die
+    Original-URL als Fallback erhalten (funktioniert dann online weiter).
+    """
+    if not url or url.startswith("data:") or fetcher is None:
+        return url
+    return fetcher(url) or url
+
+
+# Wie viele zusätzliche Beispielsätze (über den ersten hinaus) übernommen werden.
+MAX_EXTRA_SENTENCES = 2
+
+
+def _build_extra_sentences(
+    sentences: list[dict[str, Any]], fetcher: "callable | None"
+) -> list[dict[str, Any]]:
+    """Beispielsätze 2..N (der erste läuft separat über sentence_ja/_en)."""
+    out: list[dict[str, Any]] = []
+    for s in sentences[:MAX_EXTRA_SENTENCES]:
+        ja = strip_markup(s.get("ja"))
+        if not ja:
+            continue
+        out.append(
+            {
+                "ja": ja,
+                "en": strip_markup(s.get("en")) or "",
+                "audio_url": _resolve_audio_url(_pick_audio_url(s.get("audios")), fetcher),
+            }
+        )
+    return out
+
+
 def _build_components(
     data: dict[str, Any],
     subject_map: dict[int, dict[str, Any]],
@@ -510,6 +564,7 @@ def build_card(
         components=_build_components(data, vocab_map, image_fetcher),
         tags=_default_tags("Kanji", data),
         subject_id=_int_or_none(kanji.get("id")),
+        document_url=data.get("document_url"),
     )
 
     vocab = pick_example_vocab(kanji, vocab_map)
@@ -520,14 +575,19 @@ def build_card(
         card.vocab_reading = vreadings[0] if vreadings else None
         vmeanings = _primary_first(vdata.get("meanings", []), "meaning")
         card.vocab_meaning = vmeanings[0] if vmeanings else None
-        card.vocab_audio_url = _pick_audio_url(vdata.get("pronunciation_audios"))
+        card.vocab_audio_url = _resolve_audio_url(
+            _pick_audio_url(vdata.get("pronunciation_audios")), image_fetcher
+        )
         sentences = vdata.get("context_sentences") or []
         if sentences:
             card.sentence_ja = strip_markup(sentences[0].get("ja"))
             card.sentence_en = strip_markup(sentences[0].get("en"))
             # WaniKani vertont Beispielsätze selbst nicht – optionales,
             # manuell nachgetragenes Feld (gleiche Struktur wie pronunciation_audios).
-            card.sentence_audio_url = _pick_audio_url(sentences[0].get("audios"))
+            card.sentence_audio_url = _resolve_audio_url(
+                _pick_audio_url(sentences[0].get("audios")), image_fetcher
+            )
+            card.extra_sentences = _build_extra_sentences(sentences[1:], image_fetcher)
     return card
 
 
@@ -574,6 +634,7 @@ def build_radical_card(
         mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         tags=_default_tags("Radical", data),
         subject_id=_int_or_none(radical.get("id")),
+        document_url=data.get("document_url"),
     )
 
     # Bild: bereits eingebettete data-URI (Sample) oder per Fetcher nachladen.
@@ -618,7 +679,9 @@ def build_radical_cards(
     return [build_radical_card(r, kanji_map, image_fetcher) for r in radical_list]
 
 
-def build_vocab_card(vocab: dict[str, Any]) -> VocabCard:
+def build_vocab_card(
+    vocab: dict[str, Any], image_fetcher: "callable | None" = None
+) -> VocabCard:
     """Aus einem Vokabel-Subject eine VocabCard bauen."""
     data = vocab.get("data", {})
     sentences = data.get("context_sentences") or []
@@ -629,12 +692,20 @@ def build_vocab_card(vocab: dict[str, Any]) -> VocabCard:
         parts_of_speech=[p for p in (data.get("parts_of_speech") or []) if p],
         meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
+        audio_url=_resolve_audio_url(
+            _pick_audio_url(data.get("pronunciation_audios")), image_fetcher
+        ),
+        document_url=data.get("document_url"),
         tags=_default_tags("Vocab", data),
         subject_id=_int_or_none(vocab.get("id")),
     )
     if sentences:
         card.sentence_ja = strip_markup(sentences[0].get("ja"))
         card.sentence_en = strip_markup(sentences[0].get("en"))
+        card.sentence_audio_url = _resolve_audio_url(
+            _pick_audio_url(sentences[0].get("audios")), image_fetcher
+        )
+        card.extra_sentences = _build_extra_sentences(sentences[1:], image_fetcher)
     return card
 
 
@@ -735,6 +806,18 @@ LAYOUTS: dict[str, dict[str, Any]] = {
 PAGE_MARGIN_MM = 8.0
 
 
+def _merged_sentences(card: "Card | VocabCard") -> list[dict[str, Any]]:
+    """Primärer Beispielsatz + weitere zu einer Liste zusammenführen (fürs
+    Template – die Karte selbst behält sentence_ja/_en getrennt für die API)."""
+    out: list[dict[str, Any]] = []
+    if card.sentence_ja:
+        out.append(
+            {"ja": card.sentence_ja, "en": card.sentence_en or "", "audio_url": card.sentence_audio_url}
+        )
+    out.extend(card.extra_sentences)
+    return out
+
+
 def _card_to_dict(
     card: Card | CoverCard | RadicalCard | VocabCard | CustomCard | None,
 ) -> dict[str, Any] | None:
@@ -773,6 +856,7 @@ def _card_to_dict(
             "reading_mnemonic": card.reading_mnemonic,
             "sentence_ja": card.sentence_ja,
             "sentence_en": card.sentence_en,
+            "sentences": _merged_sentences(card),
             "tags": card.tags,
         }
     if isinstance(card, CustomCard):
@@ -795,6 +879,7 @@ def _card_to_dict(
         "vocab_meaning": card.vocab_meaning,
         "sentence_ja": card.sentence_ja,
         "sentence_en": card.sentence_en,
+        "sentences": _merged_sentences(card),
         "components": card.components,
         "tags": card.tags,
     }
@@ -1278,7 +1363,7 @@ def build_any_card(
     if obj == "radical":
         return build_radical_card(subject, registry, image_fetcher)
     if obj == "vocabulary":
-        return build_vocab_card(subject)
+        return build_vocab_card(subject, image_fetcher)
     return build_card(subject, registry, image_fetcher)  # kanji
 
 
