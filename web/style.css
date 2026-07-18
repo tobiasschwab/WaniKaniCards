@@ -101,6 +101,16 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .segmented button.active { background: var(--bg-elev); color: var(--text); box-shadow: var(--shadow); }
 .segmented button:hover:not(.active) { color: var(--text); }
 
+/* Chip-Checkboxen (Mehrfachauswahl, optisch wie .segmented) */
+.chipcheck-group { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 4px; gap: 4px; flex-wrap: wrap; }
+.chipcheck {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
+  color: var(--muted); padding: 9px 14px; border-radius: 9px; font-weight: 600; font-size: 13.5px; transition: all .15s;
+}
+.chipcheck input { display: none; }
+.chipcheck.active { background: var(--bg-elev); color: var(--text); box-shadow: var(--shadow); }
+.chipcheck:hover:not(.active) { color: var(--text); }
+
 /* Toggles */
 .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 6px 0 20px; }
 @media (max-width: 480px) { .toggles { grid-template-columns: 1fr; } }

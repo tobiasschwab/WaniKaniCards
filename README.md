@@ -45,7 +45,9 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
 
 ## Drei Wege zu den Karten (Web)
 
-1. **Level-Stapel:** alle **Kanji** oder **Radicals** eines Levels auflisten.
+1. **Level-Stapel:** ein Level auflisten – per Checkbox **Radicals**, **Kanji**
+   und/oder **Vokabeln** kombinieren (mehrere gleichzeitig möglich; alle drei
+   angehakt exportiert den kompletten Levelinhalt in einem Rutsch).
 2. **Vokabel / Kanji (rekursiv):** eine Vokabel oder ein Kanji suchen und über
    die **Komposition absteigen** – die enthaltenen Kanji und Radicals werden
    rekursiv mit aufgelöst (Vokabel → Kanji → Radicals). Mehrere Vokabeln
@@ -238,7 +240,11 @@ druckspezifischen Optionen) und wie gewohnt **erzeugen**.
 
 ![Web-Frontend: Anki-Export](previews/webui_anki.png)
 
-Jeder Kartentyp bekommt einen eigenen Anki-Notiztyp im Look der gedruckten Karten:
+Jeder Kartentyp bekommt einen eigenen Anki-Notiztyp im Look der gedruckten
+Karten – inklusive eines farbigen Streifens oben an der Karte (Radical =
+Türkis, Kanji = Ocker, Vokabel = Violett), damit man in gemischten
+Lernsitzungen auf einen Blick sieht, welcher Kartentyp gerade dran ist. Freie
+Karten bleiben ohne Akzent.
 
 | | Vorderseite | Rückseite |
 |---|---|---|

@@ -304,6 +304,18 @@ class WaniKaniClient:
         self._cache_write(key, data)
         return data
 
+    def fetch_vocabulary(self, level: int) -> list[dict[str, Any]]:
+        """Alle Vokabel-Subjects eines Levels holen (mit Cache)."""
+        key = f"vocabulary_level_{level}"
+        cached = self._cache_read(key)
+        if cached is not None:
+            return cached
+        data = self._fetch_all(
+            "subjects", {"types": "vocabulary", "levels": str(level)}
+        )
+        self._cache_write(key, data)
+        return data
+
     def fetch_subjects(self, ids: Iterable[int]) -> dict[int, dict[str, Any]]:
         """Beliebige Subjects gebündelt nach IDs nachladen → Map {id: subject}.
 
@@ -962,20 +974,45 @@ def _sample_registry() -> dict[int, dict[str, Any]]:
 
 # ---- Web-Tabellen-Modus: auflisten (resolve) und rendern (by ids) --------- #
 
+_LEVEL_TYPE_ORDER = {"radicals": 0, "kanji": 1, "vocabulary": 2}
+_LEVEL_SAMPLE_KEY = {"radicals": "radicals", "kanji": "kanji", "vocabulary": "vocab"}
+
+
 def resolve_level(
-    level: int, deck_type: str, *, use_cache: bool = True, sample: bool = False
+    level: int,
+    deck_types: str | Iterable[str],
+    *,
+    use_cache: bool = True,
+    sample: bool = False,
 ) -> list[dict[str, Any]]:
-    """Alle Kanji bzw. Radicals eines Levels als Tabellen-Beschreibungen."""
+    """Kanji, Radicals und/oder Vokabeln eines Levels als Tabellen-Beschreibungen.
+
+    `deck_types` ist ein einzelner Typ oder eine Liste aus "kanji", "radicals",
+    "vocabulary" – bei mehreren werden die Ergebnisse kombiniert (Reihenfolge:
+    Radicals → Kanji → Vokabeln, dem WaniKani-Lernpfad folgend).
+    """
+    types = [deck_types] if isinstance(deck_types, str) else list(deck_types)
+    types = [t for t in dict.fromkeys(types) if t in _LEVEL_TYPE_ORDER]
+    if not types:
+        raise WaniKaniError(
+            "Bitte mindestens einen Kartentyp auswählen (Radical/Kanji/Vokabel)."
+        )
+    types.sort(key=lambda t: _LEVEL_TYPE_ORDER[t])
+
+    items: list[dict[str, Any]] = []
     if sample:
         raw = _load_sample_raw()
-        items = raw.get("radicals" if deck_type == "radicals" else "kanji", [])
+        for t in types:
+            items.extend(raw.get(_LEVEL_SAMPLE_KEY[t], []))
     else:
         client = _make_client(use_cache=use_cache)
-        items = (
-            client.fetch_radicals(level)
-            if deck_type == "radicals"
-            else client.fetch_kanji(level)
-        )
+        fetchers = {
+            "radicals": client.fetch_radicals,
+            "kanji": client.fetch_kanji,
+            "vocabulary": client.fetch_vocabulary,
+        }
+        for t in types:
+            items.extend(fetchers[t](level))
     if not items:
         raise WaniKaniError(f"Nichts für Level {level} gefunden.")
     return [_subject_descriptor(s) for s in items]

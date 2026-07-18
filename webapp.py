@@ -40,7 +40,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "username": "",
     "defaults": {
         "level": 1,
-        "type": "kanji",
+        "types": ["kanji"],
         "format": "pdf",
         "layout": "a6",
         "paper": "a4",
@@ -268,7 +268,7 @@ def api_config() -> Any:
     return jsonify(
         {
             "layouts": list(kc.LAYOUTS),
-            "types": ["kanji", "radicals"],
+            "types": ["radicals", "kanji", "vocabulary"],
             "formats": ["pdf", "anki"],
             "papers": ["a4", "letter", "a6"],
             "duplex": ["long-edge", "short-edge"],
@@ -334,8 +334,8 @@ def api_resolve() -> Any:
             _apply_token_env()
         if mode == "level":
             level = int(body.get("level"))
-            deck_type = body.get("type", "kanji")
-            cards = kc.resolve_level(level, deck_type, sample=sample)
+            deck_types = body.get("types") or [body.get("type", "kanji")]
+            cards = kc.resolve_level(level, deck_types, sample=sample)
         elif mode == "search":
             cards = kc.search_subjects(str(body.get("q", "")), sample=sample)
         elif mode == "compose":

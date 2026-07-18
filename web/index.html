@@ -59,13 +59,15 @@
           </label>
           <div class="field inline">
             <span class="label">Stapel</span>
-            <div class="segmented" id="type" data-value="kanji">
-              <button data-v="kanji" class="active">Kanji</button>
-              <button data-v="radicals">Radicals</button>
+            <div class="chipcheck-group" id="type">
+              <label class="chipcheck"><input type="checkbox" value="radicals">Radicals</label>
+              <label class="chipcheck active"><input type="checkbox" value="kanji" checked>Kanji</label>
+              <label class="chipcheck"><input type="checkbox" value="vocabulary">Vokabel</label>
             </div>
           </div>
           <button id="btnLevel" class="btn primary">Auflisten</button>
         </div>
+        <p id="levelTypeError" class="error hidden">Bitte mindestens einen Kartentyp auswählen.</p>
       </div>
 
       <!-- Kompositions-Modus -->

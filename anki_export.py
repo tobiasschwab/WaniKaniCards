@@ -188,6 +188,18 @@ _CSS = """
 .night_mode .c-box { background: #2a2620; border-left-color: #4a4237; color: #cfc7ba; }
 """.strip()
 
+# Farbiger Streifen oben an der Karte, je Kartentyp – schnelle visuelle
+# Unterscheidung in gemischten Lernsitzungen. Bewusst andere Farben als die
+# On/Kun/Composition-Zeilen (rot/blau/grün) auf der Kanji-Rückseite, um dort
+# keine Verwechslung zu erzeugen. Frei erstellte Karten bleiben ohne Akzent.
+_TYPE_ACCENT = {"radical": "#2f8f8f", "kanji": "#c97a2b", "vocab": "#7a4fa0"}
+
+
+def _css_with_accent(kind: str) -> str:
+    color = _TYPE_ACCENT[kind]
+    return _CSS + f"\n.card {{ box-shadow: inset 0 4px 0 {color}; }}"
+
+
 _RADICAL_FRONT = """
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage">
@@ -310,7 +322,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 for n in ("Radical", "RadicalImage", "Meaning", "MnemonicHtml", "ExamplesHtml", "TagsHtml")
             ],
             templates=[{"name": "Radical", "qfmt": _RADICAL_FRONT, "afmt": _RADICAL_BACK}],
-            css=_CSS,
+            css=_css_with_accent("radical"),
             sort_field_index=2,
         ),
         "kanji": genanki.Model(
@@ -329,7 +341,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 {"name": "On'yomi", "qfmt": _KANJI_FRONT_ON, "afmt": _KANJI_BACK},
                 {"name": "Kun'yomi", "qfmt": _KANJI_FRONT_KUN, "afmt": _KANJI_BACK},
             ],
-            css=_CSS,
+            css=_css_with_accent("kanji"),
             sort_field_index=0,
         ),
         "vocab": genanki.Model(
@@ -343,7 +355,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 )
             ],
             templates=[{"name": "Vokabel", "qfmt": _VOCAB_FRONT, "afmt": _VOCAB_BACK}],
-            css=_CSS,
+            css=_css_with_accent("vocab"),
             sort_field_index=0,
         ),
         "custom": genanki.Model(

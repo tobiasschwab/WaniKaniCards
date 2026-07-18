@@ -24,8 +24,10 @@ from kanji_cards import (  # noqa: E402
     collect_composition,
     mirror_backside,
     paginate,
+    WaniKaniError,
     pick_example_vocab,
     resolve_composition,
+    resolve_level,
     strip_markup,
 )
 
@@ -395,6 +397,36 @@ def test_resolve_composition_sample():
     assert cards[0]["characters"] == "一人"
     assert "Kanji" in kinds and "Radical" in kinds
     assert len(cards) == 5
+
+
+def test_resolve_level_single_type_string_backward_compat():
+    cards = resolve_level(1, "kanji", sample=True)
+    assert cards and all(c["kind"] == "Kanji" for c in cards)
+
+
+def test_resolve_level_combines_multiple_types_in_order():
+    cards = resolve_level(1, ["kanji", "radicals"], sample=True)
+    kinds = [c["kind"] for c in cards]
+    # Reihenfolge: Radicals vor Kanji (WaniKani-Lernpfad), unabhängig von der
+    # Reihenfolge in der übergebenen Liste.
+    assert kinds.index("Radical") < kinds.index("Kanji")
+    assert "Vocab" not in kinds
+
+
+def test_resolve_level_all_three_types():
+    cards = resolve_level(1, ["radicals", "kanji", "vocabulary"], sample=True)
+    kinds = {c["kind"] for c in cards}
+    assert kinds == {"Radical", "Kanji", "Vocab"}
+
+
+def test_resolve_level_empty_types_raises():
+    with pytest.raises(WaniKaniError):
+        resolve_level(1, [], sample=True)
+
+
+def test_resolve_level_ignores_unknown_types():
+    with pytest.raises(WaniKaniError):
+        resolve_level(1, ["not-a-real-type"], sample=True)
 
 
 def test_build_custom_card_html():

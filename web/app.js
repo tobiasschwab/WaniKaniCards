@@ -48,6 +48,23 @@ function initSegmented(id, onChange) {
     if (onChange) onChange(b.dataset.v);
   }));
 }
+function initChipcheck(id, onChange) {
+  const el = document.getElementById(id);
+  el.querySelectorAll("input[type=checkbox]").forEach((cb) => cb.addEventListener("change", () => {
+    cb.closest(".chipcheck").classList.toggle("active", cb.checked);
+    if (onChange) onChange(chipcheckValues(id));
+  }));
+}
+function chipcheckValues(id) {
+  return [...document.getElementById(id).querySelectorAll("input[type=checkbox]:checked")].map((cb) => cb.value);
+}
+function chipcheckSet(id, values) {
+  const wanted = new Set(values);
+  document.getElementById(id).querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.checked = wanted.has(cb.value);
+    cb.closest(".chipcheck").classList.toggle("active", cb.checked);
+  });
+}
 const segValue = (id) => document.getElementById(id).dataset.value;
 function segSet(id, v) {
   const el = document.getElementById(id);
@@ -64,7 +81,7 @@ async function loadSettings() {
   else { pill.textContent = "Kein Token"; pill.className = "pill pill-warn"; }
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
-  if (d.type) segSet("type", d.type);
+  if (d.types && d.types.length) chipcheckSet("type", d.types);
   if (d.format) segSet("format", d.format);
   if (d.layout) segSet("layout", d.layout);
   if (d.paper) $("#paper").value = d.paper;
@@ -76,7 +93,7 @@ async function loadSettings() {
 }
 async function saveDefaults() {
   const defaults = {
-    level: parseInt($("#level").value, 10) || 1, type: segValue("type"),
+    level: parseInt($("#level").value, 10) || 1, types: chipcheckValues("type"),
     format: segValue("format"),
     layout: segValue("layout"), paper: $("#paper").value, duplex: segValue("duplex"),
     cut_marks: $("#cutmarks").checked, hole: $("#hole").checked,
@@ -390,7 +407,7 @@ async function loadHistory() {
 
 // ---------- Wire up ----------
 document.addEventListener("DOMContentLoaded", () => {
-  initSegmented("type"); initSegmented("duplex"); initSegmented("layout", applyLayoutState);
+  initChipcheck("type"); initSegmented("duplex"); initSegmented("layout", applyLayoutState);
   initSegmented("format", applyFormatState);
   initSegmented("modeTabs", (v) => {
     $("#modeLevel").classList.toggle("hidden", v !== "level");
@@ -419,9 +436,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnLevel").addEventListener("click", async () => {
     const level = parseInt($("#level").value, 10);
     if (!isSample() && !(level >= 1 && level <= 60)) { showResolveError("Level 1–60 angeben."); return; }
-    const type = segValue("type");
-    const list = await resolve({ mode: "level", level, type });
-    if (list) renderTable(list, `Level ${level} · ${type === "radicals" ? "Radicals" : "Kanji"}`, "subject");
+    const types = chipcheckValues("type");
+    $("#levelTypeError").classList.toggle("hidden", types.length > 0);
+    if (!types.length) return;
+    const labels = { radicals: "Radicals", kanji: "Kanji", vocabulary: "Vokabeln" };
+    const list = await resolve({ mode: "level", level, types });
+    if (list) renderTable(list, `Level ${level} · ${types.map((t) => labels[t]).join(" + ")}`, "subject");
   });
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });

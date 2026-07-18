@@ -82,6 +82,26 @@ def test_sentence_html_embeds_audio_player():
 
 
 # --------------------------------------------------------------------------- #
+# Typ-Akzent (farbiger Streifen je Kartentyp)
+# --------------------------------------------------------------------------- #
+
+def test_models_have_distinct_accent_colors():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    for kind in ("radical", "kanji", "vocab"):
+        assert ae._TYPE_ACCENT[kind] in models[kind].css
+    colors = {ae._TYPE_ACCENT[k] for k in ("radical", "kanji", "vocab")}
+    assert len(colors) == 3  # alle drei unterschiedlich
+
+
+def test_custom_model_has_no_accent():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    for color in ae._TYPE_ACCENT.values():
+        assert color not in models["custom"].css
+
+
+# --------------------------------------------------------------------------- #
 # Note-Aufbau & stabile GUIDs
 # --------------------------------------------------------------------------- #
 
