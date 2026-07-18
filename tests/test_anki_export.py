@@ -125,7 +125,17 @@ def test_radical_front_template_has_type_in_meaning():
 
 
 def test_kanji_front_template_has_type_in_meaning_plain():
-    assert "{{type:MeaningPlain}}" in ae._KANJI_FRONT
+    assert "{{type:MeaningPlain}}" in ae._KANJI_FRONT_MEANING
+
+
+def test_kanji_on_template_gated_on_onyomi_primary():
+    assert "{{#OnyomiPrimary}}" in ae._KANJI_FRONT_ON
+    assert "{{type:OnyomiPrimary}}" in ae._KANJI_FRONT_ON
+
+
+def test_kanji_kun_template_gated_on_kunyomi_primary():
+    assert "{{#KunyomiPrimary}}" in ae._KANJI_FRONT_KUN
+    assert "{{type:KunyomiPrimary}}" in ae._KANJI_FRONT_KUN
 
 
 def test_vocab_front_template_has_type_in_meaning_plain():
@@ -182,7 +192,20 @@ def test_export_deck_writes_valid_apkg(tmp_path):
     finally:
         conn.close()
     assert note_count == n
-    assert card_count == n
+    # Kanji-Notizen erzeugen bis zu 3 Karten (Meaning/On'yomi/Kun'yomi), Radicals
+    # genau eine – die Sample-Kanji haben alle beide Lesungsarten, daher exakt
+    # das 3-fache für Kanji + 1-fache für Radicals.
+    assert card_count == len(kanji_cards) * 3 + len(radical_cards)
+
+
+def test_kanji_note_skips_missing_reading_cards(tmp_path):
+    """Ein Kanji ohne Kun'yomi darf keine (leere) Kun'yomi-Karte erzeugen."""
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = Card_(kanji="口", meanings=["Mouth"], onyomi=["こう"], kunyomi=[], subject_id=999)
+    note = ae._kanji_note(genanki, models["kanji"], card)
+    template_names = [models["kanji"].templates[c.ord]["name"] for c in note.cards]
+    assert template_names == ["Meaning", "On'yomi"]  # kein Kun'yomi-Card
 
 
 def test_export_deck_embeds_fonts_as_media():

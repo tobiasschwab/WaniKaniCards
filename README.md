@@ -254,6 +254,16 @@ zeigt beim Aufdecken einen farbigen Vergleich zwischen Eingabe und korrekter
 Antwort. Freie Karten haben keine feste „richtige Antwort" und bleiben reine
 Aufdeck-Karten.
 
+**Kanji: On'yomi und Kun'yomi getrennt abfragen.** Ein Kanji-Subject wird zu
+**bis zu drei Anki-Karten**: „Meaning", „On'yomi", „Kun'yomi" – jede mit
+eigenem Eintippen-Prompt, alle mit derselben ausführlichen Rückseite. Fehlt
+eine Lesungsart (z. B. kein Kun'yomi), erzeugt Anki für dieses Kanji
+automatisch keine leere Karte dafür.
+
+| „On'yomi"-Karte | „Kun'yomi"-Karte |
+|---|---|
+| ![On'yomi eingeben](previews/anki_kanji_onyomi_front.png) | ![Kun'yomi eingeben](previews/anki_kanji_kunyomi_front.png) |
+
 Die WaniKani-Subject-ID (bzw. bei freien Karten deren gespeicherte ID) wird als
 stabile Anki-Notiz-ID verwendet: ein erneuter Export nach Lernfortschritt
 **aktualisiert** bestehende Notizen in Anki, statt sie zu duplizieren. Die

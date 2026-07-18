@@ -215,13 +215,40 @@ _RADICAL_BACK = """
 </div>
 """.strip()
 
-_KANJI_FRONT = """
+_KANJI_FRONT_MEANING = """
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage"><div class="wk-big">{{Kanji}}</div></div>
 <div class="wk-typein">
   <div class="wk-typein-label">Bedeutung eingeben</div>
   {{type:MeaningPlain}}
 </div>
+""".strip()
+
+# Eigene Karte je Lesungsart (statt einer gemeinsamen "Reading"-Karte): On'yomi
+# und Kun'yomi sind unterschiedliche Konzepte und sollen getrennt abgefragt
+# werden. Die {{#…}}-Klammer um den GESAMTEN Vorderseiten-Inhalt sorgt dafür,
+# dass genanki/Anki diese Karte automatisch überspringt, wenn das jeweilige
+# Feld leer ist (z. B. Kanji ohne Kun'yomi) – kein manuelles Filtern nötig.
+_KANJI_FRONT_ON = """
+{{#OnyomiPrimary}}
+<div class="wk-tags">{{TagsHtml}}</div>
+<div class="wk-stage"><div class="wk-big">{{Kanji}}</div></div>
+<div class="wk-typein">
+  <div class="wk-typein-label">On'yomi eingeben</div>
+  {{type:OnyomiPrimary}}
+</div>
+{{/OnyomiPrimary}}
+""".strip()
+
+_KANJI_FRONT_KUN = """
+{{#KunyomiPrimary}}
+<div class="wk-tags">{{TagsHtml}}</div>
+<div class="wk-stage"><div class="wk-big">{{Kanji}}</div></div>
+<div class="wk-typein">
+  <div class="wk-typein-label">Kun'yomi eingeben</div>
+  {{type:KunyomiPrimary}}
+</div>
+{{/KunyomiPrimary}}
 """.strip()
 
 _KANJI_BACK = """
@@ -294,9 +321,14 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 for n in (
                     "Kanji", "MeaningsHtml", "Onyomi", "Kunyomi", "CompositionHtml",
                     "MnemonicsHtml", "VocabHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
+                    "OnyomiPrimary", "KunyomiPrimary",
                 )
             ],
-            templates=[{"name": "Kanji", "qfmt": _KANJI_FRONT, "afmt": _KANJI_BACK}],
+            templates=[
+                {"name": "Meaning", "qfmt": _KANJI_FRONT_MEANING, "afmt": _KANJI_BACK},
+                {"name": "On'yomi", "qfmt": _KANJI_FRONT_ON, "afmt": _KANJI_BACK},
+                {"name": "Kun'yomi", "qfmt": _KANJI_FRONT_KUN, "afmt": _KANJI_BACK},
+            ],
             css=_CSS,
             sort_field_index=0,
         ),
@@ -491,6 +523,8 @@ def _kanji_note(genanki: Any, model: Any, card: kc.Card) -> Any:
         _sentence_html(card.sentence_ja, card.sentence_en, card.sentence_audio_url),
         _tags_html(card.tags),
         _first_plain(card.meanings),
+        _esc(card.onyomi[0]) if card.onyomi else "",
+        _esc(card.kunyomi[0]) if card.kunyomi else "",
     ]
     guid = genanki.guid_for("wkcards", "kanji", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
