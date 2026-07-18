@@ -75,8 +75,10 @@ class Card:
     vocab: str | None = None
     vocab_reading: str | None = None
     vocab_meaning: str | None = None
+    vocab_audio_url: str | None = None
     sentence_ja: str | None = None
     sentence_en: str | None = None
+    sentence_audio_url: str | None = None
     # Zusammensetzung: die Radicals, aus denen das Kanji besteht.
     # Je Eintrag: {"radical": str, "image_uri": str|None, "meaning": str}
     components: list[dict[str, Any]] = field(default_factory=list)
@@ -411,6 +413,24 @@ def _default_tags(kind: str, data: dict[str, Any]) -> list[str]:
     return tags
 
 
+def _pick_audio_url(audios: list[dict[str, Any]] | None) -> str | None:
+    """Erste Audio-URL wählen (mp3 bevorzugt).
+
+    Passt zu WaniKanis `pronunciation_audios` auf Vokabel-Subjects
+    (`[{url, content_type, metadata}, …]`); dieselbe Struktur funktioniert
+    auch für manuell nachgetragene Audios (z. B. für Beispielsätze, die
+    WaniKani selbst nicht vertont).
+    """
+    if not audios:
+        return None
+    mp3 = next(
+        (a for a in audios if a.get("content_type") == "audio/mpeg" and a.get("url")),
+        None,
+    )
+    chosen = mp3 or next((a for a in audios if a.get("url")), None)
+    return chosen.get("url") if chosen else None
+
+
 def _build_components(
     data: dict[str, Any],
     subject_map: dict[int, dict[str, Any]],
@@ -488,10 +508,14 @@ def build_card(
         card.vocab_reading = vreadings[0] if vreadings else None
         vmeanings = _primary_first(vdata.get("meanings", []), "meaning")
         card.vocab_meaning = vmeanings[0] if vmeanings else None
+        card.vocab_audio_url = _pick_audio_url(vdata.get("pronunciation_audios"))
         sentences = vdata.get("context_sentences") or []
         if sentences:
             card.sentence_ja = strip_markup(sentences[0].get("ja"))
             card.sentence_en = strip_markup(sentences[0].get("en"))
+            # WaniKani vertont Beispielsätze selbst nicht – optionales,
+            # manuell nachgetragenes Feld (gleiche Struktur wie pronunciation_audios).
+            card.sentence_audio_url = _pick_audio_url(sentences[0].get("audios"))
     return card
 
 
@@ -757,8 +781,10 @@ def _card_to_dict(
         "vocab": card.vocab,
         "vocab_reading": card.vocab_reading,
         "vocab_meaning": card.vocab_meaning,
+        "vocab_audio_url": card.vocab_audio_url,
         "sentence_ja": card.sentence_ja,
         "sentence_en": card.sentence_en,
+        "sentence_audio_url": card.sentence_audio_url,
         "components": card.components,
         "tags": card.tags,
     }

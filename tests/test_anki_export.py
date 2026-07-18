@@ -66,6 +66,21 @@ def test_vocab_font_size_scales_down_with_length():
     assert ae._vocab_font_size("一") > ae._vocab_font_size("一二三四五")
 
 
+def test_vocab_example_html_embeds_audio_player():
+    html = ae._vocab_example_html("大きい", "おおきい", "Big", audio_url="https://example.test/a.mp3")
+    assert '<audio controls src="https://example.test/a.mp3"></audio>' in html
+
+
+def test_vocab_example_html_without_audio_has_no_player():
+    html = ae._vocab_example_html("大きい", "おおきい", "Big")
+    assert "<audio" not in html
+
+
+def test_sentence_html_embeds_audio_player():
+    html = ae._sentence_html("一から始めましょう。", "Let's start from the beginning.", audio_url="https://example.test/s.mp3")
+    assert '<audio controls src="https://example.test/s.mp3"></audio>' in html
+
+
 # --------------------------------------------------------------------------- #
 # Note-Aufbau & stabile GUIDs
 # --------------------------------------------------------------------------- #

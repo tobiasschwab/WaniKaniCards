@@ -150,10 +150,12 @@ _CSS = """
 .wk-vocab .rd { font-family: "WKSerif", "WKSans", serif; color: #666; font-size: 15px; }
 .night_mode .wk-vocab .rd { color: #aaa; }
 .wk-vocab .gl { color: #666; font-size: 14px; }
+.wk-vocab audio { display: block; margin-top: 5px; width: 100%; max-width: 260px; height: 30px; }
 
 .wk-sentence { margin-top: 8px; }
 .wk-sentence .ja { font-size: 15px; line-height: 1.4; word-break: break-word; }
 .wk-sentence .en { font-size: 13px; color: #808080; font-style: italic; margin-top: 3px; }
+.wk-sentence audio { display: block; margin-top: 5px; width: 100%; max-width: 260px; height: 30px; }
 
 .wk-examples { margin-top: 8px; }
 .wk-examples .ttl { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #111; margin-bottom: 5px; }
@@ -372,7 +374,18 @@ def _examples_html(examples: list[tuple[str, str, str]]) -> str:
     return '<div class="wk-examples"><div class="ttl">Kanji</div>' + "".join(items) + "</div>"
 
 
-def _vocab_example_html(vocab: str | None, reading: str | None, meaning: str | None) -> str:
+def _audio_html(url: str | None) -> str:
+    """Abspielbares <audio>-Element (referenziert die URL direkt statt sie in
+    die apkg-Medien einzubetten – schlank, funktioniert für WaniKani-CDN-URLs
+    und für manuell hinterlegte Audios gleichermaßen)."""
+    if not url:
+        return ""
+    return f'<audio controls src="{_esc(url)}"></audio>'
+
+
+def _vocab_example_html(
+    vocab: str | None, reading: str | None, meaning: str | None, audio_url: str | None = None
+) -> str:
     if not vocab:
         return ""
     head = f'<span class="word">{_esc(vocab)}</span>'
@@ -380,15 +393,16 @@ def _vocab_example_html(vocab: str | None, reading: str | None, meaning: str | N
         head += f'<span class="rd">{_esc(reading)}</span>'
     if meaning:
         head += f'<span class="gl">{_esc(meaning)}</span>'
-    return f'<div class="wk-vocab"><div class="head">{head}</div></div>'
+    return f'<div class="wk-vocab"><div class="head">{head}</div>{_audio_html(audio_url)}</div>'
 
 
-def _sentence_html(ja: str | None, en: str | None) -> str:
+def _sentence_html(ja: str | None, en: str | None, audio_url: str | None = None) -> str:
     if not ja:
         return ""
     out = f'<div class="wk-sentence"><div class="ja">{_esc(ja)}</div>'
     if en:
         out += f'<div class="en">{_esc(en)}</div>'
+    out += _audio_html(audio_url)
     return out + "</div>"
 
 
@@ -448,8 +462,8 @@ def _kanji_note(genanki: Any, model: Any, card: kc.Card) -> Any:
         _esc("、".join(card.kunyomi)),
         _composition_html(card.components),
         _mnemonics_html(card.meaning_mnemonic, card.reading_mnemonic),
-        _vocab_example_html(card.vocab, card.vocab_reading, card.vocab_meaning),
-        _sentence_html(card.sentence_ja, card.sentence_en),
+        _vocab_example_html(card.vocab, card.vocab_reading, card.vocab_meaning, card.vocab_audio_url),
+        _sentence_html(card.sentence_ja, card.sentence_en, card.sentence_audio_url),
         _tags_html(card.tags),
     ]
     guid = genanki.guid_for("wkcards", "kanji", card.subject_id) if card.subject_id else None

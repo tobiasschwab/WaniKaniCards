@@ -14,6 +14,11 @@ const selected = new Set();     // ausgewählte ids (als String)
 let tableMode = "subject";      // "subject" | "custom"
 let pollTimer = null;
 
+// Kompositions-Modus: über mehrere Suchen hinweg angehängte Karten, bis der
+// Nutzer "Tabelle leeren" klickt oder neu startet.
+let composeAccum = [];
+let composeLabels = [];
+
 // ---------- Helpers ----------
 function toast(msg, isErr) {
   const t = $("#toast");
@@ -158,10 +163,30 @@ async function doSearch() {
       <span class="rc-meta"><span class="tag-mini ${c.object}">${escapeHtml(c.kind)}</span> ${escapeHtml(c.meaning)}</span>`;
     b.onclick = async () => {
       const comp = await resolve({ mode: "compose", subject_ids: [c.id] });
-      if (comp) renderTable(comp, `Komposition: ${c.characters || c.meaning}`, "subject");
+      if (comp) appendComposition(comp, c.characters || c.meaning);
     };
     box.append(b);
   }
+}
+
+// Neue Kompositions-Ergebnisse an die bestehende Tabelle anhängen (dedupliziert
+// nach id), statt sie zu ersetzen – so lassen sich mehrere Vokabeln nacheinander
+// kombinieren, bis der Nutzer "Tabelle leeren" klickt.
+function appendComposition(newCards, label) {
+  const seen = new Set(composeAccum.map((x) => String(x.id)));
+  for (const item of newCards) {
+    if (!seen.has(String(item.id))) { composeAccum.push(item); seen.add(String(item.id)); }
+  }
+  if (label) composeLabels.push(label);
+  const title = composeLabels.length && composeLabels.length <= 4
+    ? `Komposition: ${composeLabels.join(", ")}`
+    : "Komposition";
+  renderTable(composeAccum, title, "subject");
+}
+function clearCompose() {
+  composeAccum = []; composeLabels = [];
+  cards = []; selected.clear();
+  $("#tablePanel").classList.add("hidden");
 }
 
 // ---------- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) ----------
@@ -400,6 +425,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+  $("#btnComposeClear").addEventListener("click", clearCompose);
 
   // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)
   document.querySelectorAll(".rt-toolbar button").forEach((b) => {

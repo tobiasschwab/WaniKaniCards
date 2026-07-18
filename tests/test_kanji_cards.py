@@ -208,6 +208,50 @@ def test_build_card_full():
     assert card.sentence_en == "Climb a mountain."
 
 
+def test_build_card_extracts_audio_urls():
+    kanji = {
+        "data": {
+            "characters": "山",
+            "meanings": [{"meaning": "Mountain", "primary": True}],
+            "readings": [{"reading": "さん", "primary": True, "type": "onyomi"}],
+            "amalgamation_subject_ids": [77],
+        }
+    }
+    vmap = {
+        77: {
+            "id": 77,
+            "data": {
+                "level": 1,
+                "characters": "山",
+                "meanings": [{"meaning": "Mountain", "primary": True}],
+                "readings": [{"reading": "やま", "primary": True}],
+                "context_sentences": [
+                    {
+                        "ja": "山に登る。",
+                        "en": "Climb a mountain.",
+                        "audios": [{"url": "https://example.test/sentence.mp3", "content_type": "audio/mpeg"}],
+                    }
+                ],
+                # WaniKani-Schema: mehrere Stimmen, mp3 bevorzugt
+                "pronunciation_audios": [
+                    {"url": "https://example.test/vocab.ogg", "content_type": "audio/ogg"},
+                    {"url": "https://example.test/vocab.mp3", "content_type": "audio/mpeg"},
+                ],
+            },
+        }
+    }
+    card = build_card(kanji, vmap)
+    assert card.vocab_audio_url == "https://example.test/vocab.mp3"  # mp3 bevorzugt
+    assert card.sentence_audio_url == "https://example.test/sentence.mp3"
+
+
+def test_build_card_without_audio_fields_stays_none():
+    kanji = {"data": {"characters": "口", "meanings": [{"meaning": "Mouth", "primary": True}]}}
+    card = build_card(kanji, {})
+    assert card.vocab_audio_url is None
+    assert card.sentence_audio_url is None
+
+
 def test_build_card_resolves_composition():
     kanji = {
         "data": {

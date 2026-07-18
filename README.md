@@ -13,7 +13,13 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 - **Rückseite:** das Kanji als Referenz (oben, etwas größer als der Text) ·
   Bedeutungen · Lesungen (On/Kun) · **Zusammensetzung** (die Radicals, aus denen
   das Kanji besteht, mit Bedeutung) · **Eselsbrücken** (Mnemonic & Reading) ·
-  eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung.
+  eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung – beide
+  optional mit **Vertonung** (`vocab_audio_url` / `sentence_audio_url` auf der
+  `Card`): im PDF ein dezenter, klickbarer „Audio“-Link, im Anki-Export ein
+  abspielbarer Player. Vokabel-Audio wird automatisch aus WaniKanis
+  `pronunciation_audios` übernommen; für Beispielsätze liefert WaniKani selbst
+  keine Vertonung – dieses Feld (`context_sentences[0].audios`, gleiches
+  Schema) lässt sich manuell in den Subject-Daten nachtragen.
 
 **Radical-Karten**
 
@@ -41,7 +47,9 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
 1. **Level-Stapel:** alle **Kanji** oder **Radicals** eines Levels auflisten.
 2. **Vokabel / Kanji (rekursiv):** eine Vokabel oder ein Kanji suchen und über
    die **Komposition absteigen** – die enthaltenen Kanji und Radicals werden
-   rekursiv mit aufgelöst (Vokabel → Kanji → Radicals).
+   rekursiv mit aufgelöst (Vokabel → Kanji → Radicals). Mehrere Vokabeln
+   nacheinander suchen und anklicken **hängt** deren Kompositionen an dieselbe
+   Tabelle an (dedupliziert); **„Tabelle leeren“** setzt zurück.
 3. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
@@ -85,6 +93,11 @@ Weitere Eigenschaften:
 | Vorderseite | Rückseite |
 |---|---|
 | ![Komposition vorne](previews/composition_front.png) | ![Komposition hinten](previews/composition_back.png) |
+
+Mehrere Vokabeln nacheinander gesucht und angeklickt – die Kompositionen hängen
+sich an dieselbe Tabelle an (hier 一人 + 大きい, 8 Karten kombiniert):
+
+![Web-Frontend: Komposition anhängen](previews/webui_compose_append.png)
 
 **Radicals** und **A6 (eine Karte/Seite)**:
 
