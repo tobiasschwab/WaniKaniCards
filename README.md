@@ -524,8 +524,19 @@ pytest
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 `paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`annotate_text`
 (Text-Modus, inkl. Wörterbuch-Fallback), `dictionary.py` (JMdict-Download/
--Index, DeepL-Übersetzung, gemockt statt Live-Netzwerk), `KanaCard`-Bau sowie
-das Auflösen bereits exportierter bzw. manuell als bekannt markierter
-Subject-/Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen
-im Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/
-`save_known`, `webapp.api_wortliste`, `anki_export._kana_note`).
+-Index, DeepL-Übersetzung), `KanaCard`-Bau sowie das Auflösen bereits
+exportierter bzw. manuell als bekannt markierter Subject-/Dictionary-IDs,
+die Wortlisten-Aggregation und die Anki-Notiztypen im Web-Frontend
+(`webapp._already_exported_ids`, `webapp.load_known`/`save_known`,
+`webapp.api_wortliste`, `anki_export._kana_note`).
+
+Die Test-Suite selbst läuft gemockt (kein Netzwerkzugriff nötig, `pytest`
+ist offline lauffähig). Live gegen echte Endpunkte verifiziert wurden
+zusätzlich: WaniKani-API (Subjects, Text-Modus end-to-end inkl. Anki-Export)
+und DeepL (`translate_sentence`, mit `:fx`-Free-Key gegen
+`api-free.deepl.com`) – beide funktionieren wie erwartet. Der JMdict-Download
+selbst (`dictionary.download_jmdict()` gegen die echte GitHub-Releases-API
+von `scriptin/jmdict-simplified`) konnte in der Entwicklungsumgebung aus
+Netzwerk-Policy-Gründen noch nicht live getestet werden; der übrige
+Dictionary-Pfad (Index-Aufbau, Kartenerstellung, Anki-Export) wurde mit
+einem simulierten Index-Eintrag live durchgespielt und funktioniert.
