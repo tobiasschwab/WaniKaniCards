@@ -159,6 +159,41 @@ def test_custom_note_passes_html_through_unescaped():
     assert note.fields[1] == "<b>x</b>"
 
 
+def test_kana_note_fields():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(
+        word="しあい", kanji_hint="試合", meaning="match; game; contest",
+        sentence_ja="しあいがはじまりました。", sentence_translation="Das Spiel hat begonnen.",
+        tags=["Dictionary"], card_id="kana_abc",
+    )
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert note.fields[0] == "しあい"
+    assert note.fields[1] == "match; game; contest"
+    assert "試合" in note.fields[2]
+    assert "しあいがはじまりました" in note.fields[3]
+    assert "Das Spiel hat begonnen." in note.fields[3]
+    assert "Dictionary" in note.fields[4]
+    assert note.fields[5] == "match"  # MeaningPlain: nur der erste Gloss-Eintrag
+
+
+def test_kana_note_without_kanji_hint_omits_it():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(word="さあ", kanji_hint=None, meaning="well now", card_id="kana_saa")
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert note.fields[2] == ""
+
+
+def test_note_for_dispatches_kana_card():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(word="しあい", meaning="match", card_id="kana_x")
+    note = ae._note_for(genanki, models, card)
+    assert note is not None
+    assert note.fields[0] == "しあい"
+
+
 def Card_(**kwargs):
     """Kleiner Helfer: Card mit sinnvollen Defaults für die Guid-Tests."""
     return kc.Card(**kwargs)
@@ -272,7 +307,20 @@ def test_export_deck_embeds_fonts_as_media():
                 "_NotoSansJP-Regular.ttf",
                 "_NotoSansJP-Bold.ttf",
                 "_NotoSerifJP-SemiBold.ttf",
+                "_wanakana.min.js",
             }
+
+
+def test_onyomi_kunyomi_templates_bind_wanakana_to_typeans():
+    """Romaji->Kana-Live-Konvertierung nur an den Lesungs-Type-in-Feldern
+    (nicht an der Bedeutung, die auf Englisch eingetippt wird)."""
+    assert '<script src="_wanakana.min.js">' in ae._KANJI_FRONT_ON
+    assert 'wanakana.bind(answerDiv)' in ae._KANJI_FRONT_ON
+    assert '<script src="_wanakana.min.js">' in ae._KANJI_FRONT_KUN
+    assert 'wanakana.bind(answerDiv)' in ae._KANJI_FRONT_KUN
+    assert "wanakana" not in ae._KANJI_FRONT_MEANING
+    assert "wanakana" not in ae._VOCAB_FRONT
+    assert "wanakana" not in ae._RADICAL_FRONT
 
 
 def test_export_deck_skips_cover_and_raises_if_nothing_left():

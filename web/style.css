@@ -10,6 +10,7 @@
   --ok: #16a34a;
   --warn: #d97706;
   --err: #dc2626;
+  --known-manual: #db2777;
   --radius: 16px;
   --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -201,11 +202,21 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .tag-mini.kanji { color: var(--accent); border-color: #d8ccfb; background: rgba(109,59,245,.08); }
 .tag-mini.radical { color: #0891b2; border-color: #bae6f2; background: rgba(0,180,216,.08); }
 .tag-mini.vocabulary { color: #a2792e; border-color: #ecd9b0; background: rgba(162,121,46,.08); }
+.tag-mini.dictionary { color: #00889e; border-color: #a6e6f2; background: rgba(0,180,216,.08); }
+.tag-mini.manual { color: var(--known-manual); border-color: #f6bfdd; background: rgba(219,39,119,.08); }
 .tag-mini.exported { color: #16a34a; border-color: #bbf1cf; background: rgba(22,163,74,.08); margin-left: 6px; }
 .cards-table tbody tr.is-exported { opacity: .55; }
 
 .c-act { width: 74px; text-align: right; white-space: nowrap; }
 .c-act .chip-btn { padding: 4px 8px; }
+
+/* Wortliste */
+.wl-list { margin-top: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.wl-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+.wl-row:last-child { border-bottom: 0; }
+.wl-char { font-size: 18px; font-weight: 700; min-width: 84px; }
+.wl-meaning { flex: 1; color: var(--text); font-size: 14px; }
+.wl-badges { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 
 textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-height: 1.5; }
 
@@ -248,13 +259,21 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .text-display .text-line { margin: 0 0 10px; }
 .text-display .text-line:last-child { margin-bottom: 0; }
 .word-token { cursor: pointer; border-radius: 4px; padding: 0 1px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
-.word-token.unknown { color: var(--accent); text-decoration-color: var(--accent); }
-.word-token.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-token.unknown-wanikani { color: var(--accent); text-decoration-color: var(--accent); }
+.word-token.unknown-dictionary { color: var(--warn); text-decoration-color: var(--warn); }
+.word-token.known-wanikani { color: var(--ok); text-decoration-color: var(--ok); }
+.word-token.known-dictionary { color: var(--accent-2); text-decoration-color: var(--accent-2); }
+.word-token.known-manual { color: var(--known-manual); text-decoration-color: var(--known-manual); }
 .word-token:hover { background: rgba(109,59,245,.1); }
-.word-token.known:hover { background: rgba(22,163,74,.1); }
+.word-token.known-wanikani:hover { background: rgba(22,163,74,.1); }
+.word-token.known-dictionary:hover { background: rgba(0,180,216,.1); }
+.word-token.known-manual:hover { background: rgba(219,39,119,.1); }
 .word-legend { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
-.word-legend.unknown { color: var(--accent); text-decoration-color: var(--accent); }
-.word-legend.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-legend.unknown-wanikani { color: var(--accent); text-decoration-color: var(--accent); }
+.word-legend.unknown-dictionary { color: var(--warn); text-decoration-color: var(--warn); }
+.word-legend.known-wanikani { color: var(--ok); text-decoration-color: var(--ok); }
+.word-legend.known-dictionary { color: var(--accent-2); text-decoration-color: var(--accent-2); }
+.word-legend.known-manual { color: var(--known-manual); text-decoration-color: var(--known-manual); }
 
 /* Wort-Popup */
 .word-popup {

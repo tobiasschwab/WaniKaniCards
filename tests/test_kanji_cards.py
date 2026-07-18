@@ -22,19 +22,27 @@ from kanji_cards import (  # noqa: E402
     build_cover_radicals,
     build_radical_card,
     build_vocab_card,
+    build_kana_card,
+    build_kana_card_from_dict,
+    KanaCard,
     collect_composition,
     mirror_backside,
     paginate,
     WaniKaniError,
     pick_example_vocab,
     resolve_composition,
+    resolve_subject_ids,
     resolve_level,
     annotate_text,
     strip_markup,
     lemmatize_text,
+    kana_card_id,
     _resolve_audio_url,
     _split_sentences,
+    _is_kana_only,
 )
+
+import dictionary as dic
 
 
 # --------------------------------------------------------------------------- #
@@ -533,6 +541,23 @@ def test_resolve_composition_sample():
     assert len(cards) == 5
 
 
+def test_resolve_subject_ids_returns_only_requested_subjects_no_descent():
+    # 一人 (id 2481) hat Komponenten (一, 人 usw.) - resolve_subject_ids soll
+    # NICHT absteigen, nur die angeforderte ID selbst liefern.
+    cards = resolve_subject_ids([2481], sample=True)
+    assert len(cards) == 1
+    assert cards[0]["characters"] == "一人"
+
+
+def test_resolve_subject_ids_preserves_order_and_dedupes():
+    cards = resolve_subject_ids([2481, 2467, 2481], sample=True)
+    assert [c["id"] for c in cards] == [2481, 2467]
+
+
+def test_resolve_subject_ids_empty_list():
+    assert resolve_subject_ids([], sample=True) == []
+
+
 def test_resolve_level_single_type_string_backward_compat():
     cards = resolve_level(1, "kanji", sample=True)
     assert cards and all(c["kind"] == "Kanji" for c in cards)
@@ -719,6 +744,72 @@ def test_annotate_text_empty_string_returns_single_empty_line():
     assert annotate_text("", sample=True) == [[]]
 
 
+def test_annotate_text_wanikani_words_carry_source_field():
+    lines = annotate_text("大きい山に人が一人います。", sample=True)
+    words = [s for s in lines[0] if s["type"] == "word"]
+    assert words and all(s["source"] == "wanikani" for s in words)
+
+
+# --------------------------------------------------------------------------- #
+# _is_kana_only
+# --------------------------------------------------------------------------- #
+
+def test_is_kana_only_true_for_pure_hiragana():
+    assert _is_kana_only("しあい") is True
+
+
+def test_is_kana_only_false_when_kanji_present():
+    assert _is_kana_only("試合") is False
+
+
+def test_is_kana_only_false_for_empty_string():
+    assert _is_kana_only("") is False
+
+
+# --------------------------------------------------------------------------- #
+# annotate_text: JMdict-Fallback für kana-only Wörter ohne WaniKani-Treffer
+# --------------------------------------------------------------------------- #
+
+def test_annotate_text_falls_back_to_dictionary_for_kana_only_unmatched_word(monkeypatch):
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
+    lines = annotate_text("しあいがはじまりました。", sample=True)
+    words = [s for s in lines[0] if s["type"] == "word"]
+    assert len(words) == 1
+    seg = words[0]
+    assert seg["source"] == "dictionary"
+    assert seg["kind"] == "Dict"
+    assert seg["text"] == "しあい"
+    assert seg["meaning"] == "match; game"
+    assert seg["kanji_hint"] == "試合"
+    assert seg["id"] == kana_card_id("しあい")
+    assert seg["sentence"] == "しあいがはじまりました。"
+
+
+def test_annotate_text_does_not_dictionary_fallback_for_kanji_words(monkeypatch):
+    # "試合" enthält Kanji -> auch ohne WaniKani-Treffer KEIN JMdict-Fallback
+    # (der Nutzer soll das dann als Kanji lernen, nicht als Hiragana-Karte).
+    monkeypatch.setattr(dic, "_index_cache", {"試合": {"kanji": None, "meaning": "should not be used"}})
+    lines = annotate_text("試合があります。", sample=True)
+    words = [s for s in lines[0] if s["type"] == "word"]
+    assert words == []
+
+
+def test_annotate_text_no_dictionary_fallback_when_jmdict_has_no_entry(monkeypatch):
+    monkeypatch.setattr(dic, "_index_cache", {})
+    lines = annotate_text("ぜんぜんちがう。", sample=True)
+    words = [s for s in lines[0] if s["type"] == "word"]
+    assert words == []
+
+
+def test_annotate_text_wanikani_match_wins_over_dictionary_fallback(monkeypatch):
+    # "大きい" hat sowohl einen WaniKani-Treffer (Sample-Daten) als auch einen
+    # JMdict-Eintrag -> WaniKani gewinnt (kommt vor dem Fallback-Zweig).
+    monkeypatch.setattr(dic, "_index_cache", {"大きい": {"kanji": None, "meaning": "should not be used"}})
+    lines = annotate_text("大きい山です。", sample=True)
+    seg = next(s for s in lines[0] if s["type"] == "word" and s["lemma"] == "大きい")
+    assert seg["source"] == "wanikani"
+
+
 # --------------------------------------------------------------------------- #
 # Text-Modus: eigener Beispielsatz überschreibt WaniKanis erste context_sentence
 # --------------------------------------------------------------------------- #
@@ -850,3 +941,88 @@ def test_resolve_subject_deck_normalizes_string_keyed_overrides():
     vocab_cards = {c.subject_id: c for c in deck if isinstance(c, VocabCard)}
     for sid, override in overrides.items():
         assert vocab_cards[sid].sentence_ja == override["ja"]
+
+
+# --------------------------------------------------------------------------- #
+# KanaCard: Dictionary-Karten für Wörter ohne WaniKani-Treffer (Text-Modus)
+# --------------------------------------------------------------------------- #
+
+def test_kana_card_id_is_stable_and_deterministic():
+    assert kana_card_id("しあい") == kana_card_id("しあい")
+    assert kana_card_id("しあい") != kana_card_id("べつのことば")
+    assert kana_card_id("しあい").startswith("kana_")
+
+
+def test_build_kana_card_looks_up_jmdict(monkeypatch):
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
+    card = build_kana_card("しあい", sentence="しあいがはじまりました。")
+    assert isinstance(card, KanaCard)
+    assert card.word == "しあい"
+    assert card.kanji_hint == "試合"
+    assert card.meaning == "match; game"
+    assert card.sentence_ja == "しあいがはじまりました。"
+    assert card.sentence_translation is None
+    assert card.tags == ["Dictionary"]
+    assert card.card_id == kana_card_id("しあい")
+
+
+def test_build_kana_card_returns_none_when_not_in_dictionary(monkeypatch):
+    monkeypatch.setattr(dic, "_index_cache", {})
+    assert build_kana_card("ぜんぜんちがう") is None
+
+
+def test_build_kana_card_translates_sentence_when_deepl_key_given(monkeypatch):
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
+    calls = []
+
+    def fake_translate(text, key, **kwargs):
+        calls.append((text, key))
+        return "Das Spiel hat begonnen."
+
+    card = build_kana_card(
+        "しあい", sentence="しあいがはじまりました。", deepl_key="dummy:fx", translate_fn=fake_translate
+    )
+    assert card.sentence_translation == "Das Spiel hat begonnen."
+    assert calls == [("しあいがはじまりました。", "dummy:fx")]
+
+
+def test_build_kana_card_skips_translation_without_deepl_key(monkeypatch):
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
+    card = build_kana_card("しあい", sentence="しあいがはじまりました。")
+    assert card.sentence_translation is None
+
+
+def test_build_kana_card_from_dict_roundtrip():
+    d = {
+        "id": "kana_abc123",
+        "word": "しあい",
+        "kanji_hint": "試合",
+        "meaning": "match; game",
+        "sentence_ja": "しあいがはじまりました。",
+        "sentence_translation": "Das Spiel hat begonnen.",
+        "tags": ["Dictionary"],
+    }
+    card = build_kana_card_from_dict(d)
+    assert card == KanaCard(
+        word="しあい",
+        kanji_hint="試合",
+        meaning="match; game",
+        sentence_ja="しあいがはじまりました。",
+        sentence_translation="Das Spiel hat begonnen.",
+        tags=["Dictionary"],
+        card_id="kana_abc123",
+    )
+
+
+def test_card_to_dict_serializes_kana_card():
+    from kanji_cards import _card_to_dict
+
+    card = KanaCard(
+        word="しあい", kanji_hint="試合", meaning="match", sentence_ja="文。",
+        sentence_translation="Übersetzung.", tags=["Dictionary"], card_id="kana_x",
+    )
+    d = _card_to_dict(card)
+    assert d["type"] == "kana"
+    assert d["word"] == "しあい"
+    assert d["kanji_hint"] == "試合"
+    assert d["sentence_translation"] == "Übersetzung."

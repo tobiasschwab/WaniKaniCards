@@ -8,6 +8,7 @@ unter ``WKCARDS_DATA`` (Default: ``./data``).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -26,12 +27,14 @@ HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
 SETTINGS_FILE = DATA_DIR / "settings.json"
 KNOWN_FILE = DATA_DIR / "known.json"
+KNOWN_META_FILE = DATA_DIR / "known_meta.json"
 OUTPUT_DIR = DATA_DIR / "output"
 JOBS_DIR = DATA_DIR / "jobs"
 CUSTOM_DIR = DATA_DIR / "customcards"
+KANA_DIR = DATA_DIR / "kanacards"
 WEB_DIR = HERE / "web"
 
-for _d in (DATA_DIR, OUTPUT_DIR, JOBS_DIR, CUSTOM_DIR):
+for _d in (DATA_DIR, OUTPUT_DIR, JOBS_DIR, CUSTOM_DIR, KANA_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 _export_lock = threading.Lock()
@@ -39,6 +42,7 @@ _export_lock = threading.Lock()
 DEFAULT_SETTINGS: dict[str, Any] = {
     "token": "",
     "username": "",
+    "deepl_key": "",
     "defaults": {
         "level": 1,
         "types": ["kanji"],
@@ -75,10 +79,11 @@ def save_settings(data: dict[str, Any]) -> None:
     )
 
 
-def load_known() -> set[int]:
-    """Subject-IDs, die manuell als „bekannt" markiert wurden (Text-Modus) –
-    unabhängig vom Export-Verlauf, z. B. für Wörter, die man von woanders
-    schon kann."""
+def load_known() -> set[int | str]:
+    """IDs, die manuell als „bekannt" markiert wurden (Text-Modus) – unabhängig
+    vom Export-/Karten-Verlauf, z. B. für Wörter, die man von woanders schon
+    kann. WaniKani-Subject-IDs bleiben int, Dictionary-Wörter (`kana_…`) sind
+    str – beide zusammen in derselben Datei, da beide „bekannt" bedeuten."""
     if not KNOWN_FILE.is_file():
         return set()
     try:
@@ -86,18 +91,38 @@ def load_known() -> set[int]:
     except (OSError, json.JSONDecodeError):
         return set()
     ids = data.get("ids") if isinstance(data, dict) else None
-    out: set[int] = set()
+    out: set[int | str] = set()
     for i in ids or []:
-        try:
-            out.add(int(i))
-        except (TypeError, ValueError):
+        if isinstance(i, bool):
             continue
+        if isinstance(i, int) or (isinstance(i, str) and i):
+            out.add(i)
     return out
 
 
-def save_known(ids: set[int]) -> None:
+def save_known(ids: set[int | str]) -> None:
     KNOWN_FILE.write_text(
-        json.dumps({"ids": sorted(ids)}, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps({"ids": sorted(ids, key=str)}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def load_known_meta() -> dict[str, dict[str, Any]]:
+    """Anzeige-Metadaten (characters/meaning/kind/level/source) zu manuell
+    bekannt markierten IDs – nötig für die Wortliste, u. a. weil rein manuelle
+    Einträge (`manual_…`) gar keine Karte/keinen WaniKani-Subject haben, aus
+    dem sich die Anzeige sonst herleiten ließe."""
+    if not KNOWN_META_FILE.is_file():
+        return {}
+    try:
+        data = json.loads(KNOWN_META_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_known_meta(meta: dict[str, dict[str, Any]]) -> None:
+    KNOWN_META_FILE.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 
@@ -243,7 +268,76 @@ def _custom_descriptor(card: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ---------- Dictionary-Karten (kanacards/) – Text-Modus, kein WaniKani-Treffer #
+
+def _kana_path(kid: str) -> Path:
+    safe = "".join(c for c in kid if c.isalnum() or c == "_")
+    return KANA_DIR / f"{safe}.json"
+
+
+def read_kana(kid: str) -> dict[str, Any] | None:
+    p = _kana_path(kid)
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_kana(card: dict[str, Any]) -> None:
+    _kana_path(card["id"]).write_text(
+        json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def list_kana() -> list[dict[str, Any]]:
+    out = []
+    for p in KANA_DIR.glob("*.json"):
+        try:
+            out.append(json.loads(p.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    out.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+    return out
+
+
+def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": card["id"],
+        "object": "dictionary",
+        "kind": "Dict",
+        "characters": card.get("word", ""),
+        "meaning": card.get("meaning", ""),
+        "level": None,
+        "has_image": False,
+    }
+
+
 # ---------- Render-Worker ---------------------------------------------------- #
+
+def _build_mixed_deck(p: dict[str, Any]) -> list[Any]:
+    """Kombinierten Stapel aus WaniKani-Subjects, eigenen und Dictionary-
+    Karten bauen – alle drei Quellen können in einem Export landen (z. B.
+    Text-Modus: WaniKani-Vokabel + Dictionary-Wort zusammen ausgewählt)."""
+    deck: list[Any] = []
+    if p.get("subject_ids"):
+        deck.extend(
+            kc.resolve_subject_deck(
+                p["subject_ids"],
+                use_cache=p.get("use_cache", True),
+                sample=p.get("sample", False),
+                sentence_overrides=p.get("sentence_overrides"),
+            )
+        )
+    if p.get("custom_ids"):
+        datas = [read_custom(cid) for cid in p["custom_ids"]]
+        deck.extend(kc.build_custom_card(d) for d in datas if d)
+    if p.get("kana_ids"):
+        datas = [read_kana(kid) for kid in p["kana_ids"]]
+        deck.extend(kc.build_kana_card_from_dict(d) for d in datas if d)
+    return deck
+
 
 def _run_render(job_id: str) -> None:
     job = read_job(job_id)
@@ -259,8 +353,8 @@ def _run_render(job_id: str) -> None:
         anki = p.get("format") == "anki"
         out_path = OUTPUT_DIR / (f"{job_id}.apkg" if anki else f"{job_id}.pdf")
         try:
-            # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-Karten,
-            # kein Demo-Modus) gerendert werden.
+            # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-/
+            # Dictionary-Karten, kein Demo-Modus) gerendert werden.
             needs_token = bool(p.get("subject_ids")) and not p.get("sample")
             if needs_token and not _apply_token_env():
                 raise kc.WaniKaniError(
@@ -268,45 +362,28 @@ def _run_render(job_id: str) -> None:
                 )
             _apply_token_env()
 
+            deck = _build_mixed_deck(p)
+            if not deck:
+                raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
+
             if anki:
                 deck_name = job.get("title") or "WaniKani Card Studio"
-                if p.get("custom_ids"):
-                    datas = [read_custom(cid) for cid in p["custom_ids"]]
-                    datas = [d for d in datas if d]
-                    _, n = ae.export_custom(datas, out_path, deck_name=deck_name)
-                else:
-                    _, n = ae.export_subjects(
-                        p["subject_ids"],
-                        out_path,
-                        deck_name=deck_name,
-                        use_cache=p.get("use_cache", True),
-                        sample=p.get("sample", False),
-                        sentence_overrides=p.get("sentence_overrides"),
-                    )
+                _, n = ae.export_deck(deck, out_path, deck_name=deck_name)
             else:
-                common = dict(
+                username = load_settings().get("username", "")
+                if not p.get("sample") and not username:
+                    username = ""  # kein Token → kein Name
+                kc.render_deck(
+                    deck,
+                    out_path,
                     layout=p.get("layout", "a6"),
                     paper=p.get("paper", "a4"),
                     duplex=p.get("duplex", "long-edge"),
                     cut_marks=p.get("cut_marks", True),
                     hole=p.get("hole", False),
-                    username=load_settings().get("username", ""),
+                    username=username,
                 )
-                if p.get("custom_ids"):
-                    datas = [read_custom(cid) for cid in p["custom_ids"]]
-                    datas = [d for d in datas if d]
-                    _, n = kc.render_custom(datas, out_path, **common)
-                else:
-                    if not p.get("sample") and not common["username"]:
-                        common["username"] = ""  # kein Token → kein Name
-                    _, n = kc.render_subjects(
-                        p["subject_ids"],
-                        out_path,
-                        use_cache=p.get("use_cache", True),
-                        sample=p.get("sample", False),
-                        sentence_overrides=p.get("sentence_overrides"),
-                        **common,
-                    )
+                n = len(deck)
             job["status"] = "done"
             job["n_cards"] = n
             job["filename"] = out_path.name
@@ -339,8 +416,15 @@ def api_config() -> Any:
 def api_get_settings() -> Any:
     s = load_settings()
     token = s.get("token", "")
+    deepl_key = s.get("deepl_key", "")
     return jsonify(
-        {"token_set": bool(token), "token_hint": _mask(token), "defaults": s["defaults"]}
+        {
+            "token_set": bool(token),
+            "token_hint": _mask(token),
+            "deepl_key_set": bool(deepl_key),
+            "deepl_key_hint": _mask(deepl_key),
+            "defaults": s["defaults"],
+        }
     )
 
 
@@ -351,6 +435,8 @@ def api_post_settings() -> Any:
     if isinstance(body.get("token"), str):
         s["token"] = body["token"].strip()
         s["username"] = _fetch_username(s["token"])  # für den Kartenaufdruck
+    if isinstance(body.get("deepl_key"), str):
+        s["deepl_key"] = body["deepl_key"].strip()
     if isinstance(body.get("defaults"), dict):
         s["defaults"] = {**s["defaults"], **body["defaults"]}
     save_settings(s)
@@ -415,10 +501,16 @@ def api_resolve() -> Any:
 def api_text_annotate() -> Any:
     """Text lemmatisieren und zeilenweise annotieren (kein Auto-Hinzufügen).
 
-    Jedes erkannte Wort trägt `already_exported` (aus dem Job-Verlauf) und
-    `manually_known` (manuell markiert, siehe `/api/known`) – `known` ist die
-    Vereinigung aus beiden und treibt sowohl die Text-Einfärbung als auch die
-    „Prozent bekannt"-Statistik im Frontend.
+    Jedes erkannte Wort bekommt zwei rohe Signale (fürs clientseitige
+    Umschalten von „bekannt" ohne Server-Roundtrip):
+    - `manually_known` (bool) – manuell als bekannt markiert (`/api/known`).
+    - `ready`          (bool) – Karte dafür existiert bereits
+                                 (WaniKani exportiert bzw. Dictionary-Karte erstellt).
+    Daraus abgeleitet (bereits serverseitig berechnet, zur Bequemlichkeit):
+    - `status` – einer von `known_manual` / `known_wanikani` / `known_dictionary`
+                 / `unknown_wanikani` / `unknown_dictionary`.
+    - `known`  – `manually_known or ready`, treibt die „Prozent bekannt"-Statistik
+                 (Vorkommen-basiert, nicht nur eindeutige Wörter).
     """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", ""))
@@ -432,18 +524,23 @@ def api_text_annotate() -> Any:
 
     exported = _already_exported_ids()
     known_manual = load_known()
+    created_kana = {c["id"] for c in list_kana()}
     total = 0
     known_count = 0
     for line in lines:
         for seg in line:
             if seg.get("type") != "word":
                 continue
-            sid = int(seg["id"])
-            is_exported = sid in exported
+            is_dict = seg.get("source") == "dictionary"
+            sid: int | str = str(seg["id"]) if is_dict else int(seg["id"])
             is_manual = sid in known_manual
-            seg["already_exported"] = is_exported
+            is_ready = sid in (created_kana if is_dict else exported)
+            kind = "dictionary" if is_dict else "wanikani"
+            status = "known_manual" if is_manual else (f"known_{kind}" if is_ready else f"unknown_{kind}")
             seg["manually_known"] = is_manual
-            seg["known"] = is_exported or is_manual
+            seg["ready"] = is_ready
+            seg["status"] = status
+            seg["known"] = is_manual or is_ready
             total += 1
             if seg["known"]:
                 known_count += 1
@@ -456,20 +553,151 @@ def api_text_annotate() -> Any:
     )
 
 
-@app.post("/api/known/<int:subject_id>")
-def api_mark_known(subject_id: int) -> Any:
-    ids = load_known()
-    ids.add(subject_id)
-    save_known(ids)
-    return jsonify({"ok": True, "id": subject_id, "known": True})
+def _coerce_known_id(raw: str) -> int | str:
+    """WaniKani-Subject-IDs sind rein numerisch -> int; Dictionary-Wörter
+    (`kana_…`) bleiben str."""
+    return int(raw) if raw.isdigit() else raw
 
 
-@app.delete("/api/known/<int:subject_id>")
-def api_unmark_known(subject_id: int) -> Any:
+_KNOWN_META_FIELDS = ("characters", "meaning", "kind", "level", "source")
+
+
+@app.post("/api/known/<string:word_id>")
+def api_mark_known(word_id: str) -> Any:
+    coerced = _coerce_known_id(word_id)
     ids = load_known()
-    ids.discard(subject_id)
+    ids.add(coerced)
     save_known(ids)
-    return jsonify({"ok": True, "id": subject_id, "known": False})
+    body = request.get_json(silent=True) or {}
+    fields = {k: body[k] for k in _KNOWN_META_FIELDS if k in body}
+    if fields:
+        meta = load_known_meta()
+        meta[str(coerced)] = {**meta.get(str(coerced), {}), **fields}
+        save_known_meta(meta)
+    return jsonify({"ok": True, "id": coerced, "known": True})
+
+
+@app.delete("/api/known/<string:word_id>")
+def api_unmark_known(word_id: str) -> Any:
+    coerced = _coerce_known_id(word_id)
+    ids = load_known()
+    ids.discard(coerced)
+    save_known(ids)
+    meta = load_known_meta()
+    if str(coerced) in meta:
+        del meta[str(coerced)]
+        save_known_meta(meta)
+    return jsonify({"ok": True, "id": coerced, "known": False})
+
+
+# ---------- API: Wortliste (alle bekannten Wörter, gefiltert/entfernbar) ---- #
+
+@app.get("/api/wortliste")
+def api_wortliste() -> Any:
+    """Vereinigte Liste aller bekannten Wörter: WaniKani (exportiert oder
+    manuell markiert), Dictionary (Karte erstellt oder manuell markiert) und
+    rein manuelle Einträge ohne Karte/Subject. Volltextsuche/Filter passiert
+    clientseitig (Liste ist überschaubar, keine Server-Roundtrips nötig)."""
+    sample = request.args.get("sample") in ("1", "true", "True")
+    exported = _already_exported_ids()
+    manual = load_known()
+    meta = load_known_meta()
+    kana_records = {c["id"]: c for c in list_kana()}
+
+    entries: list[dict[str, Any]] = []
+
+    wk_ids = sorted(exported | {i for i in manual if isinstance(i, int)})
+    by_id: dict[int, dict[str, Any]] = {}
+    if wk_ids:
+        try:
+            if not sample:
+                _apply_token_env()
+            by_id = {d["id"]: d for d in kc.resolve_subject_ids(wk_ids, sample=sample)}
+        except kc.WaniKaniError:
+            by_id = {}
+    for sid in wk_ids:
+        d = by_id.get(sid) or {}
+        m = meta.get(str(sid), {})
+        entries.append(
+            {
+                "id": sid,
+                "source": "wanikani",
+                "object": d.get("object", ""),
+                "characters": d.get("characters") or m.get("characters") or f"#{sid}",
+                "meaning": d.get("meaning") or m.get("meaning", ""),
+                "kind": d.get("kind") or m.get("kind", "?"),
+                "level": d.get("level", m.get("level")),
+                "already_exported": sid in exported,
+                "manually_known": sid in manual,
+                "removable": sid in manual,
+            }
+        )
+
+    dict_ids = sorted(set(kana_records) | {i for i in manual if isinstance(i, str) and i.startswith("kana_")})
+    for wid in dict_ids:
+        card = kana_records.get(wid) or {}
+        m = meta.get(wid, {})
+        entries.append(
+            {
+                "id": wid,
+                "source": "dictionary",
+                "characters": card.get("word") or m.get("characters") or wid,
+                "meaning": card.get("meaning") or m.get("meaning", ""),
+                "kind": "Dict",
+                "level": None,
+                "card_created": wid in kana_records,
+                "manually_known": wid in manual,
+                "removable": wid in manual,
+            }
+        )
+
+    manual_ids = sorted(i for i in manual if isinstance(i, str) and i.startswith("manual_"))
+    for wid in manual_ids:
+        m = meta.get(wid, {})
+        entries.append(
+            {
+                "id": wid,
+                "source": "manual",
+                "characters": m.get("characters", wid),
+                "meaning": m.get("meaning", ""),
+                "kind": "Manuell",
+                "level": None,
+                "manually_known": True,
+                "removable": True,
+            }
+        )
+
+    return jsonify({"entries": entries, "total": len(entries)})
+
+
+@app.post("/api/wortliste")
+def api_wortliste_add_manual() -> Any:
+    """Rein manuellen Eintrag (ohne WaniKani-Subject/Dictionary-Treffer) zur
+    Wortliste hinzufügen – z. B. ein Wort, das man von woanders schon kann."""
+    body = request.get_json(silent=True) or {}
+    characters = str(body.get("characters", "")).strip()
+    meaning = str(body.get("meaning", "")).strip()
+    if not characters:
+        return jsonify({"error": "Bitte ein Wort angeben."}), 400
+    wid = "manual_" + hashlib.sha1(characters.encode("utf-8")).hexdigest()[:16]
+    ids = load_known()
+    ids.add(wid)
+    save_known(ids)
+    meta = load_known_meta()
+    meta[wid] = {"characters": characters, "meaning": meaning, "kind": "Manuell", "level": None, "source": "manual"}
+    save_known_meta(meta)
+    return jsonify(
+        {
+            "id": wid,
+            "source": "manual",
+            "characters": characters,
+            "meaning": meaning,
+            "kind": "Manuell",
+            "level": None,
+            "manually_known": True,
+            "removable": True,
+        }
+    )
 
 
 # ---------- API: Rendern (by ids) ------------------------------------------- #
@@ -479,7 +707,8 @@ def api_render() -> Any:
     body = request.get_json(silent=True) or {}
     subject_ids = body.get("subject_ids") or []
     custom_ids = body.get("custom_ids") or []
-    if not (subject_ids or custom_ids):
+    kana_ids = body.get("kana_ids") or []
+    if not (subject_ids or custom_ids or kana_ids):
         return jsonify({"error": "Keine Karten ausgewählt."}), 400
     fmt = body.get("format", "pdf")
     if fmt not in ("pdf", "anki"):
@@ -492,6 +721,7 @@ def api_render() -> Any:
     params = {
         "subject_ids": [int(i) for i in subject_ids] if subject_ids else [],
         "custom_ids": [str(i) for i in custom_ids] if custom_ids else [],
+        "kana_ids": [str(i) for i in kana_ids] if kana_ids else [],
         "format": fmt,
         "layout": layout,
         "paper": body.get("paper", "a4"),
@@ -502,7 +732,7 @@ def api_render() -> Any:
         "sample": bool(body.get("sample", False)),
         "sentence_overrides": sentence_overrides if isinstance(sentence_overrides, dict) else {},
     }
-    n = len(params["custom_ids"]) + len(params["subject_ids"])
+    n = len(params["custom_ids"]) + len(params["subject_ids"]) + len(params["kana_ids"])
     title = body.get("title") or f"{n} Karten"
 
     job_id = uuid.uuid4().hex[:12]
@@ -553,6 +783,50 @@ def api_delete_customcard(cid: str) -> Any:
     if read_custom(cid) is None:
         abort(404)
     _custom_path(cid).unlink(missing_ok=True)
+    return jsonify({"ok": True})
+
+
+# ---------- API: Dictionary-Karten (kanacards) ------------------------------- #
+
+@app.get("/api/kanacards")
+def api_kanacards() -> Any:
+    return jsonify([_kana_descriptor(c) for c in list_kana()])
+
+
+@app.post("/api/kanacards")
+def api_create_kanacard() -> Any:
+    """Wort (aus dem Text-Modus, ohne WaniKani-Treffer) als Dictionary-Karte
+    anlegen. Bedeutung kommt aus JMdict; Satzübersetzung optional per DeepL,
+    wenn ein Key hinterlegt ist (sonst bleibt die Karte trotzdem gültig)."""
+    body = request.get_json(silent=True) or {}
+    word = str(body.get("word", "")).strip()
+    sentence_raw = body.get("sentence")
+    sentence = sentence_raw.strip() if isinstance(sentence_raw, str) and sentence_raw.strip() else None
+    if not word:
+        return jsonify({"error": "Kein Wort angegeben."}), 400
+    deepl_key = load_settings().get("deepl_key") or None
+    card_obj = kc.build_kana_card(word, sentence, deepl_key=deepl_key)
+    if card_obj is None:
+        return jsonify({"error": f"„{word}“ wurde im Wörterbuch nicht gefunden."}), 404
+    record = {
+        "id": card_obj.card_id,
+        "word": card_obj.word,
+        "kanji_hint": card_obj.kanji_hint,
+        "meaning": card_obj.meaning,
+        "sentence_ja": card_obj.sentence_ja,
+        "sentence_translation": card_obj.sentence_translation,
+        "tags": card_obj.tags,
+        "updated_at": _now(),
+    }
+    write_kana(record)
+    return jsonify(_kana_descriptor(record))
+
+
+@app.delete("/api/kanacards/<kid>")
+def api_delete_kanacard(kid: str) -> Any:
+    if read_kana(kid) is None:
+        abort(404)
+    _kana_path(kid).unlink(missing_ok=True)
     return jsonify({"ok": True})
 
 

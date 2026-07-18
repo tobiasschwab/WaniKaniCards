@@ -49,6 +49,7 @@
         <button data-v="compose">Vokabel / Kanji (rekursiv)</button>
         <button data-v="text">Aus Text</button>
         <button data-v="custom">Frei erstellen</button>
+        <button data-v="wortliste">Wortliste</button>
       </div>
 
       <!-- Level-Modus -->
@@ -106,7 +107,14 @@
             <button id="btnComposeClear2" class="btn small">Tabelle leeren</button>
           </div>
           <div id="textDisplay" class="text-display"></div>
-          <p class="hint"><span class="word-legend known">bekannt</span> = bereits exportiert oder manuell markiert · <span class="word-legend unknown">unbekannt</span> = WaniKani-Treffer, noch nicht bekannt · Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.</p>
+          <p class="hint">
+            <span class="word-legend known-manual">bekannt markiert</span> ·
+            <span class="word-legend known-wanikani">bekannt · WaniKani</span> ·
+            <span class="word-legend known-dictionary">bekannt · Wörterbuch</span> ·
+            <span class="word-legend unknown-wanikani">unbekannt · WaniKani</span> ·
+            <span class="word-legend unknown-dictionary">unbekannt · Wörterbuch</span>
+            &nbsp;– Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
+          </p>
         </div>
       </div>
 
@@ -170,6 +178,31 @@
         </div>
         <div id="cfStatus" class="status" style="margin-top:6px"></div>
         <p class="hint">Gespeicherte Karten erscheinen unten in der Tabelle – dort auswählen und als PDF erzeugen.</p>
+      </div>
+
+      <!-- Wortliste: alle bekannten Wörter (WaniKani + Dictionary + manuell) -->
+      <div id="modeWortliste" class="mode hidden">
+        <div class="controls-row">
+          <label class="field inline grow">
+            <span class="label">Filtern</span>
+            <input id="wlSearch" type="text" class="text" placeholder="Volltextsuche – Zeichen oder Bedeutung …">
+          </label>
+          <span id="wlCount" class="muted"></span>
+        </div>
+        <div class="controls-row" style="margin-top:10px">
+          <label class="field inline grow">
+            <span class="label">Wort</span>
+            <input id="wlAddChar" type="text" class="text" placeholder="z. B. 元気 oder げんき">
+          </label>
+          <label class="field inline grow">
+            <span class="label">Bedeutung</span>
+            <input id="wlAddMeaning" type="text" class="text" placeholder="z. B. gesund, munter">
+          </label>
+          <button id="wlAddBtn" class="btn primary">+ Manuell hinzufügen</button>
+        </div>
+        <p class="hint">Manuell hinzugefügte Wörter sind unabhängig von WaniKani/Wörterbuch – für Wörter, die du schon von woanders kannst.</p>
+        <div id="wlList" class="wl-list"></div>
+        <p id="wlEmpty" class="muted hidden">Noch keine bekannten Wörter – über „Als bekannt markieren“ im Text-Modus, über erstellte Karten oder hier manuell hinzufügen.</p>
       </div>
 
       <div id="resolveError" class="error hidden"></div>

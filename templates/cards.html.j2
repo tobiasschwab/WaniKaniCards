@@ -626,6 +626,14 @@
           {{ tags(cell) }}
           <div class="free-html">{{ cell.front_html | safe }}</div>
         </div>
+        {% elif cell.type == "kana" %}
+        {% set kl = cell.word | length %}
+        {% if kl <= 3 %}{% set kfs = 108 %}{% elif kl <= 5 %}{% set kfs = 86 %}{% else %}{% set kfs = 64 %}{% endif %}
+        <div class="card front vocab-front" style="{{ pos }}">
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {{ tags(cell) }}
+          <div class="vword" style="font-size: {{ kfs }}pt;">{{ cell.word }}</div>
+        </div>
         {% else %}
         <div class="card front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
@@ -725,6 +733,25 @@
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {% if username %}<div class="username">{{ username }}</div>{% endif %}
           <div class="free-html">{{ cell.back_html | safe }}</div>
+        </div>
+
+      {% elif cell.type == "kana" %}
+        <div class="card back" style="{{ pos }}">
+          {% if show_hole %}<div class="hole"></div>{% endif %}
+          {% if username %}<div class="username">{{ username }}</div>{% endif %}
+          <div class="back-head">
+            <div class="back-char vocab-char">{{ cell.word }}</div>
+            <div class="meanings">
+              {{ cell.meaning }}{% if cell.kanji_hint %}<span class="secondary">&nbsp;· auch {{ cell.kanji_hint }}</span>{% endif %}
+            </div>
+          </div>
+
+          {% if cell.sentence_ja %}
+          <div class="sentence">
+            <div class="ja">{{ cell.sentence_ja }}</div>
+            {% if cell.sentence_translation %}<div class="en">{{ cell.sentence_translation }}</div>{% endif %}
+          </div>
+          {% endif %}
         </div>
 
       {% else %}

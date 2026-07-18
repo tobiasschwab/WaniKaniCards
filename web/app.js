@@ -266,7 +266,7 @@ function renderAnnotatedText(lines) {
     for (const seg of line) {
       if (seg.type === "word") {
         const span = document.createElement("span");
-        span.className = "word-token " + (seg.known ? "known" : "unknown");
+        span.className = "word-token " + seg.status.replace(/_/g, "-");
         span.dataset.id = String(seg.id);
         span.textContent = seg.text;
         span._seg = seg;
@@ -283,12 +283,16 @@ function renderAnnotatedText(lines) {
 function openWordPopup(el, seg) {
   activeWordSeg = seg;
   const pop = $("#wordPopup");
+  const isDict = seg.source === "dictionary";
   $("#wpChar").textContent = seg.text;
   $("#wpKind").textContent = seg.kind;
-  $("#wpKind").className = "tag-mini " + seg.object;
-  $("#wpLevel").textContent = seg.level ? `Lv ${seg.level}` : "";
+  $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : seg.object);
+  $("#wpLevel").textContent = isDict ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "") : (seg.level ? `Lv ${seg.level}` : "");
   $("#wpMeaning").textContent = seg.meaning || "";
-  $("#wpExportedNote").classList.toggle("hidden", !seg.already_exported);
+  $("#wpExportedNote").textContent = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
+  $("#wpExportedNote").classList.toggle("hidden", !seg.ready);
+  $("#wpAdd").textContent = isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
+  $("#wpAdd").disabled = isDict && seg.ready;
   $("#wpKnown").textContent = seg.manually_known ? "Bekannt-Markierung entfernen" : "Als bekannt markieren";
 
   const rect = el.getBoundingClientRect();
@@ -300,6 +304,13 @@ function openWordPopup(el, seg) {
   pop.style.top = `${rect.bottom + 8}px`;
 }
 function closeWordPopup() { $("#wordPopup").classList.add("hidden"); activeWordSeg = null; }
+
+function wpAddClicked() {
+  const seg = activeWordSeg;
+  if (!seg) return;
+  if (seg.source === "dictionary") createKanaCardFromPopup();
+  else addWordFromPopup();
+}
 
 async function addWordFromPopup() {
   const seg = activeWordSeg;
@@ -314,6 +325,48 @@ async function addWordFromPopup() {
   closeWordPopup();
 }
 
+async function createKanaCardFromPopup() {
+  const seg = activeWordSeg;
+  if (!seg || seg.ready) return;
+  try {
+    await api("/api/kanacards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word: seg.lemma || seg.text, sentence: seg.sentence }),
+    });
+  } catch (e) { toast(e.message, true); return; }
+  setSegReady(seg, true);
+  toast(`Dictionary-Karte für ${seg.text} erstellt`);
+  closeWordPopup();
+}
+
+// Nach Toggle/Erstellung: Status eines Worts (über alle Vorkommen im Text
+// hinweg, per id) lokal aktualisieren, DOM-Klassen + Statistik neu ziehen –
+// ohne kompletten Server-Roundtrip über /api/text-annotate.
+function setSegReady(seg, ready) { applySegChange(seg, { ready }); }
+function setSegManuallyKnown(seg, manuallyKnown) { applySegChange(seg, { manually_known: manuallyKnown }); }
+
+function applySegChange(seg, patch) {
+  let known = 0, total = 0;
+  for (const line of textLines) {
+    for (const s of line) {
+      if (s.type !== "word") continue;
+      total++;
+      if (s.id === seg.id && s.source === seg.source) {
+        Object.assign(s, patch);
+        const kind = s.source === "dictionary" ? "dictionary" : "wanikani";
+        s.status = s.manually_known ? "known_manual" : (s.ready ? `known_${kind}` : `unknown_${kind}`);
+        s.known = s.manually_known || s.ready;
+      }
+      if (s.known) known++;
+    }
+  }
+  document.querySelectorAll(`.word-token[data-id="${seg.id}"]`).forEach((span) => {
+    if (span._seg.source !== seg.source) return;
+    span.className = "word-token " + span._seg.status.replace(/_/g, "-");
+  });
+  updateTextStats({ known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 });
+}
+
 async function toggleKnownFromPopup() {
   const seg = activeWordSeg;
   if (!seg) return;
@@ -321,21 +374,82 @@ async function toggleKnownFromPopup() {
   try {
     await api(`/api/known/${seg.id}`, { method: makeKnown ? "POST" : "DELETE" });
   } catch (e) { toast(e.message, true); return; }
-  let known = 0, total = 0;
-  for (const line of textLines) {
-    for (const s of line) {
-      if (s.type !== "word") continue;
-      total++;
-      if (s.id === seg.id) { s.manually_known = makeKnown; s.known = makeKnown || s.already_exported; }
-      if (s.known) known++;
-    }
-  }
-  document.querySelectorAll(`.word-token[data-id="${seg.id}"]`).forEach((span) => {
-    span.className = "word-token " + (span._seg.known ? "known" : "unknown");
-  });
-  updateTextStats({ known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 });
+  setSegManuallyKnown(seg, makeKnown);
   toast(makeKnown ? `${seg.text} als bekannt markiert` : `${seg.text} nicht mehr als bekannt markiert`);
   closeWordPopup();
+}
+
+// ---------- Wortliste: alle bekannten Wörter (WaniKani + Dictionary + manuell) ----------
+let wortlisteEntries = [];
+
+async function loadWortliste() {
+  $("#wlList").innerHTML = '<div class="wl-row"><span class="muted">Lädt…</span></div>';
+  try {
+    wortlisteEntries = (await api(`/api/wortliste?sample=${isSample() ? 1 : 0}`)).entries || [];
+  } catch (e) {
+    $("#wlList").innerHTML = "";
+    toast(e.message, true);
+    wortlisteEntries = [];
+  }
+  renderWortliste();
+}
+
+function renderWortliste() {
+  const q = $("#wlSearch").value.trim().toLowerCase();
+  const filtered = q
+    ? wortlisteEntries.filter((e) => (e.characters || "").toLowerCase().includes(q) || (e.meaning || "").toLowerCase().includes(q))
+    : wortlisteEntries;
+
+  $("#wlCount").textContent = wortlisteEntries.length
+    ? `${filtered.length} von ${wortlisteEntries.length} Wörtern`
+    : "";
+  $("#wlEmpty").classList.toggle("hidden", wortlisteEntries.length > 0);
+
+  const list = $("#wlList");
+  list.innerHTML = "";
+  for (const e of filtered) {
+    const row = document.createElement("div");
+    row.className = "wl-row";
+    const badges = [];
+    badges.push(`<span class="tag-mini ${e.source === "wanikani" ? e.object : e.source}">${escapeHtml(e.kind || e.source)}</span>`);
+    if (e.level) badges.push(`<span class="muted">Lv ${e.level}</span>`);
+    if (e.already_exported) badges.push('<span class="tag-mini exported">✓ exportiert</span>');
+    if (e.card_created) badges.push('<span class="tag-mini exported">✓ Karte erstellt</span>');
+    if (e.manually_known) badges.push('<span class="tag-mini manual">bekannt markiert</span>');
+    row.innerHTML = `
+      <span class="wl-char">${escapeHtml(e.characters)}</span>
+      <span class="wl-meaning">${escapeHtml(e.meaning)}</span>
+      <span class="wl-badges">${badges.join("")}</span>`;
+    if (e.removable) {
+      const del = document.createElement("button");
+      del.className = "chip-btn danger"; del.textContent = "✕"; del.title = "Entfernen";
+      del.onclick = () => removeWortlisteEntry(e);
+      row.append(del);
+    }
+    list.append(row);
+  }
+}
+
+async function removeWortlisteEntry(e) {
+  try {
+    await api(`/api/known/${e.id}`, { method: "DELETE" });
+  } catch (err) { toast(err.message, true); return; }
+  wortlisteEntries = wortlisteEntries.filter((x) => x.id !== e.id);
+  renderWortliste();
+  toast(`${e.characters} entfernt`);
+}
+
+async function addManualWortliste() {
+  const characters = $("#wlAddChar").value.trim();
+  const meaning = $("#wlAddMeaning").value.trim();
+  if (!characters) return;
+  try {
+    const entry = await api("/api/wortliste", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ characters, meaning }) });
+    wortlisteEntries.unshift(entry);
+    renderWortliste();
+    $("#wlAddChar").value = ""; $("#wlAddMeaning").value = "";
+    toast(`${characters} zur Wortliste hinzugefügt`);
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) ----------
@@ -545,8 +659,10 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#modeCompose").classList.toggle("hidden", v !== "compose");
     $("#modeText").classList.toggle("hidden", v !== "text");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
+    $("#modeWortliste").classList.toggle("hidden", v !== "wortliste");
     $("#tablePanel").classList.add("hidden");
     if (v === "custom") loadCustoms();
+    if (v === "wortliste") loadWortliste();
   });
 
   $("#settingsToggle").addEventListener("click", () => $("#settingsPanel").classList.toggle("hidden"));
@@ -581,7 +697,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnComposeClear2").addEventListener("click", clearCompose);
   $("#btnTextProcess").addEventListener("click", doTextProcess);
   $("#btnTextEdit").addEventListener("click", backToTextEdit);
-  $("#wpAdd").addEventListener("click", addWordFromPopup);
+  $("#wpAdd").addEventListener("click", wpAddClicked);
   $("#wpKnown").addEventListener("click", toggleKnownFromPopup);
   $("#wordPopupClose").addEventListener("click", closeWordPopup);
   document.addEventListener("click", (e) => {
@@ -599,6 +715,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#cfSave").addEventListener("click", saveCustom);
   $("#cfClear").addEventListener("click", clearEditor);
   $("#cfLoadWk").addEventListener("click", prefillFromWk);
+
+  $("#wlSearch").addEventListener("input", renderWortliste);
+  $("#wlAddBtn").addEventListener("click", addManualWortliste);
+  $("#wlAddMeaning").addEventListener("keydown", (e) => { if (e.key === "Enter") addManualWortliste(); });
 
   $("#checkAll").addEventListener("change", (e) => selectAll(e.target.checked));
   $("#selAll").addEventListener("click", () => selectAll(true));

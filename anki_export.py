@@ -33,6 +33,7 @@ import kanji_cards as kc
 
 HERE = Path(__file__).resolve().parent
 FONT_DIR = HERE / "fonts"
+VENDOR_DIR = HERE / "vendor"
 
 # Unterstrich-Präfix: schützt die Dateien in Anki vor "Nicht verwendete
 # Medien löschen" (Anki scannt dafür nur Feld-HTML, keine CSS @font-face-
@@ -43,12 +44,21 @@ _FONT_FILES = {
     "_NotoSerifJP-SemiBold.ttf": FONT_DIR / "NotoSerifJP-SemiBold.ttf",
 }
 
+# WanaKana (MIT-Lizenz, vendor/wanakana.LICENSE) – wandelt Romaji beim Tippen
+# live in Kana um (Shift = Katakana statt Hiragana), gebunden an die
+# On'yomi-/Kun'yomi-Type-in-Felder der Kanji-Karten. Lokal gebündelt (statt
+# per CDN geladen), damit Anki-Review komplett offline funktioniert.
+_SCRIPT_FILES = {
+    "_wanakana.min.js": VENDOR_DIR / "wanakana.min.js",
+}
+
 # Feste Modell-IDs, damit ein erneuter Export in Anki dieselben Notiztypen
 # aktualisiert statt neue anzulegen.
 _MODEL_ID_RADICAL = 1_607_021_301
 _MODEL_ID_KANJI = 1_607_021_302
 _MODEL_ID_VOCAB = 1_607_021_303
 _MODEL_ID_CUSTOM = 1_607_021_304
+_MODEL_ID_KANA = 1_607_021_305
 
 
 class AnkiExportError(kc.WaniKaniError):
@@ -203,7 +213,7 @@ _CSS = """
 # Unterscheidung in gemischten Lernsitzungen. Bewusst andere Farben als die
 # On/Kun/Composition-Zeilen (rot/blau/grün) auf der Kanji-Rückseite, um dort
 # keine Verwechslung zu erzeugen. Frei erstellte Karten bleiben ohne Akzent.
-_TYPE_ACCENT = {"radical": "#2f8f8f", "kanji": "#c97a2b", "vocab": "#7a4fa0"}
+_TYPE_ACCENT = {"radical": "#2f8f8f", "kanji": "#c97a2b", "vocab": "#7a4fa0", "kana": "#2563eb"}
 
 
 def _css_with_accent(kind: str) -> str:
@@ -253,6 +263,20 @@ _KANJI_FRONT_MEANING = """
 # werden. Die {{#…}}-Klammer um den GESAMTEN Vorderseiten-Inhalt sorgt dafür,
 # dass genanki/Anki diese Karte automatisch überspringt, wenn das jeweilige
 # Feld leer ist (z. B. Kanji ohne Kun'yomi) – kein manuelles Filtern nötig.
+# Romaji→Kana-Live-Konvertierung im Type-in-Feld (Shift = Katakana statt
+# Hiragana), per WanaKana (vendor/wanakana.min.js, siehe _SCRIPT_FILES). Das
+# Script steht bewusst NACH {{type:…}}, damit #typeans im DOM schon existiert,
+# wenn es ausgeführt wird (kein Retry/Timing-Hack nötig).
+_WANAKANA_BIND_SCRIPT = """
+<script src="_wanakana.min.js"></script>
+<script>
+var answerDiv = document.getElementById("typeans");
+if (answerDiv !== null && answerDiv.value == '') {
+  wanakana.bind(answerDiv);
+}
+</script>
+""".strip()
+
 _KANJI_FRONT_ON = """
 {{#OnyomiPrimary}}
 <div class="wk-tags">{{TagsHtml}}</div>
@@ -261,6 +285,7 @@ _KANJI_FRONT_ON = """
   <div class="wk-typein-label">On'yomi eingeben</div>
   {{type:OnyomiPrimary}}
 </div>
+""" + _WANAKANA_BIND_SCRIPT + """
 {{/OnyomiPrimary}}
 """.strip()
 
@@ -272,6 +297,7 @@ _KANJI_FRONT_KUN = """
   <div class="wk-typein-label">Kun'yomi eingeben</div>
   {{type:KunyomiPrimary}}
 </div>
+""" + _WANAKANA_BIND_SCRIPT + """
 {{/KunyomiPrimary}}
 """.strip()
 
@@ -324,6 +350,29 @@ _CUSTOM_BACK = """
 {{FrontSide}}
 <hr id="answer">
 <div class="wk-free-back">{{BackHtml}}</div>
+""".strip()
+
+# Dictionary-Karte (Text-Modus, kein WaniKani-Treffer – siehe dictionary.py):
+# Vorderseite bewusst nur die Hiragana-Schreibweise, kein Kanji, damit man
+# Wörter aus vereinfachten Lesetexten auch ohne Kanji-Kenntnis lernt.
+_KANA_FRONT = """
+<div class="wk-tags">{{TagsHtml}}</div>
+<div class="wk-stage"><div class="wk-big">{{Word}}</div></div>
+<div class="wk-typein">
+  <div class="wk-typein-label">Bedeutung eingeben</div>
+  {{type:MeaningPlain}}
+</div>
+""".strip()
+
+_KANA_BACK = """
+{{FrontSide}}
+<hr id="answer">
+<div class="wk-back">
+  <div class="wk-refhead"><span class="wk-ref small">{{Word}}</span><span class="wk-meaning">{{Meaning}}</span></div>
+  {{KanjiHintHtml}}
+  {{SentenceHtml}}
+  <div class="wk-doclink">Quelle: JMdict (EDRDG)</div>
+</div>
 """.strip()
 
 
@@ -383,6 +432,17 @@ def _build_models(genanki: Any) -> dict[str, Any]:
             fields=[{"name": n} for n in ("FrontHtml", "BackHtml", "TagsHtml")],
             templates=[{"name": "Frei", "qfmt": _CUSTOM_FRONT, "afmt": _CUSTOM_BACK}],
             css=_CSS,
+            sort_field_index=0,
+        ),
+        "kana": genanki.Model(
+            _MODEL_ID_KANA,
+            "WaniKani Card Studio – Dictionary",
+            fields=[
+                {"name": n}
+                for n in ("Word", "Meaning", "KanjiHintHtml", "SentenceHtml", "TagsHtml", "MeaningPlain")
+            ],
+            templates=[{"name": "Dictionary", "qfmt": _KANA_FRONT, "afmt": _KANA_BACK}],
+            css=_css_with_accent("kana"),
             sort_field_index=0,
         ),
     }
@@ -477,6 +537,14 @@ def _doclink_html(url: str | None) -> str:
     if not url:
         return ""
     return f'<a class="wk-doclink" href="{_esc(url)}">WaniKani ↗</a>'
+
+
+def _kanji_hint_html(kanji_hint: str | None) -> str:
+    """Kanji-Schreibweise als dezenter Hinweis (Dictionary-Karte, nur Info –
+    die Karte fragt bewusst nur die Hiragana-Schreibweise ab)."""
+    if not kanji_hint:
+        return ""
+    return f'<div class="wk-pos">auch geschrieben: {_esc(kanji_hint)}</div>'
 
 
 def _vocab_example_html(
@@ -612,6 +680,19 @@ def _custom_note(genanki: Any, model: Any, card: kc.CustomCard) -> Any:
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
 
 
+def _kana_note(genanki: Any, model: Any, card: kc.KanaCard) -> Any:
+    fields = [
+        _esc(card.word),
+        _esc(card.meaning),
+        _kanji_hint_html(card.kanji_hint),
+        _sentences_html(card.sentence_ja, card.sentence_translation, None, []),
+        _tags_html(card.tags),
+        _esc((card.meaning or "").split(";")[0].strip()),
+    ]
+    guid = genanki.guid_for("wkcards", "kana", card.card_id) if card.card_id else None
+    return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
+
+
 def _note_for(genanki: Any, models: dict[str, Any], card: Any) -> Any | None:
     if isinstance(card, kc.RadicalCard):
         return _radical_note(genanki, models["radical"], card)
@@ -619,6 +700,8 @@ def _note_for(genanki: Any, models: dict[str, Any], card: Any) -> Any | None:
         return _vocab_note(genanki, models["vocab"], card)
     if isinstance(card, kc.CustomCard):
         return _custom_note(genanki, models["custom"], card)
+    if isinstance(card, kc.KanaCard):
+        return _kana_note(genanki, models["kana"], card)
     if isinstance(card, kc.Card):
         return _kanji_note(genanki, models["kanji"], card)
     return None  # CoverCard o. ä. – im Anki-Export nicht sinnvoll, wird übersprungen
@@ -661,7 +744,7 @@ def export_deck(
     tmp_dir = Path(tempfile.mkdtemp(prefix="wkcards_anki_"))
     try:
         media_files = []
-        for name, src in _FONT_FILES.items():
+        for name, src in {**_FONT_FILES, **_SCRIPT_FILES}.items():
             dst = tmp_dir / name
             dst.write_bytes(src.read_bytes())
             media_files.append(str(dst))

@@ -88,6 +88,28 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
    rutscht dafür als weiterer Satz nach hinten, geht also nicht verloren) –
    sowohl auf der eigenständigen Vokabel-Karte als auch im eingebetteten
    Beispiel einer Kanji-Karte, falls dieselbe Vokabel dort herangezogen wird.
+
+   **Wörterbuch-Fallback für kanji-freie Wörter:** WaniKani indiziert Vokabeln
+   über ihre Kanji-Schreibweise – vereinfachte Lesetexte, die bewusst
+   Hiragana statt Kanji verwenden (z. B. NHK Easy News), treffen darüber also
+   fast nie. Für Wörter **ohne jedes Kanji**, die WaniKani nicht kennt, greift
+   deshalb automatisch ein Fallback über [JMdict](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project)
+   (Open-Source-Wörterbuch, einmalig als JSON geladen und unter `.cache/jmdict/`
+   zwischengespeichert). Kanji-haltige unbekannte Wörter bleiben bewusst
+   Klartext (die gehören als Kanji gelernt, nicht als Dictionary-Karte).
+   Fünf Farben im Text zeigen den Status jedes Worts:
+
+   | Farbe | Bedeutung |
+   |---|---|
+   | Pink „bekannt markiert" | manuell als bekannt markiert, unabhängig von Quelle/Karte |
+   | Grün „bekannt · WaniKani" | WaniKani-Treffer, bereits exportiert |
+   | Türkis „bekannt · Wörterbuch" | Dictionary-Treffer, Karte bereits erstellt |
+   | Violett „unbekannt · WaniKani" | WaniKani-Treffer, noch nichts davon |
+   | Orange „unbekannt · Wörterbuch" | Dictionary-Treffer, noch nichts davon |
+
+   Für Dictionary-Wörter erzeugt das Popup statt „Zur Tabelle" den Button
+   **„Dictionary-Karte erstellen"** – ein neuer, WaniKani-unabhängiger
+   Kartentyp (siehe [Dictionary-Karten](#dictionary-karten)).
 4. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
@@ -107,10 +129,44 @@ Ermittelt sich zentral aus dem Job-Verlauf – keine eigene Datenbank nötig.
 
 **„Bekannt" ist mehr als „exportiert":** Im Text-Modus lässt sich ein Wort auch
 **manuell als bekannt markieren**, ohne je eine Karte dafür zu erzeugen (z. B.
-weil man es schon aus dem Unterricht kennt). Das fließt in dieselbe
-Blau/Grün-Färbung im Text und in die Prozentanzeige ein wie tatsächlich
-exportierte Wörter – landet aber in einer eigenen, kleinen Datei
-(`data/known.json`), getrennt vom Export-Verlauf.
+weil man es schon aus dem Unterricht kennt). Das fließt in dieselbe Färbung im
+Text und in die Prozentanzeige ein wie tatsächlich exportierte/erstellte
+Wörter – landet aber in einer eigenen, kleinen Datei (`data/known.json`),
+getrennt vom Export-/Karten-Verlauf.
+
+## Dictionary-Karten
+
+Ein fünfter, WaniKani-**unabhängiger** Kartentyp für kanji-freie Wörter aus
+dem Text-Modus (siehe oben), z. B. für vereinfachte Lesetexte:
+
+- **Vorderseite:** das Wort in Hiragana/Katakana, groß und zentriert.
+- **Rückseite:** das Wort als Referenz, die Bedeutung (aus JMdict), optional
+  ein Kanji-Hinweis („auch 試合") und – falls beim Erstellen ein Beispielsatz
+  aus dem Text vorlag – dieser Satz mitsamt **deutscher Übersetzung**.
+
+Die Übersetzung läuft optional über die [DeepL-API](https://www.deepl.com/de/pro-api):
+API-Key in den Einstellungen eintragen (⚙ → **DeepL-API-Key**, landet wie der
+WaniKani-Token nur in `data/settings.json`, nie im Repo) – ohne Key wird die
+Karte trotzdem erstellt, nur ohne Satzübersetzung. Dictionary-Karten landen
+im Anki-Export mit einem eigenen, blauen Akzent und lassen sich zusammen mit
+WaniKani- und freien Karten in **einem** gemeinsamen Export kombinieren.
+
+## Wortliste
+
+Ein eigener Tab **„Wortliste"** zeigt alle bekannten Wörter an einem Ort –
+egal ob sie über „Als bekannt markieren" im Text-Modus, über eine erstellte
+WaniKani-/Dictionary-Karte oder **manuell direkt hier** hinzugekommen sind:
+
+![Web-Frontend: Wortliste](previews/webui_wortliste.png)
+
+- **Volltextsuche** filtert clientseitig nach Zeichen oder Bedeutung.
+- **Manuell hinzufügen:** Wort + Bedeutung eintragen – unabhängig von
+  WaniKani/Wörterbuch, für Wörter, die man einfach schon von woanders kennt.
+- **Entfernen** (✕) ist nur möglich, wenn der Eintrag manuell markiert wurde
+  (rein manuelle Einträge verschwinden dabei komplett; bei WaniKani-/
+  Dictionary-Wörtern wird nur die manuelle Markierung entfernt – bleibt das
+  Wort exportiert bzw. als Karte erstellt, taucht es weiterhin auf, jetzt aber
+  ohne den „bekannt markiert"-Badge).
 
 ## Druck-Layouts (`--layout`)
 
@@ -276,10 +332,13 @@ Licht halten, um die Ausrichtung der Wende-Kante zu prüfen. Passt es nicht,
 ## Anki-Export
 
 Zusätzlich zum PDF lässt sich derselbe Kartenstapel als **Anki-Paket (`.apkg`)**
-exportieren – für alle drei Kartentypen (Radical/Kanji/Vokabel) sowie für frei
-erstellte Karten, jeweils mit einem eigenen, an die gedruckten Karten
-angelehnten Anki-Notiztyp (Tag-Chips, On/Kun/Composition-Farben, Mnemonic-Box,
-Referenz-Zeichen auf der Rückseite).
+exportieren – für alle drei Kartentypen (Radical/Kanji/Vokabel), für frei
+erstellte Karten sowie für [Dictionary-Karten](#dictionary-karten), jeweils
+mit einem eigenen, an die gedruckten Karten angelehnten Anki-Notiztyp
+(Tag-Chips, On/Kun/Composition-Farben, Mnemonic-Box, Referenz-Zeichen auf der
+Rückseite). Alle vier Kartentypen lassen sich in **einem** gemeinsamen Export
+kombinieren (z. B. Text-Modus: WaniKani-Vokabel + Dictionary-Wort zusammen
+ausgewählt).
 
 **Anki läuft lokal, dieses Tool im Container – die beiden müssen dafür nicht
 verbunden sein:** Der Export passiert komplett offline mit
@@ -301,9 +360,16 @@ druckspezifischen Optionen) und wie gewohnt **erzeugen**.
 
 Jeder Kartentyp bekommt einen eigenen Anki-Notiztyp im Look der gedruckten
 Karten – inklusive eines farbigen Streifens oben an der Karte (Radical =
-Türkis, Kanji = Ocker, Vokabel = Violett), damit man in gemischten
-Lernsitzungen auf einen Blick sieht, welcher Kartentyp gerade dran ist. Freie
-Karten bleiben ohne Akzent.
+Türkis, Kanji = Ocker, Vokabel = Violett, Dictionary = Blau), damit man in
+gemischten Lernsitzungen auf einen Blick sieht, welcher Kartentyp gerade dran
+ist. Freie Karten bleiben ohne Akzent.
+
+**Japanische Eingabe ohne Tastatur-Wechsel:** Die Eintippen-Felder für
+On'yomi/Kun'yomi (Kanji-Karten) nutzen [WanaKana](https://github.com/WaniKani/WanaKana)
+(`vendor/wanakana.min.js`, im `.apkg` eingebettet) – Romaji wird automatisch
+in Hiragana umgewandelt, Großschreibung (Shift) ergibt Katakana. Kein Wechsel
+zwischen deutscher/japanischer Tastatur nötig, um auf einer deutschen Tastatur
+Kana einzutippen.
 
 | | Vorderseite | Rückseite |
 |---|---|---|
@@ -345,11 +411,15 @@ alles wird dateibasiert im Ordner `data/` gespeichert:
 
 ```
 data/
-├── settings.json      # API-Token (+ zuletzt genutzte Optionen)
-├── output/<id>.pdf    # erzeugte PDFs
-├── output/<id>.apkg   # erzeugte Anki-Pakete
-├── jobs/<id>.json     # Job-Status/Metadaten
-└── .cache/            # WaniKani-API-Cache
+├── settings.json          # API-Token, DeepL-Key (+ zuletzt genutzte Optionen)
+├── known.json             # manuell als „bekannt" markierte IDs (Text-Modus/Wortliste)
+├── known_meta.json        # Anzeige-Metadaten dazu (Zeichen/Bedeutung/…), für die Wortliste
+├── customcards/<id>.json  # frei erstellte Karten
+├── kanacards/<id>.json    # Dictionary-Karten (Wort/Bedeutung/Beispielsatz)
+├── output/<id>.pdf        # erzeugte PDFs
+├── output/<id>.apkg       # erzeugte Anki-Pakete
+├── jobs/<id>.json         # Job-Status/Metadaten
+└── .cache/                # WaniKani-API- und JMdict-Cache
 ```
 
 ![Web-Frontend](previews/webui.png)
@@ -408,9 +478,41 @@ Beispielsatz aus dem Text" wird dabei clientseitig als `sentence_overrides`
 (Vokabel-Subject-ID → `{"ja", "en"}`) mitgeschickt und erst beim Rendern
 angewendet (`resolve_subject_deck()` → `build_card()` / `build_vocab_card()`)
 – WaniKanis eigene Beispielsätze gehen dabei nicht verloren, sie rutschen nur
-eine Position nach hinten. Manuell als „bekannt" markierte Wörter leben separat
-in `data/known.json` (`webapp.load_known()`/`save_known()`), unabhängig vom
-Export-Verlauf.
+eine Position nach hinten.
+
+**Wörterbuch-Fallback** (`dictionary.py`, unabhängig von WaniKani): lädt
+[JMdict-simplified](https://github.com/scriptin/jmdict-simplified) (JSON, per
+GitHub-Releases-API immer die neueste Version) einmalig herunter und baut
+einen Lesung→{Kanji, Bedeutung}-Index, gecacht unter `.cache/jmdict/`. Für
+Text-Modus-Wörter ohne Kanji UND ohne WaniKani-Treffer liefert
+`dictionary.lookup_reading()` die Anzeige-Daten für den neuen, WaniKani-
+unabhängigen Kartentyp `KanaCard` (`kanji_cards.build_kana_card()`) –
+Vorderseite Hiragana/Katakana, Rückseite Bedeutung + optionaler, per
+[DeepL-API](https://www.deepl.com/de/pro-api) übersetzter Beispielsatz
+(`dictionary.translate_sentence()`, DeepL-Key aus `data/settings.json`, wie
+der WaniKani-Token nie hardgecodet). `webapp._build_mixed_deck()` kombiniert
+WaniKani-, freie und Dictionary-Karten in **einem** Export – die niedrig-
+levelig­en `kc.render_deck()`/`ae.export_deck()`-Funktionen unterstützen
+beliebig gemischte Card-Objektlisten per `isinstance`-Dispatch, das war schon
+vorher so angelegt.
+
+Jedes Wort im Text-Modus bekommt zwei rohe Signale vom Backend
+(`/api/text-annotate`): `manually_known` (aus `data/known.json`) und `ready`
+(WaniKani bereits exportiert bzw. Dictionary-Karte bereits erstellt) – daraus
+berechnet sowohl der Server (`status`, für die Erstanzeige) als auch das
+Frontend lokal (`applySegChange()` in `web/app.js`) denselben fünfstufigen
+Status, ohne bei jedem Umschalten („bekannt markieren"/entfernen, Dictionary-
+Karte erstellen) einen kompletten Server-Roundtrip über `/api/text-annotate`
+zu brauchen.
+
+Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-
+Liste: bereits exportierte/manuell markierte WaniKani-Subjects (Anzeige-Daten
+über das neue, nicht-rekursive `kc.resolve_subject_ids()` aufgelöst – anders
+als `resolve_composition()` steigt es **nicht** in die Komposition ab, da die
+Wortliste die Wörter selbst zeigen soll, nicht ihre Bestandteile), erstellte
+Dictionary-Karten sowie rein manuelle Einträge ohne jede Karte/Subject
+(`manual_<hash>`-IDs, Anzeige-Daten aus `data/known_meta.json`, da es dafür
+keine andere Quelle gibt).
 
 ## Tests
 
@@ -421,6 +523,9 @@ pytest
 
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 `paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`annotate_text`
-(Text-Modus) sowie das Auflösen bereits exportierter bzw. manuell als bekannt
-markierter Subject-IDs im Web-Frontend (`webapp._already_exported_ids`,
-`webapp.load_known`/`save_known`).
+(Text-Modus, inkl. Wörterbuch-Fallback), `dictionary.py` (JMdict-Download/
+-Index, DeepL-Übersetzung, gemockt statt Live-Netzwerk), `KanaCard`-Bau sowie
+das Auflösen bereits exportierter bzw. manuell als bekannt markierter
+Subject-/Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen
+im Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/
+`save_known`, `webapp.api_wortliste`, `anki_export._kana_note`).

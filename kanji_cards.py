@@ -14,6 +14,7 @@ Siehe CLAUDE.md für Details zur Architektur.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import requests
+
+import dictionary
 
 try:
     from dotenv import load_dotenv
@@ -152,6 +155,27 @@ class CustomCard:
     back_html: str = ""
     tags: list[str] = field(default_factory=list)
     # ID der Karte in customcards/ (falls gespeichert) – für stabile Anki-IDs.
+    card_id: str | None = None
+
+
+@dataclass
+class KanaCard:
+    """Karte für ein Wort, das im Text-Modus gefunden, aber NICHT über
+    WaniKani gematcht wurde – typischerweise ein Wort, das im Text bewusst in
+    Hiragana statt Kanji geschrieben ist (vereinfachte Lesetexte). Quelle ist
+    JMdict (siehe `dictionary.py`), nicht WaniKani.
+
+    Vorderseite: die Hiragana-Schreibweise, wie sie im Text vorkam – bewusst
+    ohne Kanji, damit man den Text auch ohne Kanji-Kenntnis lesen lernt.
+    """
+
+    word: str = ""                          # Hiragana/Katakana-Schreibweise (Vorderseite)
+    kanji_hint: str | None = None           # Kanji-Schreibweise laut JMdict, nur als Hinweis
+    meaning: str = ""                       # Bedeutung (JMdict, Englisch)
+    sentence_ja: str | None = None          # Satz aus dem Text-Modus, in dem das Wort vorkam
+    sentence_translation: str | None = None  # DeepL-Übersetzung des Satzes (optional)
+    tags: list[str] = field(default_factory=list)
+    # ID der Karte in kanacards/ (Hash des Worts) – für stabile Anki-IDs.
     card_id: str | None = None
 
 
@@ -751,6 +775,59 @@ def build_custom_card(d: dict[str, Any]) -> CustomCard:
     )
 
 
+def kana_card_id(word: str) -> str:
+    """Stabile ID für ein Wort (Hash statt Zufalls-UUID) – dieselbe Vokabel
+    landet beim erneuten „Karte erstellen" also auf derselben Anki-Notiz statt
+    einer Dublette, genau wie bei WaniKani-Subject-IDs.
+    """
+    return "kana_" + hashlib.sha1(word.encode("utf-8")).hexdigest()[:16]
+
+
+def build_kana_card(
+    word: str,
+    sentence: str | None = None,
+    *,
+    deepl_key: str | None = None,
+    translate_fn: "callable | None" = None,
+) -> KanaCard | None:
+    """Aus einem im Text gefundenen Wort (ohne WaniKani-Treffer) eine KanaCard
+    bauen. Bedeutung kommt aus JMdict; gibt `None` zurück, wenn dort auch
+    nichts gefunden wird (Karte macht dann keinen Sinn).
+
+    Satzübersetzung nur, wenn `deepl_key` gesetzt ist – sonst bleibt das Feld
+    leer, die Karte wird trotzdem erstellt (nie hart abbrechen).
+    """
+    entry = dictionary.lookup_reading(word)
+    if not entry or not entry.get("meaning"):
+        return None
+    card = KanaCard(
+        word=word,
+        kanji_hint=entry.get("kanji"),
+        meaning=entry["meaning"],
+        sentence_ja=sentence,
+        tags=["Dictionary"],
+        card_id=kana_card_id(word),
+    )
+    if sentence and deepl_key:
+        fn = translate_fn or dictionary.translate_sentence
+        card.sentence_translation = fn(sentence, deepl_key)
+    return card
+
+
+def build_kana_card_from_dict(d: dict[str, Any]) -> KanaCard:
+    """Bereits erstellte/gespeicherte KanaCard (kanacards/) wieder aufbauen."""
+    tags = [str(t).strip() for t in (d.get("tags") or []) if str(t).strip()] or ["Dictionary"]
+    return KanaCard(
+        word=str(d.get("word") or ""),
+        kanji_hint=d.get("kanji_hint"),
+        meaning=str(d.get("meaning") or ""),
+        sentence_ja=d.get("sentence_ja"),
+        sentence_translation=d.get("sentence_translation"),
+        tags=tags,
+        card_id=str(d["id"]) if d.get("id") else None,
+    )
+
+
 def build_cover_radicals(
     level: int | str, cards: Sequence[RadicalCard]
 ) -> CoverCard:
@@ -766,10 +843,10 @@ def build_cover_radicals(
 # --------------------------------------------------------------------------- #
 
 def paginate(
-    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None], per_page: int = 6
-) -> list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None]]:
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None], per_page: int = 6
+) -> list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None]]:
     """Karten in Seiten à `per_page` aufteilen; letzte Seite mit None auffüllen."""
-    pages: list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None]] = []
+    pages: list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None]] = []
     for start in range(0, len(cards), per_page):
         chunk: list[Card | None] = list(cards[start : start + per_page])
         while len(chunk) < per_page:
@@ -850,7 +927,7 @@ def _merged_sentences(card: "Card | VocabCard") -> list[dict[str, Any]]:
 
 
 def _card_to_dict(
-    card: Card | CoverCard | RadicalCard | VocabCard | CustomCard | None,
+    card: Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None,
 ) -> dict[str, Any] | None:
     if card is None:
         return None
@@ -897,6 +974,16 @@ def _card_to_dict(
             "back_html": card.back_html,
             "tags": card.tags,
         }
+    if isinstance(card, KanaCard):
+        return {
+            "type": "kana",
+            "word": card.word,
+            "kanji_hint": card.kanji_hint,
+            "meaning": card.meaning,
+            "sentence_ja": card.sentence_ja,
+            "sentence_translation": card.sentence_translation,
+            "tags": card.tags,
+        }
     return {
         "type": "kanji",
         "kanji": card.kanji,
@@ -917,7 +1004,7 @@ def _card_to_dict(
 
 
 def build_sheets(
-    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None],
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None],
     *,
     cols: int = 2,
     rows: int = 2,
@@ -934,7 +1021,7 @@ def build_sheets(
 
 
 def render_pdf(
-    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | None],
+    cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None],
     output: str | Path,
     *,
     template_dir: Path = DEFAULT_TEMPLATE_DIR,
@@ -1182,6 +1269,23 @@ def resolve_composition(
     return [_subject_descriptor(s) for s in ordered]
 
 
+def resolve_subject_ids(
+    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False
+) -> list[dict[str, Any]]:
+    """Beschreibungen für genau die übergebenen Subject-IDs (ohne Komposition
+    rekursiv abzusteigen) – für die Wortliste, die bereits bekannte/exportierte
+    Subjects unverändert anzeigen will, nicht deren Bestandteile."""
+    ids = [int(i) for i in dict.fromkeys(subject_ids)]
+    if not ids:
+        return []
+    if sample:
+        reg = _sample_registry()
+    else:
+        client = _make_client(use_cache=use_cache)
+        reg = client.fetch_subjects(ids)
+    return [_subject_descriptor(reg[i]) for i in ids if i in reg]
+
+
 # --------------------------------------------------------------------------- #
 # Text-Modus: Volltext lemmatisieren → Wörter gegen WaniKani abgleichen
 # --------------------------------------------------------------------------- #
@@ -1239,6 +1343,14 @@ def lemmatize_text(text: str) -> list[tuple[str, str]]:
 # zuerst, da im Lesefluss Wörter (nicht einzelne Kanji) erkannt werden sollen.
 _ANNOTATE_KIND_PRIORITY = {"vocabulary": 0, "kanji": 1, "radical": 2}
 
+# Kanji (CJK Unified Ideographs + Extension A). Ein Token ohne eines dieser
+# Zeichen gilt als „reines Kana" – Kandidat für den JMdict-Fallback.
+_KANJI_RE = re.compile(r"[一-鿿㐀-䶿]")
+
+
+def _is_kana_only(text: str) -> bool:
+    return bool(text) and not _KANJI_RE.search(text)
+
 
 def annotate_text(
     text: str, *, use_cache: bool = True, sample: bool = False
@@ -1247,12 +1359,22 @@ def annotate_text(
     Textansicht im Text-Modus).
 
     Jede Zeile wird zu einer Liste von Segmenten:
-    - `{"type": "text", "text": …}` – Text ohne WaniKani-Treffer (Partikel,
-      Satzzeichen, Verbendungen …), wird unverändert dargestellt.
-    - `{"type": "word", "text": Original-Schreibweise, "lemma": Grundform,
-      "sentence": Satz-aus-dem-Text, "id", "object", "kind", "meaning",
-      "level"}` – ein per Lemma gegen WaniKani abgeglichenes Wort (Vokabel/
-      Kanji/Radical, Vokabel bevorzugt).
+    - `{"type": "text", "text": …}` – kein Treffer (Partikel, Satzzeichen,
+      Verbendungen, oder ein Kanji-Wort ohne WaniKani-Treffer), wird
+      unverändert dargestellt.
+    - `{"type": "word", "source": "wanikani", "text": Original-Schreibweise,
+      "lemma": Grundform, "sentence": Satz-aus-dem-Text, "id", "object",
+      "kind", "meaning", "level"}` – ein per Lemma gegen WaniKani
+      abgeglichenes Wort (Vokabel/Kanji/Radical, Vokabel bevorzugt).
+    - `{"type": "word", "source": "dictionary", "text", "lemma", "sentence",
+      "id", "kind": "Dict", "meaning", "kanji_hint"}` – nur für Tokens
+      **ohne Kanji** (reines Hiragana/Katakana) UND ohne WaniKani-Treffer:
+      WaniKani indiziert Vokabeln über die Kanji-Schreibweise, matcht solche
+      Wörter also nie (typisch für vereinfachte Lesetexte, die bewusst
+      Hiragana statt Kanji verwenden). Fallback über JMdict (siehe
+      `dictionary.py`), damit auch diese Wörter lernbar werden – bewusst nur
+      für kanji-freie Tokens, kanji-haltige unbekannte Wörter bleiben
+      Klartext (die gehören eigentlich als Kanji gelernt).
 
     Reihung der Segmente pro Zeile ist so, dass `"".join(s["text"] für alle
     Segmente)` wieder exakt die Original-Zeile ergibt (Janome liefert
@@ -1323,6 +1445,7 @@ def annotate_text(
                 segments.append(
                     {
                         "type": "word",
+                        "source": "wanikani",
                         "text": surface,
                         "lemma": lemma,
                         "sentence": sentence,
@@ -1333,6 +1456,28 @@ def annotate_text(
                         "level": desc["level"],
                     }
                 )
+            elif _is_kana_only(surface):
+                entry = dictionary.lookup_reading(lemma)
+                if entry and entry.get("meaning"):
+                    if buf:
+                        segments.append({"type": "text", "text": buf})
+                        buf = ""
+                    segments.append(
+                        {
+                            "type": "word",
+                            "source": "dictionary",
+                            "text": surface,
+                            "lemma": lemma,
+                            "sentence": sentence,
+                            "id": kana_card_id(lemma),
+                            "kind": "Dict",
+                            "meaning": entry["meaning"],
+                            "kanji_hint": entry.get("kanji"),
+                            "level": None,
+                        }
+                    )
+                else:
+                    buf += surface
             else:
                 buf += surface
         if buf:
