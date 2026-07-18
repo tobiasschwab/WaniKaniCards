@@ -201,9 +201,13 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .tag-mini.kanji { color: var(--accent); border-color: #d8ccfb; background: rgba(109,59,245,.08); }
 .tag-mini.radical { color: #0891b2; border-color: #bae6f2; background: rgba(0,180,216,.08); }
 .tag-mini.vocabulary { color: #a2792e; border-color: #ecd9b0; background: rgba(162,121,46,.08); }
+.tag-mini.exported { color: #16a34a; border-color: #bbf1cf; background: rgba(22,163,74,.08); margin-left: 6px; }
+.cards-table tbody tr.is-exported { opacity: .55; }
 
 .c-act { width: 74px; text-align: right; white-space: nowrap; }
 .c-act .chip-btn { padding: 4px 8px; }
+
+textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-height: 1.5; }
 
 /* Frei-Editor (zwei Rich-Text-Felder) */
 .ed2col { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px; }

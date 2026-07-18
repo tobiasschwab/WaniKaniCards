@@ -548,11 +548,14 @@ def build_card(
     kanji: dict[str, Any],
     vocab_map: dict[int, dict[str, Any]],
     image_fetcher: "callable | None" = None,
+    sentence_overrides: dict[int, dict[str, Any]] | None = None,
 ) -> Card:
     """Aus einem Kanji-Subject (+ Subject-Map) eine Card bauen.
 
     `vocab_map` dient sowohl den Beispielvokabeln (amalgamation) als auch den
     Kompositions-Radicals (component); es genügt eine Map, die beide enthält.
+    `sentence_overrides` (optional): Subject-ID der Beispielvokabel →
+    `{"ja": str, "en": str|None}` (Text-Modus, siehe `build_vocab_card`).
     """
     data = kanji.get("data", {})
     readings = data.get("readings", [])
@@ -588,7 +591,13 @@ def build_card(
             _pick_audio_url(vdata.get("pronunciation_audios")), image_fetcher
         )
         sentences = vdata.get("context_sentences") or []
-        if sentences:
+        override = (sentence_overrides or {}).get(_int_or_none(vocab.get("id")))
+        if override and override.get("ja"):
+            card.sentence_ja = override["ja"]
+            card.sentence_en = override.get("en") or None
+            card.sentence_audio_url = None
+            card.extra_sentences = _build_extra_sentences(sentences, image_fetcher)
+        elif sentences:
             card.sentence_ja = strip_markup(sentences[0].get("ja"))
             card.sentence_en = strip_markup(sentences[0].get("en"))
             # WaniKani vertont Beispielsätze selbst nicht – optionales,
@@ -689,9 +698,17 @@ def build_radical_cards(
 
 
 def build_vocab_card(
-    vocab: dict[str, Any], image_fetcher: "callable | None" = None
+    vocab: dict[str, Any],
+    image_fetcher: "callable | None" = None,
+    sentence_override: dict[str, Any] | None = None,
 ) -> VocabCard:
-    """Aus einem Vokabel-Subject eine VocabCard bauen."""
+    """Aus einem Vokabel-Subject eine VocabCard bauen.
+
+    `sentence_override` (optional): `{"ja": str, "en": str|None}` – z. B. der
+    Original-Satz aus dem Text-Modus, in dem die Vokabel vorkam. Wird als
+    *erster* Beispielsatz verwendet; WaniKanis eigene `context_sentences`
+    rutschen komplett in `extra_sentences` (statt nur ab Index 1).
+    """
     data = vocab.get("data", {})
     sentences = data.get("context_sentences") or []
     card = VocabCard(
@@ -708,7 +725,12 @@ def build_vocab_card(
         tags=_default_tags("Vocab", data),
         subject_id=_int_or_none(vocab.get("id")),
     )
-    if sentences:
+    if sentence_override and sentence_override.get("ja"):
+        card.sentence_ja = sentence_override["ja"]
+        card.sentence_en = sentence_override.get("en") or None
+        card.sentence_audio_url = None
+        card.extra_sentences = _build_extra_sentences(sentences, image_fetcher)
+    elif sentences:
         card.sentence_ja = strip_markup(sentences[0].get("ja"))
         card.sentence_en = strip_markup(sentences[0].get("en"))
         card.sentence_audio_url = _resolve_audio_url(
@@ -1160,17 +1182,144 @@ def resolve_composition(
     return [_subject_descriptor(s) for s in ordered]
 
 
+# --------------------------------------------------------------------------- #
+# Text-Modus: Volltext lemmatisieren → Wörter gegen WaniKani abgleichen
+# --------------------------------------------------------------------------- #
+
+# Wie viele eindeutige Lemmata pro WaniKani-Anfrage (slugs-Filter) gebündelt
+# werden – hält die URL kurz, auch bei langen Texten.
+_TEXT_LOOKUP_CHUNK = 50
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？.!?])\s*|\n+")
+
+_janome_tokenizer: Any = None
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Text in Sätze zerlegen (an Satzzeichen und Zeilenumbrüchen)."""
+    return [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+
+
+def _get_tokenizer() -> Any:
+    """Janome-Tokenizer lazy laden (erst beim ersten Gebrauch, spart Startzeit)."""
+    global _janome_tokenizer
+    if _janome_tokenizer is None:
+        try:
+            from janome.tokenizer import Tokenizer
+        except ImportError as exc:  # pragma: no cover - umgebungsabhängig
+            raise WaniKaniError(
+                "Für den Text-Modus wird das Paket 'janome' benötigt. "
+                "Bitte installieren: pip install janome"
+            ) from exc
+        _janome_tokenizer = Tokenizer()
+    return _janome_tokenizer
+
+
+def lemmatize_text(text: str) -> list[tuple[str, str]]:
+    """Text in (Grundform, Satz)-Paare zerlegen.
+
+    Grundform = Janomes `base_form` (z. B. „食べます" → „食べる"), was i. d. R.
+    WaniKanis Vokabel-Schreibweise entspricht (Wörterbuchform). Der Satz ist
+    der Original-Satz aus dem Eingabetext, in dem das Wort vorkam – Grundlage
+    für den späteren „eigener Beispielsatz"-Override.
+    """
+    tokenizer = _get_tokenizer()
+    pairs: list[tuple[str, str]] = []
+    for sentence in _split_sentences(text):
+        for tok in tokenizer.tokenize(sentence):
+            lemma = (tok.base_form or tok.surface or "").strip()
+            if not lemma or lemma == "*":
+                continue
+            pairs.append((lemma, sentence))
+    return pairs
+
+
+def resolve_text(
+    text: str, *, use_cache: bool = True, sample: bool = False
+) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    """Volltext lemmatisieren, Treffer gegen WaniKani abgleichen und rekursiv auflösen.
+
+    Ablauf: Text → Lemmata (Grundformen) je Satz → Lemmata als WaniKani-Slugs
+    nachschlagen (Vokabeln/Kanji/Radicals, was passt) → Treffer rekursiv über
+    `resolve_composition` in Kanji & Radicals zerlegen.
+
+    Gibt `(Tabellen-Deskriptoren, Satz-Overrides)` zurück. `Satz-Overrides`
+    bildet Vokabel-Subject-ID → `{"ja": Satz-aus-dem-Text, "en": None}` ab –
+    wird beim Rendern als *erster* Beispielsatz eingesetzt (WaniKanis eigener
+    Satz rutscht dann als weiterer Satz nach hinten).
+    """
+    pairs = lemmatize_text(text)
+    sentence_by_lemma: dict[str, str] = {}
+    order: list[str] = []
+    for lemma, sentence in pairs:
+        if lemma not in sentence_by_lemma:
+            sentence_by_lemma[lemma] = sentence
+            order.append(lemma)
+    if not order:
+        raise WaniKaniError("Kein auswertbarer Text gefunden.")
+
+    if sample:
+        hits = [
+            s
+            for s in _sample_registry().values()
+            if strip_markup(s.get("data", {}).get("characters")) in sentence_by_lemma
+        ]
+    else:
+        client = _make_client(use_cache=use_cache)
+        hits = []
+        seen: set[int] = set()
+        for i in range(0, len(order), _TEXT_LOOKUP_CHUNK):
+            chunk = order[i : i + _TEXT_LOOKUP_CHUNK]
+            for s in client.search_subjects(",".join(chunk)):
+                sid = int(s["id"])
+                if sid not in seen:
+                    seen.add(sid)
+                    hits.append(s)
+    if not hits:
+        raise WaniKaniError("Keine passenden WaniKani-Einträge im Text gefunden.")
+
+    root_ids = [int(s["id"]) for s in hits]
+    descriptors = resolve_composition(root_ids, use_cache=use_cache, sample=sample)
+
+    sentence_overrides: dict[int, dict[str, Any]] = {}
+    for s in hits:
+        if s.get("object") != "vocabulary":
+            continue
+        chars = strip_markup(s.get("data", {}).get("characters"))
+        sentence = sentence_by_lemma.get(chars)
+        if sentence:
+            sentence_overrides[int(s["id"])] = {"ja": sentence, "en": None}
+
+    return descriptors, sentence_overrides
+
+
+def _normalize_sentence_overrides(
+    sentence_overrides: dict[Any, Any] | None,
+) -> dict[int, dict[str, Any]]:
+    """Overrides-Keys robust in int wandeln (kommen z. B. als JSON-String-Keys an)."""
+    out: dict[int, dict[str, Any]] = {}
+    for k, v in (sentence_overrides or {}).items():
+        ik = _int_or_none(k)
+        if ik is not None and isinstance(v, dict):
+            out[ik] = v
+    return out
+
+
 def resolve_subject_deck(
     subject_ids: Iterable[int],
     *,
     use_cache: bool = True,
     sample: bool = False,
+    sentence_overrides: dict[Any, Any] | None = None,
 ) -> list[Card | RadicalCard | VocabCard]:
     """Die gewählten Subjects (nach ID) in Card-Objekte auflösen (ohne zu rendern).
 
     Gemeinsam genutzt von PDF- (`render_subjects`) und Anki-Export.
+    `sentence_overrides` (optional): Vokabel-Subject-ID → `{"ja": str, "en":
+    str|None}` – z. B. aus dem Text-Modus (siehe `resolve_text`).
     """
     ids = [int(i) for i in subject_ids]
+    overrides = _normalize_sentence_overrides(sentence_overrides)
     image_fetcher: "callable | None" = None
     if sample:
         reg = _sample_registry()
@@ -1197,7 +1346,7 @@ def resolve_subject_deck(
     for i in ids:
         s = reg.get(i)
         if s:
-            deck.append(build_any_card(s, reg, image_fetcher))
+            deck.append(build_any_card(s, reg, image_fetcher, overrides))
     if not deck:
         raise WaniKaniError("Keine gültigen Karten für die Auswahl gefunden.")
     return deck
@@ -1215,9 +1364,15 @@ def render_subjects(
     username: str = "",
     use_cache: bool = True,
     sample: bool = False,
+    sentence_overrides: dict[Any, Any] | None = None,
 ) -> tuple[Path, int]:
     """Genau die gewählten Subjects (nach ID) als ein PDF rendern (kein Deckblatt)."""
-    deck = resolve_subject_deck(subject_ids, use_cache=use_cache, sample=sample)
+    deck = resolve_subject_deck(
+        subject_ids,
+        use_cache=use_cache,
+        sample=sample,
+        sentence_overrides=sentence_overrides,
+    )
     path = render_deck(
         deck, output, layout=layout, paper=paper, duplex=duplex,
         cut_marks=cut_marks, hole=hole, username=username,
@@ -1366,14 +1521,16 @@ def build_any_card(
     subject: dict[str, Any],
     registry: dict[int, dict[str, Any]],
     image_fetcher: "callable | None" = None,
+    sentence_overrides: dict[int, dict[str, Any]] | None = None,
 ) -> Card | RadicalCard | VocabCard:
     """Passende Karte je nach Subject-Typ bauen (nutzt registry für Bezüge)."""
     obj = subject.get("object")
     if obj == "radical":
         return build_radical_card(subject, registry, image_fetcher)
     if obj == "vocabulary":
-        return build_vocab_card(subject, image_fetcher)
-    return build_card(subject, registry, image_fetcher)  # kanji
+        override = (sentence_overrides or {}).get(_int_or_none(subject.get("id")))
+        return build_vocab_card(subject, image_fetcher, override)
+    return build_card(subject, registry, image_fetcher, sentence_overrides)  # kanji
 
 
 # --------------------------------------------------------------------------- #

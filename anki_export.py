@@ -681,9 +681,15 @@ def export_subjects(
     deck_name: str | None = None,
     use_cache: bool = True,
     sample: bool = False,
+    sentence_overrides: dict[Any, Any] | None = None,
 ) -> tuple[Path, int]:
     """WaniKani-Subjects (nach ID) direkt als Anki-Paket exportieren."""
-    cards = kc.resolve_subject_deck(subject_ids, use_cache=use_cache, sample=sample)
+    cards = kc.resolve_subject_deck(
+        subject_ids,
+        use_cache=use_cache,
+        sample=sample,
+        sentence_overrides=sentence_overrides,
+    )
     return export_deck(cards, output, deck_name=deck_name or "WaniKani Card Studio")
 
 

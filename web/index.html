@@ -47,6 +47,7 @@
       <div class="tabs" id="modeTabs" data-value="level">
         <button data-v="level" class="active">Level-Stapel</button>
         <button data-v="compose">Vokabel / Kanji (rekursiv)</button>
+        <button data-v="text">Aus Text</button>
         <button data-v="custom">Frei erstellen</button>
       </div>
 
@@ -82,6 +83,19 @@
         </div>
         <div id="searchResults" class="search-results"></div>
         <p class="hint">Treffer anklicken → alle enthaltenen Kanji &amp; Radicals werden rekursiv aufgelöst und an die Tabelle unten <strong>angehängt</strong>. Mehrere Vokabeln nacheinander suchen &amp; anklicken, um sie zu kombinieren. „Tabelle leeren“ setzt zurück.</p>
+      </div>
+
+      <!-- Text-Modus: Volltext lemmatisieren, Treffer rekursiv auflösen -->
+      <div id="modeText" class="mode hidden">
+        <label class="field">
+          <span class="label">Japanischer Text</span>
+          <textarea id="textInput" class="text" rows="6" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
+        </label>
+        <div class="row gap">
+          <button id="btnTextResolve" class="btn primary">Wörter finden</button>
+          <span id="textStatus" class="muted"></span>
+        </div>
+        <p class="hint">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen; Treffer werden rekursiv in Kanji &amp; Radicals zerlegt. Bereits exportierte Karten sind unten vorab <strong>abgewählt</strong>. Bei gefundenen Vokabeln wird dein Satz aus dem Text als erster Beispielsatz auf der Karte verwendet.</p>
       </div>
 
       <!-- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) -->

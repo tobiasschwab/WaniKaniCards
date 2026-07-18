@@ -29,8 +29,11 @@ from kanji_cards import (  # noqa: E402
     pick_example_vocab,
     resolve_composition,
     resolve_level,
+    resolve_text,
     strip_markup,
+    lemmatize_text,
     _resolve_audio_url,
+    _split_sentences,
 )
 
 
@@ -645,3 +648,191 @@ def test_fetch_audio_data_uri_returns_none_on_persistent_failure():
     session = _FakeSession(_FakeResponse(b"", "text/html", status_code=404))
     client = WaniKaniClient("dummy-token", use_cache=False, session=session)
     assert client.fetch_audio_data_uri("https://example.test/missing.mp3") is None
+
+
+# --------------------------------------------------------------------------- #
+# Text-Modus: Sätze zerlegen, lemmatisieren, gegen WaniKani abgleichen
+# --------------------------------------------------------------------------- #
+
+def test_split_sentences_splits_on_japanese_punctuation():
+    text = "大きい山に登った。小さい犬がいた！本当？"
+    assert _split_sentences(text) == [
+        "大きい山に登った。",
+        "小さい犬がいた！",
+        "本当？",
+    ]
+
+
+def test_split_sentences_splits_on_newlines_too():
+    assert _split_sentences("一行目\n二行目\n\n三行目") == ["一行目", "二行目", "三行目"]
+
+
+def test_split_sentences_strips_and_drops_empty():
+    assert _split_sentences("  一。  \n\n  ") == ["一。"]
+
+
+def test_lemmatize_text_uses_dictionary_base_form():
+    # 「大きく」 (Adverbform) → Grundform 「大きい」; jedes Paar trägt den
+    # Original-Satz mit, in dem das Wort vorkam.
+    pairs = lemmatize_text("犬が大きく吠えた。")
+    lemmas = [p[0] for p in pairs]
+    assert "大きい" in lemmas
+    assert all(sentence == "犬が大きく吠えた。" for _, sentence in pairs)
+
+
+def test_lemmatize_text_empty_string():
+    assert lemmatize_text("") == []
+
+
+def test_resolve_text_finds_and_recursively_resolves_sample_data():
+    text = "大きい山に人が一人います。"
+    descriptors, overrides = resolve_text(text, sample=True)
+    kinds = {d["kind"] for d in descriptors}
+    chars = {d["characters"] for d in descriptors}
+    # Kanji/Radicals werden über die Komposition der gefundenen Vokabeln/Kanji
+    # nachgeladen (rekursiv), nicht nur die direkten Text-Treffer.
+    assert "Radical" in kinds and "Kanji" in kinds
+    assert "山" in chars and "人" in chars
+
+
+def test_resolve_text_sentence_override_keyed_by_vocab_subject_id():
+    text = "大きい山に人が一人います。"
+    descriptors, overrides = resolve_text(text, sample=True)
+    vocab_ids = {d["id"] for d in descriptors if d["kind"] == "Vocab"}
+    assert vocab_ids  # mindestens eine Vokabel wurde gefunden
+    assert set(overrides).issubset(vocab_ids)
+    for sid, o in overrides.items():
+        assert o["ja"] == text
+        assert o["en"] is None
+
+
+def test_resolve_text_raises_on_empty_text():
+    with pytest.raises(WaniKaniError):
+        resolve_text("", sample=True)
+
+
+def test_resolve_text_raises_when_nothing_matches():
+    with pytest.raises(WaniKaniError):
+        resolve_text("asdf qwer zxcv", sample=True)
+
+
+# --------------------------------------------------------------------------- #
+# Text-Modus: eigener Beispielsatz überschreibt WaniKanis erste context_sentence
+# --------------------------------------------------------------------------- #
+
+def test_build_vocab_card_sentence_override_prepends_own_sentence():
+    vocab = {
+        "id": 99,
+        "data": {
+            "characters": "犬",
+            "meanings": [{"meaning": "Dog", "primary": True}],
+            "readings": [{"reading": "いぬ", "primary": True}],
+            "context_sentences": [{"ja": "犬がいます。", "en": "There is a dog."}],
+        },
+    }
+    card = build_vocab_card(vocab, sentence_override={"ja": "私の犬は大きい。", "en": None})
+    assert card.sentence_ja == "私の犬は大きい。"
+    assert card.sentence_en is None
+    assert card.sentence_audio_url is None
+    # WaniKanis eigener Satz rutscht komplett nach extra_sentences (nicht verloren).
+    assert card.extra_sentences == [
+        {"ja": "犬がいます。", "en": "There is a dog.", "audio_url": None}
+    ]
+
+
+def test_build_vocab_card_without_override_keeps_default_behavior():
+    vocab = {
+        "id": 99,
+        "data": {
+            "characters": "犬",
+            "meanings": [{"meaning": "Dog", "primary": True}],
+            "readings": [{"reading": "いぬ", "primary": True}],
+            "context_sentences": [{"ja": "犬がいます。", "en": "There is a dog."}],
+        },
+    }
+    card = build_vocab_card(vocab)
+    assert card.sentence_ja == "犬がいます。"
+    assert card.extra_sentences == []
+
+
+def test_build_card_sentence_override_applies_to_embedded_vocab():
+    kanji = {
+        "id": 1,
+        "data": {
+            "characters": "犬",
+            "meanings": [{"meaning": "Dog", "primary": True}],
+            "readings": [{"reading": "けん", "primary": True, "type": "onyomi"}],
+            "amalgamation_subject_ids": [77],
+        },
+    }
+    vmap = {
+        77: {
+            "id": 77,
+            "data": {
+                "characters": "犬",
+                "level": 1,
+                "meanings": [{"meaning": "Dog", "primary": True}],
+                "readings": [{"reading": "いぬ", "primary": True}],
+                "context_sentences": [{"ja": "犬がいます。", "en": "There is a dog."}],
+            },
+        }
+    }
+    overrides = {77: {"ja": "私の犬は大きい。", "en": None}}
+    card = build_card(kanji, vmap, sentence_overrides=overrides)
+    assert card.sentence_ja == "私の犬は大きい。"
+    assert card.sentence_en is None
+    assert card.extra_sentences == [
+        {"ja": "犬がいます。", "en": "There is a dog.", "audio_url": None}
+    ]
+
+
+def test_build_card_sentence_overrides_ignores_unrelated_ids():
+    kanji = {
+        "id": 1,
+        "data": {
+            "characters": "犬",
+            "meanings": [{"meaning": "Dog", "primary": True}],
+            "readings": [{"reading": "けん", "primary": True, "type": "onyomi"}],
+            "amalgamation_subject_ids": [77],
+        },
+    }
+    vmap = {
+        77: {
+            "id": 77,
+            "data": {
+                "characters": "犬",
+                "level": 1,
+                "meanings": [{"meaning": "Dog", "primary": True}],
+                "readings": [{"reading": "いぬ", "primary": True}],
+                "context_sentences": [{"ja": "犬がいます。", "en": "There is a dog."}],
+            },
+        }
+    }
+    card = build_card(kanji, vmap, sentence_overrides={999: {"ja": "unrelated", "en": None}})
+    assert card.sentence_ja == "犬がいます。"
+
+
+def test_resolve_subject_deck_threads_sentence_overrides():
+    from kanji_cards import resolve_subject_deck
+
+    text = "大きい山に人が一人います。"
+    descriptors, overrides = resolve_text(text, sample=True)
+    ids = [d["id"] for d in descriptors]
+    deck = resolve_subject_deck(ids, sample=True, sentence_overrides=overrides)
+    vocab_cards = {c.subject_id: c for c in deck if isinstance(c, VocabCard)}
+    for sid, override in overrides.items():
+        assert vocab_cards[sid].sentence_ja == override["ja"]
+
+
+def test_resolve_subject_deck_normalizes_string_keyed_overrides():
+    """Overrides kommen über JSON (Web-API) mit String-Keys an – muss trotzdem greifen."""
+    from kanji_cards import resolve_subject_deck
+
+    text = "大きい山に人が一人います。"
+    descriptors, overrides = resolve_text(text, sample=True)
+    ids = [d["id"] for d in descriptors]
+    string_keyed = {str(k): v for k, v in overrides.items()}
+    deck = resolve_subject_deck(ids, sample=True, sentence_overrides=string_keyed)
+    vocab_cards = {c.subject_id: c for c in deck if isinstance(c, VocabCard)}
+    for sid, override in overrides.items():
+        assert vocab_cards[sid].sentence_ja == override["ja"]

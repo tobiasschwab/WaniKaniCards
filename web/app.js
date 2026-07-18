@@ -19,6 +19,10 @@ let pollTimer = null;
 let composeAccum = [];
 let composeLabels = [];
 
+// Text-Modus: Subject-ID → {ja, en} – eigener Beispielsatz aus dem Text,
+// wird beim Rendern mitgeschickt und dort als erster Satz eingesetzt.
+let sentenceOverrides = {};
+
 // ---------- Helpers ----------
 function toast(msg, isErr) {
   const t = $("#toast");
@@ -122,17 +126,19 @@ function showResolveError(m) { const el = $("#resolveError"); el.textContent = "
 
 function renderTable(list, title, mode) {
   cards = list; tableMode = mode || "subject"; selected.clear();
+  sentenceOverrides = {}; // nur der Text-Modus setzt das direkt danach wieder
   $("#tableTitle").textContent = title + ` (${list.length})`;
   $("#thActions").classList.toggle("hidden", tableMode !== "custom");
   const tb = $("#tableBody"); tb.innerHTML = "";
   for (const c of list) {
     const id = String(c.id);
     const tr = document.createElement("tr");
+    tr.classList.toggle("is-exported", !!c.already_exported);
     tr.innerHTML = `
       <td class="c-check"><input type="checkbox" data-id="${escapeHtml(id)}"></td>
       <td class="c-char">${escapeHtml(c.characters || (c.has_image ? "🖼" : "—"))}</td>
       <td><span class="tag-mini ${c.object}">${escapeHtml(c.kind)}</span></td>
-      <td>${escapeHtml(c.meaning)}</td>
+      <td>${escapeHtml(c.meaning)}${c.already_exported ? '<span class="tag-mini exported" title="Bereits exportiert">✓ exportiert</span>' : ""}</td>
       <td class="c-lvl">${c.level ?? ""}</td>
       <td class="c-act ${tableMode === "custom" ? "" : "hidden"}"></td>`;
     const cb = tr.querySelector("input");
@@ -148,12 +154,18 @@ function renderTable(list, title, mode) {
     }
     tb.append(tr);
   }
-  selectAll(true);
+  selectDefault();
   $("#tablePanel").classList.remove("hidden");
 }
 function toggle(id, on) { if (on) selected.add(id); else selected.delete(id); syncChecks(); updateRenderBtn(); }
 function selectAll(on) {
   selected.clear(); if (on) cards.forEach((c) => selected.add(String(c.id)));
+  syncChecks(); updateRenderBtn();
+}
+// Default-Auswahl: alles außer bereits exportierten Karten (Text-Modus u. a.).
+function selectDefault() {
+  selected.clear();
+  cards.forEach((c) => { if (!c.already_exported) selected.add(String(c.id)); });
   syncChecks(); updateRenderBtn();
 }
 function syncChecks() {
@@ -204,6 +216,26 @@ function clearCompose() {
   composeAccum = []; composeLabels = [];
   cards = []; selected.clear();
   $("#tablePanel").classList.add("hidden");
+}
+
+// ---------- Text-Modus ----------
+async function doTextResolve() {
+  const text = $("#textInput").value;
+  if (!text.trim()) return;
+  $("#textStatus").textContent = "Analysiere…";
+  $("#resolveError").classList.add("hidden");
+  let r;
+  try {
+    r = await api("/api/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "text", text, sample: isSample() }) });
+  } catch (e) {
+    $("#textStatus").textContent = "";
+    showResolveError(e.message);
+    return;
+  }
+  $("#textStatus").textContent = "";
+  if (!r.cards || r.cards.length === 0) { showResolveError("Keine WaniKani-Treffer im Text gefunden."); return; }
+  renderTable(r.cards, "Aus Text", "subject");
+  sentenceOverrides = r.sentence_overrides || {};
 }
 
 // ---------- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) ----------
@@ -329,7 +361,8 @@ async function doRender() {
       cut_marks: $("#cutmarks").checked, hole: $("#hole").checked,
     });
   }
-  if (tableMode === "custom") body.custom_ids = ids.map(String); else body.subject_ids = ids;
+  if (tableMode === "custom") body.custom_ids = ids.map(String);
+  else { body.subject_ids = ids; if (Object.keys(sentenceOverrides).length) body.sentence_overrides = sentenceOverrides; }
   $("#btnRender").disabled = true;
   $("#progress").classList.remove("hidden"); $("#progressText").textContent = "Wird erzeugt…";
   try {
@@ -412,6 +445,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initSegmented("modeTabs", (v) => {
     $("#modeLevel").classList.toggle("hidden", v !== "level");
     $("#modeCompose").classList.toggle("hidden", v !== "compose");
+    $("#modeText").classList.toggle("hidden", v !== "text");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
     $("#tablePanel").classList.add("hidden");
     if (v === "custom") loadCustoms();
@@ -446,6 +480,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
   $("#btnComposeClear").addEventListener("click", clearCompose);
+  $("#btnTextResolve").addEventListener("click", doTextResolve);
 
   // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)
   document.querySelectorAll(".rt-toolbar button").forEach((b) => {

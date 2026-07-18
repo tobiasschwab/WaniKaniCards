@@ -55,7 +55,7 @@ Jede **Vorderseite** trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level
 z. B. `KANJI` / `LV 1`); die Rückseite zeigt – sofern ein Token gesetzt ist –
 dezent unten rechts den **WaniKani-Benutzernamen**.
 
-## Drei Wege zu den Karten (Web)
+## Vier Wege zu den Karten (Web)
 
 1. **Level-Stapel:** ein Level auflisten – per Checkbox **Radicals**, **Kanji**
    und/oder **Vokabeln** kombinieren (mehrere gleichzeitig möglich; alle drei
@@ -65,15 +65,35 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
    rekursiv mit aufgelöst (Vokabel → Kanji → Radicals). Mehrere Vokabeln
    nacheinander suchen und anklicken **hängt** deren Kompositionen an dieselbe
    Tabelle an (dedupliziert); **„Tabelle leeren“** setzt zurück.
-3. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
+3. **Aus Text:** einen kompletten japanischen Text einfügen (Artikel, Satz,
+   Kapitel …). Der Text wird **lemmatisiert** ([Janome](https://github.com/mocobeta/janome),
+   reines Python – jedes Wort auf seine Wörterbuch-Grundform zurückgeführt, z. B.
+   „大きく" → „大きい") und die gefundenen Wörter gegen WaniKani abgeglichen;
+   Treffer werden wie im Kompositions-Modus rekursiv in Kanji &amp; Radicals
+   zerlegt. **Besonderheit:** Bei gefundenen Vokabeln wird der Original-Satz aus
+   deinem Text als **erster Beispielsatz** auf der Karte verwendet (WaniKanis
+   eigener Beispielsatz rutscht dafür als weiterer Satz nach hinten, geht also
+   nicht verloren) – sowohl auf der eigenständigen Vokabel-Karte als auch im
+   eingebetteten Beispiel einer Kanji-Karte, falls dieselbe Vokabel dort
+   herangezogen wird.
+4. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
    starten mit einem **Layout-Vorschlag** (Vorderseite: groß & zentriert;
    Rückseite: Titel · Freitext · Merk-Box). Die **Tags** werden separat eingegeben
    und immer vorne oben rechts gedruckt. Optional aus WaniKani vorbefüllen.
 
-Alle drei Wege füllen dieselbe **Tabelle**; dort wählt man ein oder mehrere
-Elemente aus und erzeugt daraus **ein PDF**.
+Alle vier Wege füllen dieselbe **Tabelle**; dort wählt man ein oder mehrere
+Elemente aus und erzeugt daraus **ein PDF** oder **Anki-Paket**.
+
+**Bereits Exportiertes wird sich gemerkt:** Jede Zeile, deren Subject-ID schon
+einmal in einem erfolgreich abgeschlossenen Export (PDF oder Anki, aus dem
+**Verlauf**) enthalten war, wird in der Tabelle mit einem dezenten
+„✓ exportiert"-Badge markiert und ist **standardmäßig abgewählt** – alles
+andere bleibt wie gewohnt angehakt. Besonders im Text-Modus hilfreich: einen
+zweiten Text einfügen, und nur die wirklich neuen Wörter sind vorausgewählt.
+Betrifft alle vier Modi (nicht nur „Aus Text"), da es zentral über den
+Job-Verlauf ermittelt wird – keine eigene Datenbank nötig.
 
 ## Druck-Layouts (`--layout`)
 
@@ -113,6 +133,17 @@ Mehrere Vokabeln nacheinander gesucht und angeklickt – die Kompositionen häng
 sich an dieselbe Tabelle an (hier 一人 + 大きい, 8 Karten kombiniert):
 
 ![Web-Frontend: Komposition anhängen](previews/webui_compose_append.png)
+
+**Aus Text:** ein Text eingefügt, lemmatisiert und rekursiv aufgelöst – alles
+noch nicht Exportierte ist angehakt:
+
+![Web-Frontend: Aus Text](previews/webui_text.png)
+
+Denselben Text ein zweites Mal aufgelöst, nachdem die Karten bereits
+exportiert wurden – alle Zeilen sind mit „✓ exportiert" markiert und
+automatisch **abgewählt**:
+
+![Web-Frontend: Aus Text, bereits exportiert](previews/webui_text_exported.png)
 
 **Radicals** und **A6 (eine Karte/Seite)**:
 
@@ -350,6 +381,15 @@ Card-Objekte wie der PDF-Pfad wiederverwendet (`kc.resolve_subject_deck()` /
 `kc.build_custom_card()`) und `genanki` nur bei tatsächlicher Nutzung importiert
 (`--anki` bzw. Format „Anki“ im Web-Frontend).
 
+Der Text-Modus (`lemmatize_text()`, `resolve_text()`) nutzt
+[Janome](https://github.com/mocobeta/janome) für die Lemmatisierung (reines
+Python, keine System-Abhängigkeit) und danach denselben
+`resolve_composition()`-Pfad wie der Kompositions-Modus. „Eigener Beispielsatz
+aus dem Text" wird als `sentence_overrides` (Vokabel-Subject-ID →
+`{"ja", "en"}`) bis zum Rendern durchgereicht (`resolve_subject_deck()` →
+`build_card()` / `build_vocab_card()`) – WaniKanis eigene Beispielsätze gehen
+dabei nicht verloren, sie rutschen nur eine Position nach hinten.
+
 ## Tests
 
 ```bash
@@ -358,4 +398,6 @@ pytest
 ```
 
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
-`paginate`, `build_card` und `strip_markup`.
+`paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`resolve_text`
+(Text-Modus) sowie das Auflösen bereits exportierter Subject-IDs im
+Web-Frontend (`webapp._already_exported_ids`).

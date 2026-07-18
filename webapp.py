@@ -132,6 +132,35 @@ def list_jobs() -> list[dict[str, Any]]:
     return jobs
 
 
+def _already_exported_ids() -> set[int]:
+    """Subject-IDs, die schon einmal erfolgreich exportiert wurden (PDF oder Anki).
+
+    Liest den Job-Verlauf statt einer eigenen Datenbank – ein Job ist bereits
+    die vollständige Aufzeichnung, was wann gerendert wurde.
+    """
+    ids: set[int] = set()
+    for job in list_jobs():
+        if job.get("status") != "done":
+            continue
+        for sid in (job.get("params") or {}).get("subject_ids") or []:
+            try:
+                ids.add(int(sid))
+            except (TypeError, ValueError):
+                continue
+    return ids
+
+
+def _mark_exported(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`already_exported` an jede Tabellenzeile anhängen (Default-Auswahl im Frontend)."""
+    exported = _already_exported_ids()
+    for c in cards:
+        try:
+            c["already_exported"] = int(c["id"]) in exported
+        except (TypeError, ValueError):
+            c["already_exported"] = False
+    return cards
+
+
 # ---------- Eigene Karten (customcards/) ------------------------------------ #
 
 def _custom_path(cid: str) -> Path:
@@ -225,6 +254,7 @@ def _run_render(job_id: str) -> None:
                         deck_name=deck_name,
                         use_cache=p.get("use_cache", True),
                         sample=p.get("sample", False),
+                        sentence_overrides=p.get("sentence_overrides"),
                     )
             else:
                 common = dict(
@@ -247,6 +277,7 @@ def _run_render(job_id: str) -> None:
                         out_path,
                         use_cache=p.get("use_cache", True),
                         sample=p.get("sample", False),
+                        sentence_overrides=p.get("sentence_overrides"),
                         **common,
                     )
             job["status"] = "done"
@@ -324,11 +355,12 @@ def api_test_token() -> Any:
 def api_resolve() -> Any:
     """Quelle in eine Kartenliste (Tabelle) auflösen.
 
-    body.mode: "level" | "search" | "compose"
+    body.mode: "level" | "search" | "compose" | "text"
     """
     body = request.get_json(silent=True) or {}
     mode = body.get("mode")
     sample = bool(body.get("sample"))
+    sentence_overrides: dict[str, Any] = {}
     try:
         if not sample:
             _apply_token_env()
@@ -341,13 +373,17 @@ def api_resolve() -> Any:
         elif mode == "compose":
             ids = body.get("subject_ids") or []
             cards = kc.resolve_composition(ids, sample=sample)
+        elif mode == "text":
+            text = str(body.get("text", ""))
+            cards, sentence_overrides = kc.resolve_text(text, sample=sample)
         else:
             return jsonify({"error": "Unbekannter Modus."}), 400
     except (TypeError, ValueError):
         return jsonify({"error": "Ungültige Eingabe."}), 400
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
-    return jsonify({"cards": cards})
+    cards = _mark_exported(cards)
+    return jsonify({"cards": cards, "sentence_overrides": sentence_overrides})
 
 
 # ---------- API: Rendern (by ids) ------------------------------------------- #
@@ -366,6 +402,7 @@ def api_render() -> Any:
     if fmt == "pdf" and layout not in kc.LAYOUTS:
         return jsonify({"error": "Ungültiges Layout."}), 400
 
+    sentence_overrides = body.get("sentence_overrides")
     params = {
         "subject_ids": [int(i) for i in subject_ids] if subject_ids else [],
         "custom_ids": [str(i) for i in custom_ids] if custom_ids else [],
@@ -377,6 +414,7 @@ def api_render() -> Any:
         "hole": bool(body.get("hole", False)),
         "use_cache": not bool(body.get("no_cache", False)),
         "sample": bool(body.get("sample", False)),
+        "sentence_overrides": sentence_overrides if isinstance(sentence_overrides, dict) else {},
     }
     n = len(params["custom_ids"]) + len(params["subject_ids"])
     title = body.get("title") or f"{n} Karten"
