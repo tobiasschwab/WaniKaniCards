@@ -248,6 +248,12 @@ Jeder Kartentyp bekommt einen eigenen Anki-Notiztyp im Look der gedruckten Karte
 | **Vokabel** | ![Vokabel vorne](previews/anki_vocab_front.png) | ![Vokabel hinten](previews/anki_vocab_back.png) |
 | **Frei erstellt** | ![Frei vorne](previews/anki_custom_front.png) | ![Frei hinten](previews/anki_custom_back.png) |
 
+**Antwort eintippen:** Radical-, Kanji- und Vokabel-Karten fragen auf der
+Vorderseite aktiv die **Bedeutung** ab (Ankis natives `{{type:Field}}`) – Anki
+zeigt beim Aufdecken einen farbigen Vergleich zwischen Eingabe und korrekter
+Antwort. Freie Karten haben keine feste „richtige Antwort" und bleiben reine
+Aufdeck-Karten.
+
 Die WaniKani-Subject-ID (bzw. bei freien Karten deren gespeicherte ID) wird als
 stabile Anki-Notiz-ID verwendet: ein erneuter Export nach Lernfortschritt
 **aktualisiert** bestehende Notizen in Anki, statt sie zu duplizieren. Die

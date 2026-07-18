@@ -97,6 +97,14 @@ _CSS = """
 
 .wk-stage { display: flex; align-items: center; justify-content: center; min-height: 120px; }
 .wk-big { font-family: "WKSerif", "WKSans", serif; font-weight: 600; font-size: 82px; line-height: 1; }
+
+/* Antwort eintippen (Anki-{{type:Field}}): Prompt unter dem großen Zeichen. */
+.wk-typein { margin-top: 18px; }
+.wk-typein-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+  color: #999; margin-bottom: 5px;
+}
+.night_mode .wk-typein-label { color: #888; }
 .wk-big-img img { height: 100px; width: auto; max-width: 80%; object-fit: contain; }
 .wk-fallback { font-family: "WKSans"; font-weight: 700; font-size: 26px; }
 
@@ -187,6 +195,10 @@ _RADICAL_FRONT = """
 {{^Radical}}{{#RadicalImage}}<div class="wk-big wk-big-img">{{RadicalImage}}</div>{{/RadicalImage}}{{/Radical}}
 {{^Radical}}{{^RadicalImage}}<div class="wk-fallback">{{Meaning}}</div>{{/RadicalImage}}{{/Radical}}
 </div>
+<div class="wk-typein">
+  <div class="wk-typein-label">Bedeutung eingeben</div>
+  {{type:Meaning}}
+</div>
 """.strip()
 
 _RADICAL_BACK = """
@@ -206,6 +218,10 @@ _RADICAL_BACK = """
 _KANJI_FRONT = """
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage"><div class="wk-big">{{Kanji}}</div></div>
+<div class="wk-typein">
+  <div class="wk-typein-label">Bedeutung eingeben</div>
+  {{type:MeaningPlain}}
+</div>
 """.strip()
 
 _KANJI_BACK = """
@@ -227,6 +243,10 @@ _KANJI_BACK = """
 _VOCAB_FRONT = """
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage"><div class="wk-big" style="font-size:{{VocabFontSize}}px;">{{Vocab}}</div></div>
+<div class="wk-typein">
+  <div class="wk-typein-label">Bedeutung eingeben</div>
+  {{type:MeaningPlain}}
+</div>
 """.strip()
 
 _VOCAB_BACK = """
@@ -273,7 +293,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 {"name": n}
                 for n in (
                     "Kanji", "MeaningsHtml", "Onyomi", "Kunyomi", "CompositionHtml",
-                    "MnemonicsHtml", "VocabHtml", "SentenceHtml", "TagsHtml",
+                    "MnemonicsHtml", "VocabHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
                 )
             ],
             templates=[{"name": "Kanji", "qfmt": _KANJI_FRONT, "afmt": _KANJI_BACK}],
@@ -287,7 +307,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 {"name": n}
                 for n in (
                     "Vocab", "VocabFontSize", "MeaningsHtml", "Readings",
-                    "PartsOfSpeech", "MnemonicsHtml", "SentenceHtml", "TagsHtml",
+                    "PartsOfSpeech", "MnemonicsHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
                 )
             ],
             templates=[{"name": "Vokabel", "qfmt": _VOCAB_FRONT, "afmt": _VOCAB_BACK}],
@@ -326,6 +346,11 @@ def _meanings_html(meanings: list[str]) -> str:
         f'<span class="sec">&nbsp;· {_esc(", ".join(rest))}</span>' if rest else ""
     )
     return f'<span class="wk-meaning">{primary}{secondary}</span>'
+
+
+def _first_plain(meanings: list[str]) -> str:
+    """Primäre Bedeutung als reiner Text – Vergleichsfeld für Anki {{type:Field}}."""
+    return _esc(meanings[0]) if meanings else ""
 
 
 def _mnemonics_html(meaning_mnemonic: str | None, reading_mnemonic: str | None) -> str:
@@ -465,6 +490,7 @@ def _kanji_note(genanki: Any, model: Any, card: kc.Card) -> Any:
         _vocab_example_html(card.vocab, card.vocab_reading, card.vocab_meaning, card.vocab_audio_url),
         _sentence_html(card.sentence_ja, card.sentence_en, card.sentence_audio_url),
         _tags_html(card.tags),
+        _first_plain(card.meanings),
     ]
     guid = genanki.guid_for("wkcards", "kanji", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
@@ -480,6 +506,7 @@ def _vocab_note(genanki: Any, model: Any, card: kc.VocabCard) -> Any:
         _mnemonics_html(card.meaning_mnemonic, card.reading_mnemonic),
         _sentence_html(card.sentence_ja, card.sentence_en),
         _tags_html(card.tags),
+        _first_plain(card.meanings),
     ]
     guid = genanki.guid_for("wkcards", "vocab", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)

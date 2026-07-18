@@ -117,6 +117,45 @@ def Card_(**kwargs):
 
 
 # --------------------------------------------------------------------------- #
+# Antwort eintippen ({{type:Field}})
+# --------------------------------------------------------------------------- #
+
+def test_radical_front_template_has_type_in_meaning():
+    assert "{{type:Meaning}}" in ae._RADICAL_FRONT
+
+
+def test_kanji_front_template_has_type_in_meaning_plain():
+    assert "{{type:MeaningPlain}}" in ae._KANJI_FRONT
+
+
+def test_vocab_front_template_has_type_in_meaning_plain():
+    assert "{{type:MeaningPlain}}" in ae._VOCAB_FRONT
+
+
+def test_custom_front_template_has_no_type_in():
+    # Freie Karten haben keine feste "richtige Antwort" – kein Eintippen.
+    assert "{{type:" not in ae._CUSTOM_FRONT
+
+
+def test_kanji_note_meaning_plain_matches_primary_meaning():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = Card_(kanji="大", meanings=["Big", "Large"], subject_id=1)
+    note = ae._kanji_note(genanki, models["kanji"], card)
+    field_names = [f["name"] for f in models["kanji"].fields]
+    assert note.fields[field_names.index("MeaningPlain")] == "Big"
+
+
+def test_vocab_note_meaning_plain_matches_primary_meaning():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.VocabCard(vocab="大きい", meanings=["Big", "Large"], subject_id=1)
+    note = ae._vocab_note(genanki, models["vocab"], card)
+    field_names = [f["name"] for f in models["vocab"].fields]
+    assert note.fields[field_names.index("MeaningPlain")] == "Big"
+
+
+# --------------------------------------------------------------------------- #
 # End-to-End: .apkg-Datei
 # --------------------------------------------------------------------------- #
 
