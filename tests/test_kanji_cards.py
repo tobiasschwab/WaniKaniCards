@@ -199,7 +199,7 @@ def test_build_card_full():
     }
     card = build_card(kanji, vmap)
     assert card.kanji == "山"
-    assert card.meanings == ["Mountain", "Hill"]
+    assert card.meanings == ["mountain", "hill"]
     assert card.onyomi == ["さん"]
     assert card.kunyomi == ["やま"]  # nanori wird nicht als kunyomi geführt
     # Mnemonics werden übernommen und WaniKani-Markup gestrippt
@@ -207,7 +207,7 @@ def test_build_card_full():
     assert card.reading_mnemonic == "Read さん like Mountain-san."
     assert card.vocab == "山"
     assert card.vocab_reading == "やま"
-    assert card.vocab_meaning == "Mountain"
+    assert card.vocab_meaning == "mountain"
     assert card.sentence_ja == "山に登る。"
     assert card.sentence_en == "Climb a mountain."
 
@@ -378,7 +378,7 @@ def test_build_card_resolves_composition():
     }
     card = build_card(kanji, subject_map)
     assert [c["radical"] for c in card.components] == ["人", ""]
-    assert [c["meaning"] for c in card.components] == ["Person", "Big"]
+    assert [c["meaning"] for c in card.components] == ["person", "big"]
     # Bild-Radical ohne Zeichen führt die eingebettete Bild-URI mit.
     assert card.components[1]["image_uri"] == "data:image/png;base64,AAA"
 
@@ -419,9 +419,9 @@ def test_build_radical_card_full():
     card = build_radical_card(radical, kanji_map)
     assert isinstance(card, RadicalCard)
     assert card.radical == "山"
-    assert card.meaning == "Mountain"
+    assert card.meaning == "mountain"
     assert card.mnemonic == "Three peaks = a Mountain."  # Markup gestrippt
-    assert card.kanji_examples == [("山", "さん", "Mountain"), ("岩", "がん", "Boulder")]
+    assert card.kanji_examples == [("山", "さん", "mountain"), ("岩", "がん", "boulder")]
 
 
 def test_build_radical_card_image_only():
@@ -465,7 +465,7 @@ def test_build_vocab_card():
     assert isinstance(card, VocabCard)
     assert card.vocab == "一人"
     assert card.readings == ["ひとり"]
-    assert card.meanings == ["Alone"]
+    assert card.meanings == ["alone"]
     assert card.parts_of_speech == ["noun"]
     assert card.meaning_mnemonic == "一人 is alone."  # Markup gestrippt
     assert card.sentence_ja == "一人で行く。"

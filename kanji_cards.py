@@ -166,6 +166,11 @@ def strip_markup(text: str | None) -> str | None:
     return _TAG_RE.sub("", text).strip()
 
 
+def _lower_first(text: str) -> str:
+    """Ersten Buchstaben klein schreiben (WaniKani liefert Meanings groß, z. B. 'Fins')."""
+    return text[:1].lower() + text[1:] if text else text
+
+
 def _int_or_none(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
@@ -394,11 +399,15 @@ class WaniKaniClient:
 # Modell-Aufbau
 # --------------------------------------------------------------------------- #
 
-def _primary_first(items: Sequence[dict[str, Any]], key: str) -> list[str]:
+def _primary_first(
+    items: Sequence[dict[str, Any]], key: str, lower_first: bool = False
+) -> list[str]:
     """Werte extrahieren, primäre Einträge zuerst, Reihenfolge sonst erhalten."""
     primary = [strip_markup(i[key]) for i in items if i.get("primary")]
     rest = [strip_markup(i[key]) for i in items if not i.get("primary")]
     out = [v for v in (primary + rest) if v]
+    if lower_first:
+        out = [_lower_first(v) for v in out]
     # Duplikate entfernen, Reihenfolge erhalten
     seen: set[str] = set()
     result: list[str] = []
@@ -514,7 +523,7 @@ def _build_components(
         if not comp:
             continue
         cdata = comp.get("data", {})
-        cmeanings = _primary_first(cdata.get("meanings", []), "meaning")
+        cmeanings = _primary_first(cdata.get("meanings", []), "meaning", lower_first=True)
         char = strip_markup(cdata.get("characters")) or ""
         image_uri = cdata.get("_image_data_uri")
         if not char and not image_uri and image_fetcher is not None:
@@ -556,7 +565,7 @@ def build_card(
 
     card = Card(
         kanji=strip_markup(data.get("characters")) or "",
-        meanings=_primary_first(data.get("meanings", []), "meaning"),
+        meanings=_primary_first(data.get("meanings", []), "meaning", lower_first=True),
         onyomi=onyomi,
         kunyomi=kunyomi,
         meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
@@ -573,7 +582,7 @@ def build_card(
         card.vocab = strip_markup(vdata.get("characters"))
         vreadings = _primary_first(vdata.get("readings", []), "reading")
         card.vocab_reading = vreadings[0] if vreadings else None
-        vmeanings = _primary_first(vdata.get("meanings", []), "meaning")
+        vmeanings = _primary_first(vdata.get("meanings", []), "meaning", lower_first=True)
         card.vocab_meaning = vmeanings[0] if vmeanings else None
         card.vocab_audio_url = _resolve_audio_url(
             _pick_audio_url(vdata.get("pronunciation_audios")), image_fetcher
@@ -626,7 +635,7 @@ def build_radical_card(
     kein Unicode-Zeichen hat oder zusätzlich ein Bild vorliegt.
     """
     data = radical.get("data", {})
-    meanings = _primary_first(data.get("meanings", []), "meaning")
+    meanings = _primary_first(data.get("meanings", []), "meaning", lower_first=True)
 
     card = RadicalCard(
         radical=strip_markup(data.get("characters")) or "",
@@ -660,7 +669,7 @@ def build_radical_card(
         readings = _primary_first(
             [r for r in kdata.get("readings", []) if r.get("primary")], "reading"
         ) or _primary_first(kdata.get("readings", []), "reading")
-        kmeanings = _primary_first(kdata.get("meanings", []), "meaning")
+        kmeanings = _primary_first(kdata.get("meanings", []), "meaning", lower_first=True)
         if chars:
             examples.append(
                 (chars, readings[0] if readings else "", kmeanings[0] if kmeanings else "")
@@ -688,7 +697,7 @@ def build_vocab_card(
     card = VocabCard(
         vocab=strip_markup(data.get("characters")) or "",
         readings=_primary_first(data.get("readings", []), "reading"),
-        meanings=_primary_first(data.get("meanings", []), "meaning"),
+        meanings=_primary_first(data.get("meanings", []), "meaning", lower_first=True),
         parts_of_speech=[p for p in (data.get("parts_of_speech") or []) if p],
         meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
@@ -1315,7 +1324,7 @@ _OBJ_KIND = {"kanji": "Kanji", "radical": "Radical", "vocabulary": "Vocab"}
 def _subject_descriptor(subject: dict[str, Any]) -> dict[str, Any]:
     """Kompakte Beschreibung eines Subjects für die Tabelle im Frontend."""
     data = subject.get("data", {})
-    meanings = _primary_first(data.get("meanings", []), "meaning")
+    meanings = _primary_first(data.get("meanings", []), "meaning", lower_first=True)
     obj = subject.get("object", "")
     return {
         "id": int(subject.get("id")),
