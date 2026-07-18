@@ -781,10 +781,8 @@ def _card_to_dict(
         "vocab": card.vocab,
         "vocab_reading": card.vocab_reading,
         "vocab_meaning": card.vocab_meaning,
-        "vocab_audio_url": card.vocab_audio_url,
         "sentence_ja": card.sentence_ja,
         "sentence_en": card.sentence_en,
-        "sentence_audio_url": card.sentence_audio_url,
         "components": card.components,
         "tags": card.tags,
     }

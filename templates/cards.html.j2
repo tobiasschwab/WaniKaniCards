@@ -546,19 +546,6 @@
     margin-top: 0.6mm;
   }
 
-  /* Vertonung (Vokabel/Beispielsatz): dezenter Link, im PDF-Viewer klickbar
-     (öffnet die Audio-URL) – auf Papier nur ein stiller Hinweis auf den
-     Datensatz. Kein Symbol/Emoji, um WeasyPrint-Font-Fallbacks zu vermeiden. */
-  .audio-link {
-    font-size: 7pt;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-    color: #4a7a3a;
-    text-decoration: underline;
-    margin-left: 1.8mm;
-  }
-
   /* Kleines Referenz-Kanji im reservierten Loch-Band (Gegenseite zum Loch). */
   .kanji-mini {
     position: absolute;
@@ -784,14 +771,13 @@
               <span class="word">{{ cell.vocab }}</span>
               {% if cell.vocab_reading %}<span class="vreading">{{ cell.vocab_reading }}</span>{% endif %}
               {% if cell.vocab_meaning %}<span class="gloss">{{ cell.vocab_meaning }}</span>{% endif %}
-              {% if cell.vocab_audio_url %}<a class="audio-link" href="{{ cell.vocab_audio_url }}">Audio</a>{% endif %}
             </div>
           </div>
           {% endif %}
 
           {% if cell.sentence_ja %}
           <div class="sentence">
-            <div class="ja">{{ cell.sentence_ja }}{% if cell.sentence_audio_url %}<a class="audio-link" href="{{ cell.sentence_audio_url }}">Audio</a>{% endif %}</div>
+            <div class="ja">{{ cell.sentence_ja }}</div>
             {% if cell.sentence_en %}<div class="en">{{ cell.sentence_en }}</div>{% endif %}
           </div>
           {% endif %}

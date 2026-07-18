@@ -15,11 +15,12 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
   das Kanji besteht, mit Bedeutung) · **Eselsbrücken** (Mnemonic & Reading) ·
   eine Beispielvokabel mit Lesung · ein Beispielsatz mit Übersetzung – beide
   optional mit **Vertonung** (`vocab_audio_url` / `sentence_audio_url` auf der
-  `Card`): im PDF ein dezenter, klickbarer „Audio“-Link, im Anki-Export ein
-  abspielbarer Player. Vokabel-Audio wird automatisch aus WaniKanis
-  `pronunciation_audios` übernommen; für Beispielsätze liefert WaniKani selbst
-  keine Vertonung – dieses Feld (`context_sentences[0].audios`, gleiches
-  Schema) lässt sich manuell in den Subject-Daten nachtragen.
+  `Card`), die als abspielbarer Player **nur im Anki-Export** erscheint (im
+  PDF ohne Wirkung, da Papier nicht abspielbar ist). Vokabel-Audio wird
+  automatisch aus WaniKanis `pronunciation_audios` übernommen; für
+  Beispielsätze liefert WaniKani selbst keine Vertonung – dieses Feld
+  (`context_sentences[0].audios`, gleiches Schema) lässt sich manuell in den
+  Subject-Daten nachtragen.
 
 **Radical-Karten**
 
