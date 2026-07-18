@@ -29,7 +29,7 @@ from kanji_cards import (  # noqa: E402
     pick_example_vocab,
     resolve_composition,
     resolve_level,
-    resolve_text,
+    annotate_text,
     strip_markup,
     lemmatize_text,
     _resolve_audio_url,
@@ -684,36 +684,39 @@ def test_lemmatize_text_empty_string():
     assert lemmatize_text("") == []
 
 
-def test_resolve_text_finds_and_recursively_resolves_sample_data():
+def test_annotate_text_reconstructs_lines_exactly():
+    text = "大きい山に人が一人います。\n犬は口を大きく開けた。"
+    lines = annotate_text(text, sample=True)
+    assert len(lines) == 2
+    for original, segments in zip(text.split("\n"), lines):
+        assert "".join(s["text"] for s in segments) == original
+
+
+def test_annotate_text_marks_wanikani_matches_as_word_segments():
     text = "大きい山に人が一人います。"
-    descriptors, overrides = resolve_text(text, sample=True)
-    kinds = {d["kind"] for d in descriptors}
-    chars = {d["characters"] for d in descriptors}
-    # Kanji/Radicals werden über die Komposition der gefundenen Vokabeln/Kanji
-    # nachgeladen (rekursiv), nicht nur die direkten Text-Treffer.
-    assert "Radical" in kinds and "Kanji" in kinds
-    assert "山" in chars and "人" in chars
+    lines = annotate_text(text, sample=True)
+    words = {s["lemma"]: s for s in lines[0] if s["type"] == "word"}
+    assert "大きい" in words
+    assert words["大きい"]["kind"] == "Vocab"
+    assert words["大きい"]["meaning"] == "big"
+    assert words["大きい"]["sentence"] == text
 
 
-def test_resolve_text_sentence_override_keyed_by_vocab_subject_id():
-    text = "大きい山に人が一人います。"
-    descriptors, overrides = resolve_text(text, sample=True)
-    vocab_ids = {d["id"] for d in descriptors if d["kind"] == "Vocab"}
-    assert vocab_ids  # mindestens eine Vokabel wurde gefunden
-    assert set(overrides).issubset(vocab_ids)
-    for sid, o in overrides.items():
-        assert o["ja"] == text
-        assert o["en"] is None
+def test_annotate_text_prefers_vocabulary_over_kanji_for_same_lemma():
+    # "一" ist in den Sample-Daten sowohl Vokabel (id 2467) als auch Kanji
+    # (id 440) und Radical (id 1) – im Lesefluss soll das Wort gewinnen.
+    lines = annotate_text("一人います。", sample=True)
+    words = [s for s in lines[0] if s["type"] == "word" and s["lemma"] == "一"]
+    assert words and words[0]["kind"] == "Vocab"
 
 
-def test_resolve_text_raises_on_empty_text():
-    with pytest.raises(WaniKaniError):
-        resolve_text("", sample=True)
+def test_annotate_text_no_match_stays_plain_text():
+    lines = annotate_text("asdf qwer zxcv", sample=True)
+    assert all(s["type"] == "text" for s in lines[0])
 
 
-def test_resolve_text_raises_when_nothing_matches():
-    with pytest.raises(WaniKaniError):
-        resolve_text("asdf qwer zxcv", sample=True)
+def test_annotate_text_empty_string_returns_single_empty_line():
+    assert annotate_text("", sample=True) == [[]]
 
 
 # --------------------------------------------------------------------------- #
@@ -812,12 +815,20 @@ def test_build_card_sentence_overrides_ignores_unrelated_ids():
     assert card.sentence_ja == "犬がいます。"
 
 
+def _word_segments(text: str) -> list[dict]:
+    lines = annotate_text(text, sample=True)
+    return [s for line in lines for s in line if s["type"] == "word"]
+
+
 def test_resolve_subject_deck_threads_sentence_overrides():
     from kanji_cards import resolve_subject_deck
 
     text = "大きい山に人が一人います。"
-    descriptors, overrides = resolve_text(text, sample=True)
-    ids = [d["id"] for d in descriptors]
+    words = _word_segments(text)
+    ids = [w["id"] for w in words]
+    overrides = {
+        w["id"]: {"ja": w["sentence"], "en": None} for w in words if w["kind"] == "Vocab"
+    }
     deck = resolve_subject_deck(ids, sample=True, sentence_overrides=overrides)
     vocab_cards = {c.subject_id: c for c in deck if isinstance(c, VocabCard)}
     for sid, override in overrides.items():
@@ -829,8 +840,11 @@ def test_resolve_subject_deck_normalizes_string_keyed_overrides():
     from kanji_cards import resolve_subject_deck
 
     text = "大きい山に人が一人います。"
-    descriptors, overrides = resolve_text(text, sample=True)
-    ids = [d["id"] for d in descriptors]
+    words = _word_segments(text)
+    ids = [w["id"] for w in words]
+    overrides = {
+        w["id"]: {"ja": w["sentence"], "en": None} for w in words if w["kind"] == "Vocab"
+    }
     string_keyed = {str(k): v for k, v in overrides.items()}
     deck = resolve_subject_deck(ids, sample=True, sentence_overrides=string_keyed)
     vocab_cards = {c.subject_id: c for c in deck if isinstance(c, VocabCard)}

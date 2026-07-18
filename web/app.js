@@ -21,7 +21,14 @@ let composeLabels = [];
 
 // Text-Modus: Subject-ID → {ja, en} – eigener Beispielsatz aus dem Text,
 // wird beim Rendern mitgeschickt und dort als erster Satz eingesetzt.
+// Wird NICHT bei jedem renderTable() zurückgesetzt (siehe dort), sondern
+// akkumuliert über mehrere "Zur Tabelle"-Klicks im Text-Popup hinweg.
 let sentenceOverrides = {};
+
+// Text-Modus: die zuletzt annotierten Zeilen (für Popup-Lookups und die
+// Bekannt-Prozent-Anzeige, ohne bei jeder Markierung neu vom Server zu holen).
+let textLines = [];
+let activeWordSeg = null;
 
 // ---------- Helpers ----------
 function toast(msg, isErr) {
@@ -126,7 +133,6 @@ function showResolveError(m) { const el = $("#resolveError"); el.textContent = "
 
 function renderTable(list, title, mode) {
   cards = list; tableMode = mode || "subject"; selected.clear();
-  sentenceOverrides = {}; // nur der Text-Modus setzt das direkt danach wieder
   $("#tableTitle").textContent = title + ` (${list.length})`;
   $("#thActions").classList.toggle("hidden", tableMode !== "custom");
   const tb = $("#tableBody"); tb.innerHTML = "";
@@ -213,29 +219,123 @@ function appendComposition(newCards, label) {
   renderTable(composeAccum, title, "subject");
 }
 function clearCompose() {
-  composeAccum = []; composeLabels = [];
+  composeAccum = []; composeLabels = []; sentenceOverrides = {};
   cards = []; selected.clear();
   $("#tablePanel").classList.add("hidden");
 }
 
 // ---------- Text-Modus ----------
-async function doTextResolve() {
+async function doTextProcess() {
   const text = $("#textInput").value;
   if (!text.trim()) return;
   $("#textStatus").textContent = "Analysiere…";
-  $("#resolveError").classList.add("hidden");
   let r;
   try {
-    r = await api("/api/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "text", text, sample: isSample() }) });
+    r = await api("/api/text-annotate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample() }) });
   } catch (e) {
     $("#textStatus").textContent = "";
-    showResolveError(e.message);
+    toast(e.message, true);
     return;
   }
   $("#textStatus").textContent = "";
-  if (!r.cards || r.cards.length === 0) { showResolveError("Keine WaniKani-Treffer im Text gefunden."); return; }
-  renderTable(r.cards, "Aus Text", "subject");
-  sentenceOverrides = r.sentence_overrides || {};
+  textLines = r.lines || [];
+  renderAnnotatedText(textLines);
+  updateTextStats(r.stats);
+  $("#textInputWrap").classList.add("hidden");
+  $("#textResultWrap").classList.remove("hidden");
+}
+
+function backToTextEdit() {
+  $("#textResultWrap").classList.add("hidden");
+  $("#textInputWrap").classList.remove("hidden");
+  closeWordPopup();
+}
+
+function updateTextStats(stats) {
+  if (!stats || !stats.total) { $("#textStats").innerHTML = '<span class="muted">Keine WaniKani-Wörter im Text erkannt.</span>'; return; }
+  $("#textStats").innerHTML = `<span class="pct">${String(stats.percent).replace(".", ",")} %</span> bekannt (${stats.known} von ${stats.total} erkannten Wörtern)`;
+}
+
+function renderAnnotatedText(lines) {
+  const wrap = $("#textDisplay");
+  wrap.innerHTML = "";
+  for (const line of lines) {
+    const p = document.createElement("div");
+    p.className = "text-line";
+    if (!line.length) { p.innerHTML = "&nbsp;"; wrap.append(p); continue; }
+    for (const seg of line) {
+      if (seg.type === "word") {
+        const span = document.createElement("span");
+        span.className = "word-token " + (seg.known ? "known" : "unknown");
+        span.dataset.id = String(seg.id);
+        span.textContent = seg.text;
+        span._seg = seg;
+        span.addEventListener("click", (e) => openWordPopup(e.currentTarget, seg));
+        p.append(span);
+      } else {
+        p.append(document.createTextNode(seg.text));
+      }
+    }
+    wrap.append(p);
+  }
+}
+
+function openWordPopup(el, seg) {
+  activeWordSeg = seg;
+  const pop = $("#wordPopup");
+  $("#wpChar").textContent = seg.text;
+  $("#wpKind").textContent = seg.kind;
+  $("#wpKind").className = "tag-mini " + seg.object;
+  $("#wpLevel").textContent = seg.level ? `Lv ${seg.level}` : "";
+  $("#wpMeaning").textContent = seg.meaning || "";
+  $("#wpExportedNote").classList.toggle("hidden", !seg.already_exported);
+  $("#wpKnown").textContent = seg.manually_known ? "Bekannt-Markierung entfernen" : "Als bekannt markieren";
+
+  const rect = el.getBoundingClientRect();
+  pop.classList.remove("hidden");
+  const popW = pop.offsetWidth || 240;
+  let left = rect.left;
+  if (left + popW > window.innerWidth - 10) left = window.innerWidth - popW - 10;
+  pop.style.left = `${Math.max(10, left)}px`;
+  pop.style.top = `${rect.bottom + 8}px`;
+}
+function closeWordPopup() { $("#wordPopup").classList.add("hidden"); activeWordSeg = null; }
+
+async function addWordFromPopup() {
+  const seg = activeWordSeg;
+  if (!seg) return;
+  const comp = await resolve({ mode: "compose", subject_ids: [seg.id] });
+  if (!comp) return;
+  if (seg.kind === "Vocab" && seg.sentence) {
+    sentenceOverrides[String(seg.id)] = { ja: seg.sentence, en: null };
+  }
+  appendComposition(comp, seg.text);
+  toast(`${seg.text} zur Tabelle hinzugefügt`);
+  closeWordPopup();
+}
+
+async function toggleKnownFromPopup() {
+  const seg = activeWordSeg;
+  if (!seg) return;
+  const makeKnown = !seg.manually_known;
+  try {
+    await api(`/api/known/${seg.id}`, { method: makeKnown ? "POST" : "DELETE" });
+  } catch (e) { toast(e.message, true); return; }
+  let known = 0, total = 0;
+  for (const line of textLines) {
+    for (const s of line) {
+      if (s.type !== "word") continue;
+      total++;
+      if (s.id === seg.id) { s.manually_known = makeKnown; s.known = makeKnown || s.already_exported; }
+      if (s.known) known++;
+    }
+  }
+  document.querySelectorAll(`.word-token[data-id="${seg.id}"]`).forEach((span) => {
+    span.className = "word-token " + (span._seg.known ? "known" : "unknown");
+  });
+  updateTextStats({ known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 });
+  toast(makeKnown ? `${seg.text} als bekannt markiert` : `${seg.text} nicht mehr als bekannt markiert`);
+  closeWordPopup();
 }
 
 // ---------- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) ----------
@@ -329,6 +429,7 @@ async function saveCustom() {
 async function loadCustoms() {
   let list = [];
   try { list = await api("/api/customcards"); } catch (_) {}
+  sentenceOverrides = {};
   renderTable(list, "Eigene Karten", "custom");
 }
 async function prefillFromWk() {
@@ -398,16 +499,13 @@ function pollJob(id) {
 function showPreview(job) {
   const isAnki = (job.params && job.params.format) === "anki";
   const url = isAnki ? `/api/jobs/${job.id}/apkg` : `/api/jobs/${job.id}/pdf`;
-  if (isAnki) {
-    $("#previewFrame").classList.add("hidden");
-    const pe = $("#previewEmpty");
-    pe.innerHTML = '<div class="ph-icon">🎴</div><p>Anki-Paket bereit – <strong>herunterladen</strong> und in Anki importieren (Datei → Importieren).</p>';
-    pe.classList.remove("hidden");
-  } else {
-    $("#previewEmpty").classList.add("hidden");
-    const f = $("#previewFrame"); f.src = `${url}#view=FitH`; f.classList.remove("hidden");
-  }
-  const dl = $("#downloadBtn"); dl.href = `${url}?download=1`; dl.classList.remove("hidden");
+  $("#previewEmpty").classList.add("hidden");
+  $("#previewIcon").textContent = isAnki ? "🎴" : "📄";
+  $("#previewReadyText").innerHTML = isAnki
+    ? "Anki-Paket bereit – herunterladen und in Anki importieren (Datei → Importieren)."
+    : "PDF bereit zum Download.";
+  $("#downloadBtn").href = `${url}?download=1`;
+  $("#previewReady").classList.remove("hidden");
 }
 async function loadHistory() {
   let jobs = [];
@@ -475,12 +573,23 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!types.length) return;
     const labels = { radicals: "Radicals", kanji: "Kanji", vocabulary: "Vokabeln" };
     const list = await resolve({ mode: "level", level, types });
-    if (list) renderTable(list, `Level ${level} · ${types.map((t) => labels[t]).join(" + ")}`, "subject");
+    if (list) { sentenceOverrides = {}; renderTable(list, `Level ${level} · ${types.map((t) => labels[t]).join(" + ")}`, "subject"); }
   });
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
   $("#btnComposeClear").addEventListener("click", clearCompose);
-  $("#btnTextResolve").addEventListener("click", doTextResolve);
+  $("#btnComposeClear2").addEventListener("click", clearCompose);
+  $("#btnTextProcess").addEventListener("click", doTextProcess);
+  $("#btnTextEdit").addEventListener("click", backToTextEdit);
+  $("#wpAdd").addEventListener("click", addWordFromPopup);
+  $("#wpKnown").addEventListener("click", toggleKnownFromPopup);
+  $("#wordPopupClose").addEventListener("click", closeWordPopup);
+  document.addEventListener("click", (e) => {
+    const pop = $("#wordPopup");
+    if (pop.classList.contains("hidden")) return;
+    if (pop.contains(e.target) || e.target.classList.contains("word-token")) return;
+    closeWordPopup();
+  });
 
   // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)
   document.querySelectorAll(".rt-toolbar button").forEach((b) => {

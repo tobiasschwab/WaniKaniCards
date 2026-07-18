@@ -85,17 +85,45 @@
         <p class="hint">Treffer anklicken → alle enthaltenen Kanji &amp; Radicals werden rekursiv aufgelöst und an die Tabelle unten <strong>angehängt</strong>. Mehrere Vokabeln nacheinander suchen &amp; anklicken, um sie zu kombinieren. „Tabelle leeren“ setzt zurück.</p>
       </div>
 
-      <!-- Text-Modus: Volltext lemmatisieren, Treffer rekursiv auflösen -->
+      <!-- Text-Modus: Volltext lemmatisieren, Wörter im Lesefluss anklicken -->
       <div id="modeText" class="mode hidden">
-        <label class="field">
-          <span class="label">Japanischer Text</span>
-          <textarea id="textInput" class="text" rows="6" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
-        </label>
-        <div class="row gap">
-          <button id="btnTextResolve" class="btn primary">Wörter finden</button>
-          <span id="textStatus" class="muted"></span>
+        <div id="textInputWrap">
+          <label class="field">
+            <span class="label">Japanischer Text</span>
+            <textarea id="textInput" class="text" rows="8" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
+          </label>
+          <div class="row gap">
+            <button id="btnTextProcess" class="btn primary">Verarbeiten</button>
+            <span id="textStatus" class="muted"></span>
+          </div>
+          <p class="hint">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren.</p>
         </div>
-        <p class="hint">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen; Treffer werden rekursiv in Kanji &amp; Radicals zerlegt. Bereits exportierte Karten sind unten vorab <strong>abgewählt</strong>. Bei gefundenen Vokabeln wird dein Satz aus dem Text als erster Beispielsatz auf der Karte verwendet.</p>
+
+        <div id="textResultWrap" class="hidden">
+          <div class="text-result-head">
+            <button id="btnTextEdit" class="btn small">✎ Text bearbeiten</button>
+            <div id="textStats" class="text-stats"></div>
+            <button id="btnComposeClear2" class="btn small">Tabelle leeren</button>
+          </div>
+          <div id="textDisplay" class="text-display"></div>
+          <p class="hint"><span class="word-legend known">bekannt</span> = bereits exportiert oder manuell markiert · <span class="word-legend unknown">unbekannt</span> = WaniKani-Treffer, noch nicht bekannt · Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.</p>
+        </div>
+      </div>
+
+      <!-- Wort-Popup (Text-Modus) -->
+      <div id="wordPopup" class="word-popup hidden">
+        <button id="wordPopupClose" class="word-popup-close" title="Schließen">✕</button>
+        <div class="word-popup-char" id="wpChar"></div>
+        <div class="word-popup-meta">
+          <span class="tag-mini" id="wpKind"></span>
+          <span id="wpLevel" class="muted"></span>
+        </div>
+        <div class="word-popup-meaning" id="wpMeaning"></div>
+        <div id="wpExportedNote" class="word-popup-note hidden">✓ bereits exportiert</div>
+        <div class="row gap" style="margin-top:10px">
+          <button id="wpAdd" class="btn primary small">+ Zur Tabelle</button>
+          <button id="wpKnown" class="btn small">Als bekannt markieren</button>
+        </div>
       </div>
 
       <!-- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) -->
@@ -215,13 +243,16 @@
     <section class="panel preview">
       <div class="preview-head">
         <h2>Vorschau</h2>
-        <a id="downloadBtn" class="btn small hidden" download>Download</a>
       </div>
       <div id="previewEmpty" class="preview-empty">
         <div class="ph-icon">📄</div>
-        <p>Noch kein PDF – Karten auflisten, auswählen und <strong>erzeugen</strong>.</p>
+        <p>Noch keine Datei – Karten auflisten, auswählen und <strong>erzeugen</strong>.</p>
       </div>
-      <iframe id="previewFrame" class="preview-frame hidden" title="PDF-Vorschau"></iframe>
+      <div id="previewReady" class="preview-empty hidden">
+        <div id="previewIcon" class="ph-icon">📄</div>
+        <p id="previewReadyText">Fertig.</p>
+        <a id="downloadBtn" class="btn primary" download>Download</a>
+      </div>
     </section>
 
     <!-- Verlauf -->

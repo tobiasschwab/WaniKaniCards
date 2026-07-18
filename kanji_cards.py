@@ -1234,63 +1234,111 @@ def lemmatize_text(text: str) -> list[tuple[str, str]]:
     return pairs
 
 
-def resolve_text(
+# Priorität, welcher Subject-Typ gewinnt, wenn ein Lemma auf mehrere Treffer
+# passt (z. B. ein Zeichen, das sowohl Vokabel als auch Kanji ist): Vokabeln
+# zuerst, da im Lesefluss Wörter (nicht einzelne Kanji) erkannt werden sollen.
+_ANNOTATE_KIND_PRIORITY = {"vocabulary": 0, "kanji": 1, "radical": 2}
+
+
+def annotate_text(
     text: str, *, use_cache: bool = True, sample: bool = False
-) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
-    """Volltext lemmatisieren, Treffer gegen WaniKani abgleichen und rekursiv auflösen.
+) -> list[list[dict[str, Any]]]:
+    """Text zeilenweise in Anzeige-Segmente zerlegen (für die schreibgeschützte
+    Textansicht im Text-Modus).
 
-    Ablauf: Text → Lemmata (Grundformen) je Satz → Lemmata als WaniKani-Slugs
-    nachschlagen (Vokabeln/Kanji/Radicals, was passt) → Treffer rekursiv über
-    `resolve_composition` in Kanji & Radicals zerlegen.
+    Jede Zeile wird zu einer Liste von Segmenten:
+    - `{"type": "text", "text": …}` – Text ohne WaniKani-Treffer (Partikel,
+      Satzzeichen, Verbendungen …), wird unverändert dargestellt.
+    - `{"type": "word", "text": Original-Schreibweise, "lemma": Grundform,
+      "sentence": Satz-aus-dem-Text, "id", "object", "kind", "meaning",
+      "level"}` – ein per Lemma gegen WaniKani abgeglichenes Wort (Vokabel/
+      Kanji/Radical, Vokabel bevorzugt).
 
-    Gibt `(Tabellen-Deskriptoren, Satz-Overrides)` zurück. `Satz-Overrides`
-    bildet Vokabel-Subject-ID → `{"ja": Satz-aus-dem-Text, "en": None}` ab –
-    wird beim Rendern als *erster* Beispielsatz eingesetzt (WaniKanis eigener
-    Satz rutscht dann als weiterer Satz nach hinten).
+    Reihung der Segmente pro Zeile ist so, dass `"".join(s["text"] für alle
+    Segmente)` wieder exakt die Original-Zeile ergibt (Janome liefert
+    Tokens, deren Surface-Formen sich lückenlos zur Eingabe zusammensetzen).
     """
-    pairs = lemmatize_text(text)
-    sentence_by_lemma: dict[str, str] = {}
-    order: list[str] = []
-    for lemma, sentence in pairs:
-        if lemma not in sentence_by_lemma:
-            sentence_by_lemma[lemma] = sentence
-            order.append(lemma)
-    if not order:
-        raise WaniKaniError("Kein auswertbarer Text gefunden.")
+    tokenizer = _get_tokenizer()
+    lines = text.split("\n")
 
-    if sample:
-        hits = [
-            s
-            for s in _sample_registry().values()
-            if strip_markup(s.get("data", {}).get("characters")) in sentence_by_lemma
-        ]
-    else:
-        client = _make_client(use_cache=use_cache)
-        hits = []
-        seen: set[int] = set()
-        for i in range(0, len(order), _TEXT_LOOKUP_CHUNK):
-            chunk = order[i : i + _TEXT_LOOKUP_CHUNK]
-            for s in client.search_subjects(",".join(chunk)):
-                sid = int(s["id"])
-                if sid not in seen:
-                    seen.add(sid)
-                    hits.append(s)
-    if not hits:
-        raise WaniKaniError("Keine passenden WaniKani-Einträge im Text gefunden.")
+    # Erste Runde: alle Zeilen tokenisieren, Satz-Zuordnung je Token merken,
+    # dabei alle vorkommenden Lemmata sammeln (für eine gebündelte Anfrage).
+    line_tokens: list[list[tuple[str, str, str]]] = []
+    all_lemmas: dict[str, None] = {}
+    for line in lines:
+        sentences = _split_sentences(line)
+        toks = list(tokenizer.tokenize(line)) if line.strip() else []
+        annotated: list[tuple[str, str, str]] = []
+        sent_idx = 0
+        consumed = 0
+        for tok in toks:
+            surface = tok.surface
+            lemma = (tok.base_form or surface or "").strip()
+            sentence = sentences[sent_idx] if sentences else line
+            annotated.append((surface, lemma, sentence))
+            if lemma and lemma != "*":
+                all_lemmas.setdefault(lemma, None)
+            if sentences:
+                consumed += len(surface)
+                if consumed >= len(sentences[sent_idx]) and sent_idx < len(sentences) - 1:
+                    sent_idx += 1
+                    consumed = 0
+        line_tokens.append(annotated)
 
-    root_ids = [int(s["id"]) for s in hits]
-    descriptors = resolve_composition(root_ids, use_cache=use_cache, sample=sample)
+    # Lemmata gebündelt gegen WaniKani abgleichen (slugs-Filter, wie bei den
+    # anderen Modi) – auch Nicht-Treffer sind völlig normal (Partikel etc.).
+    hits_by_chars: dict[str, list[dict[str, Any]]] = {}
+    if all_lemmas:
+        if sample:
+            for s in _sample_registry().values():
+                chars = strip_markup(s.get("data", {}).get("characters"))
+                if chars in all_lemmas:
+                    hits_by_chars.setdefault(chars, []).append(s)
+        else:
+            client = _make_client(use_cache=use_cache)
+            lemma_list = list(all_lemmas)
+            for i in range(0, len(lemma_list), _TEXT_LOOKUP_CHUNK):
+                chunk = lemma_list[i : i + _TEXT_LOOKUP_CHUNK]
+                for s in client.search_subjects(",".join(chunk)):
+                    chars = strip_markup(s.get("data", {}).get("characters"))
+                    if chars:
+                        hits_by_chars.setdefault(chars, []).append(s)
 
-    sentence_overrides: dict[int, dict[str, Any]] = {}
-    for s in hits:
-        if s.get("object") != "vocabulary":
-            continue
-        chars = strip_markup(s.get("data", {}).get("characters"))
-        sentence = sentence_by_lemma.get(chars)
-        if sentence:
-            sentence_overrides[int(s["id"])] = {"ja": sentence, "en": None}
+    best_by_lemma: dict[str, dict[str, Any]] = {}
+    for chars, subs in hits_by_chars.items():
+        subs.sort(key=lambda s: _ANNOTATE_KIND_PRIORITY.get(s.get("object"), 9))
+        best_by_lemma[chars] = subs[0]
 
-    return descriptors, sentence_overrides
+    lines_out: list[list[dict[str, Any]]] = []
+    for annotated in line_tokens:
+        segments: list[dict[str, Any]] = []
+        buf = ""
+        for surface, lemma, sentence in annotated:
+            match = best_by_lemma.get(lemma)
+            if match:
+                if buf:
+                    segments.append({"type": "text", "text": buf})
+                    buf = ""
+                desc = _subject_descriptor(match)
+                segments.append(
+                    {
+                        "type": "word",
+                        "text": surface,
+                        "lemma": lemma,
+                        "sentence": sentence,
+                        "id": desc["id"],
+                        "object": desc["object"],
+                        "kind": desc["kind"],
+                        "meaning": desc["meaning"],
+                        "level": desc["level"],
+                    }
+                )
+            else:
+                buf += surface
+        if buf:
+            segments.append({"type": "text", "text": buf})
+        lines_out.append(segments)
+    return lines_out
 
 
 def _normalize_sentence_overrides(
@@ -1316,7 +1364,8 @@ def resolve_subject_deck(
 
     Gemeinsam genutzt von PDF- (`render_subjects`) und Anki-Export.
     `sentence_overrides` (optional): Vokabel-Subject-ID → `{"ja": str, "en":
-    str|None}` – z. B. aus dem Text-Modus (siehe `resolve_text`).
+    str|None}` – z. B. aus dem Text-Modus (siehe `annotate_text`), wird vom
+    Frontend beim „Hinzufügen" einer im Text gefundenen Vokabel gesetzt.
     """
     ids = [int(i) for i in subject_ids]
     overrides = _normalize_sentence_overrides(sentence_overrides)

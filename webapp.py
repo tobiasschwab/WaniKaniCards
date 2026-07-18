@@ -25,6 +25,7 @@ import kanji_cards as kc
 HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
 SETTINGS_FILE = DATA_DIR / "settings.json"
+KNOWN_FILE = DATA_DIR / "known.json"
 OUTPUT_DIR = DATA_DIR / "output"
 JOBS_DIR = DATA_DIR / "jobs"
 CUSTOM_DIR = DATA_DIR / "customcards"
@@ -71,6 +72,32 @@ def load_settings() -> dict[str, Any]:
 def save_settings(data: dict[str, Any]) -> None:
     SETTINGS_FILE.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def load_known() -> set[int]:
+    """Subject-IDs, die manuell als „bekannt" markiert wurden (Text-Modus) –
+    unabhängig vom Export-Verlauf, z. B. für Wörter, die man von woanders
+    schon kann."""
+    if not KNOWN_FILE.is_file():
+        return set()
+    try:
+        data = json.loads(KNOWN_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    ids = data.get("ids") if isinstance(data, dict) else None
+    out: set[int] = set()
+    for i in ids or []:
+        try:
+            out.add(int(i))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def save_known(ids: set[int]) -> None:
+    KNOWN_FILE.write_text(
+        json.dumps({"ids": sorted(ids)}, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 
@@ -355,12 +382,11 @@ def api_test_token() -> Any:
 def api_resolve() -> Any:
     """Quelle in eine Kartenliste (Tabelle) auflösen.
 
-    body.mode: "level" | "search" | "compose" | "text"
+    body.mode: "level" | "search" | "compose"
     """
     body = request.get_json(silent=True) or {}
     mode = body.get("mode")
     sample = bool(body.get("sample"))
-    sentence_overrides: dict[str, Any] = {}
     try:
         if not sample:
             _apply_token_env()
@@ -373,9 +399,6 @@ def api_resolve() -> Any:
         elif mode == "compose":
             ids = body.get("subject_ids") or []
             cards = kc.resolve_composition(ids, sample=sample)
-        elif mode == "text":
-            text = str(body.get("text", ""))
-            cards, sentence_overrides = kc.resolve_text(text, sample=sample)
         else:
             return jsonify({"error": "Unbekannter Modus."}), 400
     except (TypeError, ValueError):
@@ -383,7 +406,70 @@ def api_resolve() -> Any:
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
     cards = _mark_exported(cards)
-    return jsonify({"cards": cards, "sentence_overrides": sentence_overrides})
+    return jsonify({"cards": cards})
+
+
+# ---------- API: Text-Modus (lemmatisieren, annotieren, bekannt markieren) -- #
+
+@app.post("/api/text-annotate")
+def api_text_annotate() -> Any:
+    """Text lemmatisieren und zeilenweise annotieren (kein Auto-Hinzufügen).
+
+    Jedes erkannte Wort trägt `already_exported` (aus dem Job-Verlauf) und
+    `manually_known` (manuell markiert, siehe `/api/known`) – `known` ist die
+    Vereinigung aus beiden und treibt sowohl die Text-Einfärbung als auch die
+    „Prozent bekannt"-Statistik im Frontend.
+    """
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text", ""))
+    sample = bool(body.get("sample"))
+    try:
+        if not sample:
+            _apply_token_env()
+        lines = kc.annotate_text(text, sample=sample)
+    except kc.WaniKaniError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    exported = _already_exported_ids()
+    known_manual = load_known()
+    total = 0
+    known_count = 0
+    for line in lines:
+        for seg in line:
+            if seg.get("type") != "word":
+                continue
+            sid = int(seg["id"])
+            is_exported = sid in exported
+            is_manual = sid in known_manual
+            seg["already_exported"] = is_exported
+            seg["manually_known"] = is_manual
+            seg["known"] = is_exported or is_manual
+            total += 1
+            if seg["known"]:
+                known_count += 1
+    percent = round(known_count / total * 100, 1) if total else 0.0
+    return jsonify(
+        {
+            "lines": lines,
+            "stats": {"known": known_count, "total": total, "percent": percent},
+        }
+    )
+
+
+@app.post("/api/known/<int:subject_id>")
+def api_mark_known(subject_id: int) -> Any:
+    ids = load_known()
+    ids.add(subject_id)
+    save_known(ids)
+    return jsonify({"ok": True, "id": subject_id, "known": True})
+
+
+@app.delete("/api/known/<int:subject_id>")
+def api_unmark_known(subject_id: int) -> Any:
+    ids = load_known()
+    ids.discard(subject_id)
+    save_known(ids)
+    return jsonify({"ok": True, "id": subject_id, "known": False})
 
 
 # ---------- API: Rendern (by ids) ------------------------------------------- #
