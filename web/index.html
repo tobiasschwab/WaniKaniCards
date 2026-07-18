@@ -158,25 +158,35 @@
       <div class="render-bar">
         <div class="render-opts">
           <div class="opt">
-            <span class="label">Layout</span>
-            <div class="segmented" id="layout" data-value="a6">
-              <button data-v="a6" class="active">A6 · 1/Seite</button>
-              <button data-v="a4-4up">A4 · 4/Seite</button>
+            <span class="label">Format</span>
+            <div class="segmented" id="format" data-value="pdf">
+              <button data-v="pdf" class="active">PDF · Drucken</button>
+              <button data-v="anki">Anki · .apkg</button>
             </div>
           </div>
-          <div class="opt hidden" id="paperOpt">
-            <span class="label">Papier</span>
-            <select id="paper" class="select"><option value="a4">A4</option><option value="letter">Letter</option><option value="a6">A6</option></select>
-          </div>
-          <div class="opt">
-            <span class="label">Duplex</span>
-            <div class="segmented" id="duplex" data-value="long-edge">
-              <button data-v="long-edge" class="active">Lang</button>
-              <button data-v="short-edge">Kurz</button>
+          <div id="printOpts" class="print-opts">
+            <div class="opt">
+              <span class="label">Layout</span>
+              <div class="segmented" id="layout" data-value="a6">
+                <button data-v="a6" class="active">A6 · 1/Seite</button>
+                <button data-v="a4-4up">A4 · 4/Seite</button>
+              </div>
             </div>
+            <div class="opt hidden" id="paperOpt">
+              <span class="label">Papier</span>
+              <select id="paper" class="select"><option value="a4">A4</option><option value="letter">Letter</option><option value="a6">A6</option></select>
+            </div>
+            <div class="opt">
+              <span class="label">Duplex</span>
+              <div class="segmented" id="duplex" data-value="long-edge">
+                <button data-v="long-edge" class="active">Lang</button>
+                <button data-v="short-edge">Kurz</button>
+              </div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span>Schnittmarken</label>
+            <label class="switch"><input type="checkbox" id="hole"><span></span>Stanzloch</label>
           </div>
-          <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span>Schnittmarken</label>
-          <label class="switch"><input type="checkbox" id="hole"><span></span>Stanzloch</label>
+          <p id="ankiHint" class="hint hidden">Erzeugt ein <code>.apkg</code> zum lokalen Import in Anki (Datei → Importieren). Kein Docker/Anki-Netzwerk nötig.</p>
         </div>
         <button id="btnRender" class="btn primary big" disabled>PDF erzeugen (0)</button>
         <div id="progress" class="progress hidden"><div class="spinner"></div><span id="progressText">Wird erzeugt…</span></div>

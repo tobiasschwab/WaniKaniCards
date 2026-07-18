@@ -19,6 +19,7 @@ from typing import Any
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
+import anki_export as ae
 import kanji_cards as kc
 
 HERE = Path(__file__).resolve().parent
@@ -40,6 +41,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "defaults": {
         "level": 1,
         "type": "kanji",
+        "format": "pdf",
         "layout": "a6",
         "paper": "a4",
         "duplex": "long-edge",
@@ -198,7 +200,8 @@ def _run_render(job_id: str) -> None:
         job["started_at"] = _now()
         write_job(job)
 
-        pdf_path = OUTPUT_DIR / f"{job_id}.pdf"
+        anki = p.get("format") == "anki"
+        out_path = OUTPUT_DIR / (f"{job_id}.apkg" if anki else f"{job_id}.pdf")
         try:
             # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-Karten,
             # kein Demo-Modus) gerendert werden.
@@ -208,31 +211,47 @@ def _run_render(job_id: str) -> None:
                     "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
                 )
             _apply_token_env()
-            common = dict(
-                layout=p.get("layout", "a6"),
-                paper=p.get("paper", "a4"),
-                duplex=p.get("duplex", "long-edge"),
-                cut_marks=p.get("cut_marks", True),
-                hole=p.get("hole", False),
-                username=load_settings().get("username", ""),
-            )
-            if p.get("custom_ids"):
-                datas = [read_custom(cid) for cid in p["custom_ids"]]
-                datas = [d for d in datas if d]
-                _, n = kc.render_custom(datas, pdf_path, **common)
+
+            if anki:
+                deck_name = job.get("title") or "WaniKani Card Studio"
+                if p.get("custom_ids"):
+                    datas = [read_custom(cid) for cid in p["custom_ids"]]
+                    datas = [d for d in datas if d]
+                    _, n = ae.export_custom(datas, out_path, deck_name=deck_name)
+                else:
+                    _, n = ae.export_subjects(
+                        p["subject_ids"],
+                        out_path,
+                        deck_name=deck_name,
+                        use_cache=p.get("use_cache", True),
+                        sample=p.get("sample", False),
+                    )
             else:
-                if not p.get("sample") and not common["username"]:
-                    common["username"] = ""  # kein Token → kein Name
-                _, n = kc.render_subjects(
-                    p["subject_ids"],
-                    pdf_path,
-                    use_cache=p.get("use_cache", True),
-                    sample=p.get("sample", False),
-                    **common,
+                common = dict(
+                    layout=p.get("layout", "a6"),
+                    paper=p.get("paper", "a4"),
+                    duplex=p.get("duplex", "long-edge"),
+                    cut_marks=p.get("cut_marks", True),
+                    hole=p.get("hole", False),
+                    username=load_settings().get("username", ""),
                 )
+                if p.get("custom_ids"):
+                    datas = [read_custom(cid) for cid in p["custom_ids"]]
+                    datas = [d for d in datas if d]
+                    _, n = kc.render_custom(datas, out_path, **common)
+                else:
+                    if not p.get("sample") and not common["username"]:
+                        common["username"] = ""  # kein Token → kein Name
+                    _, n = kc.render_subjects(
+                        p["subject_ids"],
+                        out_path,
+                        use_cache=p.get("use_cache", True),
+                        sample=p.get("sample", False),
+                        **common,
+                    )
             job["status"] = "done"
             job["n_cards"] = n
-            job["filename"] = pdf_path.name
+            job["filename"] = out_path.name
         except kc.WaniKaniError as exc:
             job["status"], job["error"] = "error", str(exc)
         except Exception as exc:  # noqa: BLE001
@@ -250,6 +269,7 @@ def api_config() -> Any:
         {
             "layouts": list(kc.LAYOUTS),
             "types": ["kanji", "radicals"],
+            "formats": ["pdf", "anki"],
             "papers": ["a4", "letter", "a6"],
             "duplex": ["long-edge", "short-edge"],
             "defaults": load_settings()["defaults"],
@@ -339,13 +359,17 @@ def api_render() -> Any:
     custom_ids = body.get("custom_ids") or []
     if not (subject_ids or custom_ids):
         return jsonify({"error": "Keine Karten ausgewählt."}), 400
+    fmt = body.get("format", "pdf")
+    if fmt not in ("pdf", "anki"):
+        return jsonify({"error": "Ungültiges Format."}), 400
     layout = body.get("layout", "a6")
-    if layout not in kc.LAYOUTS:
+    if fmt == "pdf" and layout not in kc.LAYOUTS:
         return jsonify({"error": "Ungültiges Layout."}), 400
 
     params = {
         "subject_ids": [int(i) for i in subject_ids] if subject_ids else [],
         "custom_ids": [str(i) for i in custom_ids] if custom_ids else [],
+        "format": fmt,
         "layout": layout,
         "paper": body.get("paper", "a4"),
         "duplex": body.get("duplex", "long-edge"),
@@ -426,6 +450,7 @@ def api_delete_job(job_id: str) -> Any:
     if read_job(job_id) is None:
         abort(404)
     (OUTPUT_DIR / f"{job_id}.pdf").unlink(missing_ok=True)
+    (OUTPUT_DIR / f"{job_id}.apkg").unlink(missing_ok=True)
     _job_path(job_id).unlink(missing_ok=True)
     return jsonify({"ok": True})
 
@@ -445,6 +470,25 @@ def api_job_pdf(job_id: str) -> Any:
         mimetype="application/pdf",
         as_attachment=download,
         download_name=f"wanikani-{safe.strip() or 'cards'}.pdf",
+        max_age=0,
+    )
+
+
+@app.get("/api/jobs/<job_id>/apkg")
+def api_job_apkg(job_id: str) -> Any:
+    job = read_job(job_id)
+    if job is None or job.get("status") != "done":
+        abort(404)
+    apkg = OUTPUT_DIR / f"{job_id}.apkg"
+    if not apkg.is_file():
+        abort(404)
+    download = request.args.get("download") == "1"
+    safe = "".join(c for c in job.get("title", "cards") if c.isalnum() or c in " -_")
+    return send_file(
+        apkg,
+        mimetype="application/octet-stream",
+        as_attachment=download,
+        download_name=f"wanikani-{safe.strip() or 'cards'}.apkg",
         max_age=0,
     )
 

@@ -166,6 +166,7 @@ python kanji_cards.py --sample --layout a6        # A6, eine Karte pro Seite
 | `--hole` | – | Stanzloch-Bereich reservieren (Default: aus) |
 | `--no-cover` | – | keine Deckkarte voranstellen (CLI-only) |
 | `--sample` | – | Beispieldaten ohne API-Token verwenden |
+| `--anki` | – | Anki-Paket (`.apkg`) statt PDF erzeugen, siehe [Anki-Export](#anki-export) |
 
 > Hinweis: Die **Deckkarte** gibt es nur noch im CLI (Default an, `--no-cover`
 > zum Abschalten). Das Web-Frontend erzeugt bewusst **keine** Deckkarte.
@@ -197,20 +198,63 @@ Tipp: Vor dem Serienlauf eine Karte testen und Vorder-/Rückseite gegen das
 Licht halten, um die Ausrichtung der Wende-Kante zu prüfen. Passt es nicht,
 `--duplex short-edge` versuchen.
 
+## Anki-Export
+
+Zusätzlich zum PDF lässt sich derselbe Kartenstapel als **Anki-Paket (`.apkg`)**
+exportieren – für alle drei Kartentypen (Radical/Kanji/Vokabel) sowie für frei
+erstellte Karten, jeweils mit einem eigenen, an die gedruckten Karten
+angelehnten Anki-Notiztyp (Tag-Chips, On/Kun/Composition-Farben, Mnemonic-Box,
+Referenz-Zeichen auf der Rückseite).
+
+**Anki läuft lokal, dieses Tool im Container – die beiden müssen dafür nicht
+verbunden sein:** Der Export passiert komplett offline mit
+[`genanki`](https://github.com/kerrickstaley/genanki) (reines Python, baut die
+`.apkg`-Datei direkt als SQLite+Medien-Zip). Die Datei wird wie die PDF über
+den Browser heruntergeladen und in Anki ganz normal importiert
+(**Datei → Importieren**) – keine Netzwerkverbindung zwischen Container und
+lokalem Anki, kein AnkiConnect nötig.
+
+```bash
+python kanji_cards.py 5 --anki -o level5.apkg
+python kanji_cards.py --sample --anki              # Demo, cards.apkg
+```
+
+Im Web-Frontend: bei **Format** auf **„Anki · .apkg“** umschalten (ersetzt die
+druckspezifischen Optionen) und wie gewohnt **erzeugen**.
+
+![Web-Frontend: Anki-Export](previews/webui_anki.png)
+
+Jeder Kartentyp bekommt einen eigenen Anki-Notiztyp im Look der gedruckten Karten:
+
+| | Vorderseite | Rückseite |
+|---|---|---|
+| **Kanji** | ![Kanji vorne](previews/anki_kanji_front.png) | ![Kanji hinten](previews/anki_kanji_back.png) |
+| **Radical** | ![Radical vorne](previews/anki_radical_char_front.png) | ![Radical hinten](previews/anki_radical_char_back.png) |
+| **Radical (nur Bild)** | ![Radical-Bild vorne](previews/anki_radical_image_front.png) | ![Radical-Bild hinten](previews/anki_radical_image_back.png) |
+| **Vokabel** | ![Vokabel vorne](previews/anki_vocab_front.png) | ![Vokabel hinten](previews/anki_vocab_back.png) |
+| **Frei erstellt** | ![Frei vorne](previews/anki_custom_front.png) | ![Frei hinten](previews/anki_custom_back.png) |
+
+Die WaniKani-Subject-ID (bzw. bei freien Karten deren gespeicherte ID) wird als
+stabile Anki-Notiz-ID verwendet: ein erneuter Export nach Lernfortschritt
+**aktualisiert** bestehende Notizen in Anki, statt sie zu duplizieren. Die
+Noto-JP-Schriften sind im `.apkg` eingebettet, Kanji werden also auch ohne
+lokal installierte japanische Schrift sauber dargestellt.
+
 ## Web-Frontend (Docker)
 
 Ein modernes Web-Frontend (`webapp.py`, Flask): **API-Token setzen**, Karten
 über **Level-Stapel** oder **rekursive Komposition** auflisten, in einer
-**Tabelle auswählen**, daraus **ein PDF** erzeugen, **PDF-Vorschau** im Browser
-und ein **Verlauf**. Es gibt **keine Datenbank** – alles wird dateibasiert im
-Ordner `data/` gespeichert:
+**Tabelle auswählen**, daraus **ein PDF oder Anki-Paket** erzeugen,
+**Vorschau** im Browser und ein **Verlauf**. Es gibt **keine Datenbank** –
+alles wird dateibasiert im Ordner `data/` gespeichert:
 
 ```
 data/
-├── settings.json     # API-Token (+ zuletzt genutzte Optionen)
-├── output/<id>.pdf   # erzeugte PDFs
-├── jobs/<id>.json    # Job-Status/Metadaten
-└── .cache/           # WaniKani-API-Cache
+├── settings.json      # API-Token (+ zuletzt genutzte Optionen)
+├── output/<id>.pdf    # erzeugte PDFs
+├── output/<id>.apkg   # erzeugte Anki-Pakete
+├── jobs/<id>.json     # Job-Status/Metadaten
+└── .cache/            # WaniKani-API-Cache
 ```
 
 ![Web-Frontend](previews/webui.png)
@@ -252,6 +296,11 @@ Ein Skript (`kanji_cards.py`), klar in Funktionen getrennt:
 
 Kanji-Objekte enthalten selbst **keine** Beispiele; die Vokabeln werden über
 `amalgamation_subject_ids` **gebündelt** nachgeladen und gecacht.
+
+Der Anki-Export lebt in einem eigenen Modul (`anki_export.py`), das dieselben
+Card-Objekte wie der PDF-Pfad wiederverwendet (`kc.resolve_subject_deck()` /
+`kc.build_custom_card()`) und `genanki` nur bei tatsächlicher Nutzung importiert
+(`--anki` bzw. Format „Anki“ im Web-Frontend).
 
 ## Tests
 

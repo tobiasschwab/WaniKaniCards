@@ -215,6 +215,11 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .render-opts { display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
 .render-opts .opt .label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--muted); }
 .render-opts .switch { align-self: center; }
+/* Druck-nur-Optionen: als Gruppe ein-/ausblenden, ohne den Flex-Fluss der
+   Geschwister-Elemente zu stören (display:contents reicht die Kinder durch). */
+.print-opts { display: contents; }
+.print-opts.hidden { display: none; }
+#ankiHint { flex-basis: 100%; margin: -4px 0 0; }
 
 .hidden { display: none !important; }
 

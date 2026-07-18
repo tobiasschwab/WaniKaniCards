@@ -15,3 +15,6 @@ data/
 # Erzeugte PDFs (Beispiel-Previews unter previews/ sind ausgenommen)
 *.pdf
 !previews/*.pdf
+
+# Erzeugte Anki-Pakete (groß wegen eingebetteter Schriften, keine Preview nötig)
+*.apkg

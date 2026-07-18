@@ -81,6 +81,10 @@ class Card:
     # Je Eintrag: {"radical": str, "image_uri": str|None, "meaning": str}
     components: list[dict[str, Any]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    # WaniKani-Subject-ID (falls bekannt) – für stabile Anki-Notiz-IDs beim
+    # Export, damit ein erneuter Export bestehende Notizen aktualisiert statt
+    # sie zu duplizieren.
+    subject_id: int | None = None
 
 
 @dataclass
@@ -104,6 +108,7 @@ class RadicalCard:
     # (Kanji, primäre Lesung, primäre Bedeutung) der ersten zugehörigen Kanji
     kanji_examples: list[tuple[str, str, str]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    subject_id: int | None = None
 
 
 @dataclass
@@ -119,6 +124,7 @@ class VocabCard:
     sentence_ja: str | None = None
     sentence_en: str | None = None
     tags: list[str] = field(default_factory=list)
+    subject_id: int | None = None
 
 
 @dataclass
@@ -132,6 +138,8 @@ class CustomCard:
     front_html: str = ""
     back_html: str = ""
     tags: list[str] = field(default_factory=list)
+    # ID der Karte in customcards/ (falls gespeichert) – für stabile Anki-IDs.
+    card_id: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -143,6 +151,13 @@ def strip_markup(text: str | None) -> str | None:
     if text is None:
         return None
     return _TAG_RE.sub("", text).strip()
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -462,6 +477,7 @@ def build_card(
         reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
         components=_build_components(data, vocab_map, image_fetcher),
         tags=_default_tags("Kanji", data),
+        subject_id=_int_or_none(kanji.get("id")),
     )
 
     vocab = pick_example_vocab(kanji, vocab_map)
@@ -521,6 +537,7 @@ def build_radical_card(
         meaning=meanings[0] if meanings else "",
         mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         tags=_default_tags("Radical", data),
+        subject_id=_int_or_none(radical.get("id")),
     )
 
     # Bild: bereits eingebettete data-URI (Sample) oder per Fetcher nachladen.
@@ -577,6 +594,7 @@ def build_vocab_card(vocab: dict[str, Any]) -> VocabCard:
         meaning_mnemonic=strip_markup(data.get("meaning_mnemonic")) or None,
         reading_mnemonic=strip_markup(data.get("reading_mnemonic")) or None,
         tags=_default_tags("Vocab", data),
+        subject_id=_int_or_none(vocab.get("id")),
     )
     if sentences:
         card.sentence_ja = strip_markup(sentences[0].get("ja"))
@@ -591,6 +609,7 @@ def build_custom_card(d: dict[str, Any]) -> CustomCard:
         front_html=str(d.get("front_html") or ""),
         back_html=str(d.get("back_html") or ""),
         tags=tags,
+        card_id=str(d["id"]) if d.get("id") else None,
     )
 
 
@@ -986,20 +1005,16 @@ def resolve_composition(
     return [_subject_descriptor(s) for s in ordered]
 
 
-def render_subjects(
+def resolve_subject_deck(
     subject_ids: Iterable[int],
-    output: str | Path,
     *,
-    layout: str = "a6",
-    paper: str = "a4",
-    duplex: str = "long-edge",
-    cut_marks: bool = True,
-    hole: bool = False,
-    username: str = "",
     use_cache: bool = True,
     sample: bool = False,
-) -> tuple[Path, int]:
-    """Genau die gewählten Subjects (nach ID) als ein PDF rendern (kein Deckblatt)."""
+) -> list[Card | RadicalCard | VocabCard]:
+    """Die gewählten Subjects (nach ID) in Card-Objekte auflösen (ohne zu rendern).
+
+    Gemeinsam genutzt von PDF- (`render_subjects`) und Anki-Export.
+    """
     ids = [int(i) for i in subject_ids]
     image_fetcher: "callable | None" = None
     if sample:
@@ -1030,6 +1045,24 @@ def render_subjects(
             deck.append(build_any_card(s, reg, image_fetcher))
     if not deck:
         raise WaniKaniError("Keine gültigen Karten für die Auswahl gefunden.")
+    return deck
+
+
+def render_subjects(
+    subject_ids: Iterable[int],
+    output: str | Path,
+    *,
+    layout: str = "a6",
+    paper: str = "a4",
+    duplex: str = "long-edge",
+    cut_marks: bool = True,
+    hole: bool = False,
+    username: str = "",
+    use_cache: bool = True,
+    sample: bool = False,
+) -> tuple[Path, int]:
+    """Genau die gewählten Subjects (nach ID) als ein PDF rendern (kein Deckblatt)."""
+    deck = resolve_subject_deck(subject_ids, use_cache=use_cache, sample=sample)
     path = render_deck(
         deck, output, layout=layout, paper=paper, duplex=duplex,
         cut_marks=cut_marks, hole=hole, username=username,
@@ -1261,6 +1294,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Beispieldaten ohne API-Token verwenden (Demo).",
     )
+    parser.add_argument(
+        "--anki",
+        action="store_true",
+        help="Statt PDF ein Anki-Paket (.apkg) erzeugen, zum lokalen Import in "
+        "Anki (Datei → Importieren). Kein Docker/Anki-Netzwerk nötig; --output "
+        "bekommt automatisch die Endung .apkg.",
+    )
     return parser
 
 
@@ -1272,12 +1312,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("Bitte ein Level angeben oder --sample verwenden.")
 
     radicals = args.deck_type == "radicals"
+    kind = "Radicals" if radicals else "Kanji"
     try:
         deck = build_deck(
             args.level,
             args.deck_type,
             use_cache=not args.no_cache,
-            with_cover=not args.no_cover,
+            with_cover=not args.no_cover and not args.anki,
             sample=args.sample,
         )
     except WaniKaniError as exc:
@@ -1287,6 +1328,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not deck:
         print("Keine Karten zu erzeugen.", file=sys.stderr)
         return 1
+
+    if args.anki:
+        import anki_export
+
+        output = args.output
+        if Path(output).suffix.lower() != ".apkg":
+            output = str(Path(output).with_suffix(".apkg"))
+        label = args.level if args.level is not None else 1
+        try:
+            out, n = anki_export.export_deck(
+                deck, output, deck_name=f"WaniKani Level {label} · {kind}"
+            )
+        # Hinweis: anki_export importiert kanji_cards separat als eigenes Modul
+        # (nicht als __main__), daher hier explizit dessen Fehlerklasse fangen –
+        # ein bloßes `except WaniKaniError` (an die __main__-Klasse gebunden)
+        # würde die Instanz aus anki_export sonst nicht erkennen.
+        except anki_export.AnkiExportError as exc:
+            print(f"Fehler: {exc}", file=sys.stderr)
+            return 1
+        print(f"{n} {kind}-Karten → Anki-Paket {out} (in Anki: Datei → Importieren).")
+        return 0
 
     out = render_deck(
         deck,
@@ -1302,7 +1364,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     per_page = profile["cols"] * profile["rows"]
     n_sheets = ((len(deck) + per_page - 1) // per_page) * 2
     cover_note = "" if args.no_cover else " inkl. Deckkarte"
-    kind = "Radicals" if radicals else "Kanji"
     paper_label = (args.paper if args.layout == "a4-4up" else profile["paper"]).upper()
     print(
         f"{len(deck)} {kind}-Karten{cover_note} → {out} ({n_sheets} Seiten, "
@@ -1312,4 +1373,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Als Skript ausgeführt landet dieses Modul unter dem Namen "__main__", nicht
+    # "kanji_cards" – ein `import kanji_cards` (z. B. aus anki_export.py für den
+    # --anki-Zweig) würde die Datei sonst ein zweites Mal unter dem Namen
+    # "kanji_cards" laden. Die Folge: zwei nicht-identische Klassenobjekte
+    # (__main__.Card vs. kanji_cards.Card), sodass isinstance()-Prüfungen in
+    # anki_export.py fälschlich fehlschlagen. Fix: den bereits geladenen
+    # __main__-Modulcode unter dem Namen "kanji_cards" zwischenspeichern.
+    sys.modules.setdefault("kanji_cards", sys.modules["__main__"])
     raise SystemExit(main())

@@ -60,22 +60,31 @@ async function loadSettings() {
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
   if (d.type) segSet("type", d.type);
+  if (d.format) segSet("format", d.format);
   if (d.layout) segSet("layout", d.layout);
   if (d.paper) $("#paper").value = d.paper;
   if (d.duplex) segSet("duplex", d.duplex);
   $("#cutmarks").checked = d.cut_marks !== false;
   $("#hole").checked = d.hole === true;
   applyLayoutState();
+  applyFormatState();
 }
 async function saveDefaults() {
   const defaults = {
     level: parseInt($("#level").value, 10) || 1, type: segValue("type"),
+    format: segValue("format"),
     layout: segValue("layout"), paper: $("#paper").value, duplex: segValue("duplex"),
     cut_marks: $("#cutmarks").checked, hole: $("#hole").checked,
   };
   try { await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ defaults }) }); } catch (_) {}
 }
 function applyLayoutState() { $("#paperOpt").classList.toggle("hidden", segValue("layout") === "a6"); }
+function applyFormatState() {
+  const anki = segValue("format") === "anki";
+  $("#printOpts").classList.toggle("hidden", anki);
+  $("#ankiHint").classList.toggle("hidden", !anki);
+  updateRenderBtn();
+}
 
 // ---------- Resolve / Tabelle ----------
 async function resolve(body) {
@@ -131,7 +140,9 @@ function syncChecks() {
 }
 function updateRenderBtn() {
   const n = selected.size; const b = $("#btnRender");
-  b.textContent = `PDF erzeugen (${n})`; b.disabled = n === 0;
+  const anki = segValue("format") === "anki";
+  b.textContent = `${anki ? "Anki-Paket" : "PDF"} erzeugen (${n})`;
+  b.disabled = n === 0;
 }
 
 // ---------- Suche (Kompositions-Modus) ----------
@@ -268,11 +279,14 @@ async function doRender() {
   if (!ids.length) return;
   const chosen = cards.filter((c) => selected.has(String(c.id)));
   const title = ids.length === 1 ? (chosen[0].characters || chosen[0].meaning) : `${ids.length} Karten`;
-  const body = {
-    title, sample: isSample(),
-    layout: segValue("layout"), paper: $("#paper").value, duplex: segValue("duplex"),
-    cut_marks: $("#cutmarks").checked, hole: $("#hole").checked,
-  };
+  const format = segValue("format");
+  const body = { title, sample: isSample(), format };
+  if (format === "pdf") {
+    Object.assign(body, {
+      layout: segValue("layout"), paper: $("#paper").value, duplex: segValue("duplex"),
+      cut_marks: $("#cutmarks").checked, hole: $("#hole").checked,
+    });
+  }
   if (tableMode === "custom") body.custom_ids = ids.map(String); else body.subject_ids = ids;
   $("#btnRender").disabled = true;
   $("#progress").classList.remove("hidden"); $("#progressText").textContent = "Wird erzeugt…";
@@ -290,8 +304,9 @@ function pollJob(id) {
   const tick = async () => {
     let job;
     try { job = await api(`/api/jobs/${id}`); } catch (_) { pollTimer = setTimeout(tick, 1500); return; }
+    const isAnki = (job.params && job.params.format) === "anki";
     if (job.status === "queued") $("#progressText").textContent = "In Warteschlange…";
-    else if (job.status === "running") $("#progressText").textContent = "PDF wird gebaut…";
+    else if (job.status === "running") $("#progressText").textContent = isAnki ? "Anki-Paket wird gebaut…" : "PDF wird gebaut…";
     if (job.status === "done" || job.status === "error") {
       updateRenderBtn(); $("#progress").classList.add("hidden");
       if (job.status === "done") { showPreview(job); toast(`Fertig: ${job.n_cards} Karten`); }
@@ -306,9 +321,18 @@ function pollJob(id) {
 
 // ---------- Vorschau + Verlauf ----------
 function showPreview(job) {
-  const f = $("#previewFrame"); f.src = `/api/jobs/${job.id}/pdf#view=FitH`; f.classList.remove("hidden");
-  $("#previewEmpty").classList.add("hidden");
-  const dl = $("#downloadBtn"); dl.href = `/api/jobs/${job.id}/pdf?download=1`; dl.classList.remove("hidden");
+  const isAnki = (job.params && job.params.format) === "anki";
+  const url = isAnki ? `/api/jobs/${job.id}/apkg` : `/api/jobs/${job.id}/pdf`;
+  if (isAnki) {
+    $("#previewFrame").classList.add("hidden");
+    const pe = $("#previewEmpty");
+    pe.innerHTML = '<div class="ph-icon">🎴</div><p>Anki-Paket bereit – <strong>herunterladen</strong> und in Anki importieren (Datei → Importieren).</p>';
+    pe.classList.remove("hidden");
+  } else {
+    $("#previewEmpty").classList.add("hidden");
+    const f = $("#previewFrame"); f.src = `${url}#view=FitH`; f.classList.remove("hidden");
+  }
+  const dl = $("#downloadBtn"); dl.href = `${url}?download=1`; dl.classList.remove("hidden");
 }
 async function loadHistory() {
   let jobs = [];
@@ -318,16 +342,19 @@ async function loadHistory() {
   for (const j of jobs) {
     const li = document.createElement("li"); li.className = "hist";
     const p = j.params || {};
+    const isAnki = p.format === "anki";
+    const fmtLabel = isAnki ? "Anki-Paket (.apkg)" : (p.layout === "a6" ? "A6·1/Seite" : "A4·4/Seite");
     const sub = j.status === "error"
       ? `<span class="err-text">${escapeHtml(j.error || "Fehler")}</span>`
-      : `${(p.layout === "a6" ? "A6·1/Seite" : "A4·4/Seite")} · ${new Date(j.created_at).toLocaleString()}` + (j.n_cards ? ` · ${j.n_cards} Karten` : "");
+      : `${fmtLabel} · ${new Date(j.created_at).toLocaleString()}` + (j.n_cards ? ` · ${j.n_cards} Karten` : "");
     li.innerHTML = `<span class="dot ${j.status}"></span>
       <div class="h-main"><div class="h-title">${escapeHtml(j.title || j.id)}</div><div class="h-sub">${sub}</div></div>
       <div class="h-actions"></div>`;
     const act = li.querySelector(".h-actions");
     if (j.status === "done") {
       const v = document.createElement("button"); v.className = "chip-btn"; v.textContent = "Vorschau"; v.onclick = () => showPreview(j);
-      const d = document.createElement("a"); d.className = "chip-btn"; d.textContent = "PDF"; d.href = `/api/jobs/${j.id}/pdf?download=1`; d.setAttribute("download", "");
+      const d = document.createElement("a"); d.className = "chip-btn"; d.textContent = isAnki ? "Anki" : "PDF";
+      d.href = `/api/jobs/${j.id}/${isAnki ? "apkg" : "pdf"}?download=1`; d.setAttribute("download", "");
       act.append(v, d);
     }
     const del = document.createElement("button"); del.className = "chip-btn danger"; del.textContent = "✕"; del.title = "Löschen";
@@ -339,6 +366,7 @@ async function loadHistory() {
 // ---------- Wire up ----------
 document.addEventListener("DOMContentLoaded", () => {
   initSegmented("type"); initSegmented("duplex"); initSegmented("layout", applyLayoutState);
+  initSegmented("format", applyFormatState);
   initSegmented("modeTabs", (v) => {
     $("#modeLevel").classList.toggle("hidden", v !== "level");
     $("#modeCompose").classList.toggle("hidden", v !== "compose");
