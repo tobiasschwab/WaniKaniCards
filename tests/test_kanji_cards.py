@@ -878,6 +878,22 @@ def test_annotate_text_without_gemini_key_never_calls_gemini(monkeypatch):
     assert called == []
 
 
+def test_annotate_text_calls_gemini_once_per_unique_sentence(monkeypatch):
+    # Zwei unterschiedliche Sätze, der erste kommt zweimal vor (Zeilenumbruch
+    # dazwischen) -> trotz paralleler Verarbeitung nur 2 Gemini-Aufrufe, nicht 3.
+    calls = []
+
+    def fake_analyze(sentence, api_key, *, model="gemini-2.5-flash", session=None, use_cache=True):
+        calls.append(sentence)
+        return None  # Fallback auf Janome reicht für diesen Test
+
+    monkeypatch.setattr(gemini_client, "analyze_sentence", fake_analyze)
+    text = "大きい山です。\n大きい山です。\n小さい人です。"
+    annotate_text(text, sample=True, gemini_key="dummy")
+    assert sorted(set(calls)) == ["大きい山です。", "小さい人です。"]
+    assert len(calls) == 2
+
+
 # --------------------------------------------------------------------------- #
 # Text-Modus: eigener Beispielsatz überschreibt WaniKanis erste context_sentence
 # --------------------------------------------------------------------------- #

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,11 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 import anki_export as ae
 import kanji_cards as kc
+
+# INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
+# im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
+# gunicorn/Flask fangen stdout ab, das reicht für `docker logs`.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
@@ -56,6 +63,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "hole": False,
     },
 }
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder=None)
 
@@ -311,6 +320,7 @@ def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
         "kind": "Dict",
         "characters": card.get("word", ""),
         "meaning": card.get("meaning", ""),
+        "meaning_extra": card.get("meaning_extra"),
         "level": None,
         "has_image": False,
     }
@@ -546,6 +556,10 @@ def api_text_annotate() -> Any:
         gemini_model = s.get("gemini_model") or gemini_model
         if not gemini_key:
             return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
+    logger.info(
+        "text-annotate: %d Zeichen, use_gemini=%s, sample=%s …", len(text), use_gemini, sample,
+    )
+    t0 = time.monotonic()
     try:
         if not sample:
             _apply_token_env()
@@ -554,6 +568,7 @@ def api_text_annotate() -> Any:
         )
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
+    logger.info("text-annotate: fertig in %.1fs (%d Zeilen)", time.monotonic() - t0, len(lines))
 
     exported = _already_exported_ids()
     known_manual = load_known()
@@ -680,6 +695,7 @@ def api_wortliste() -> Any:
                 "source": "dictionary",
                 "characters": card.get("word") or m.get("characters") or wid,
                 "meaning": card.get("meaning") or m.get("meaning", ""),
+                "meaning_extra": card.get("meaning_extra"),
                 "kind": "Dict",
                 "level": None,
                 "card_created": wid in kana_records,
@@ -850,6 +866,7 @@ def api_create_kanacard() -> Any:
         "word": card_obj.word,
         "kanji_hint": card_obj.kanji_hint,
         "meaning": card_obj.meaning,
+        "meaning_extra": card_obj.meaning_extra,
         "sentence_ja": card_obj.sentence_ja,
         "sentence_translation": card_obj.sentence_translation,
         "tags": card_obj.tags,

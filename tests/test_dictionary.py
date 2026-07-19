@@ -87,14 +87,14 @@ def test_build_reading_index_maps_kana_to_kanji_and_meaning(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
-    assert index["しあい"] == {"kanji": "試合", "meaning": "Spiel; Wettkampf"}
+    assert index["しあい"] == {"kanji": "試合", "meaning": "Spiel", "meaning_extra": "Wettkampf"}
 
 
 def test_build_reading_index_handles_kana_only_word_without_kanji(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
-    assert index["さあ"] == {"kanji": None, "meaning": "nun"}
+    assert index["さあ"] == {"kanji": None, "meaning": "nun", "meaning_extra": None}
 
 
 def test_build_reading_index_skips_words_without_german_gloss(tmp_path):
@@ -115,7 +115,29 @@ def test_build_reading_index_limits_glosses_to_max(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
-    assert index["おおきい"]["meaning"] == "groß; riesig; gewaltig; gigantisch"
+    assert index["おおきい"]["meaning"] == "groß"
+    assert index["おおきい"]["meaning_extra"] == "riesig; gewaltig; gigantisch"
+
+
+def test_build_reading_index_splits_parenthetical_note_from_primary_meaning(tmp_path):
+    fixture = _jmdict_fixture()
+    fixture["words"].append({
+        "id": "6",
+        "kanji": [{"text": "僕", "common": True, "tags": []}],
+        "kana": [{"text": "ぼく", "common": True, "tags": [], "appliesToKanji": ["*"]}],
+        "sense": [{
+            "partOfSpeech": [],
+            "gloss": [
+                {"lang": "ger", "text": "ich (vertraulich im Ton; Männersprache)", "gender": None, "type": None},
+                {"lang": "ger", "text": "Kleiner", "gender": None, "type": None},
+            ],
+        }],
+    })
+    p = tmp_path / "jmdict.json"
+    p.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+    index = dic.build_reading_index(p)
+    assert index["ぼく"]["meaning"] == "ich"
+    assert index["ぼく"]["meaning_extra"] == "vertraulich im Ton; Männersprache; Kleiner"
 
 
 # --------------------------------------------------------------------------- #

@@ -105,13 +105,35 @@ def download_jmdict(*, session: requests.Session | None = None) -> Path:
 MAX_GLOSSES = 4
 
 
+def _split_primary_and_note(gloss: str) -> tuple[str, str | None]:
+    """Eine JMdict-DE-Glosse in Kernbedeutung + Erläuterung trennen.
+
+    Die deutsche Edition packt Nutzungshinweise oft direkt in Klammern hinter
+    die eigentliche Bedeutung, z. B. „ich (vertraulich im Ton; Männersprache;
+    kam in dieser Bedeutung während der Meiji-Zeit unter Studenten auf und
+    ging dann in die Umgangssprache über)". Für die Karte zählt nur „ich" als
+    Bedeutung – der Rest ist Zusatzerklärung, keine weitere Übersetzung.
+    """
+    gloss = gloss.strip()
+    if "(" in gloss and gloss.endswith(")"):
+        primary, _, rest = gloss.partition("(")
+        primary = primary.strip().rstrip(",;").strip()
+        note = rest[:-1].strip()
+        if primary and note:
+            return primary, note
+    return gloss, None
+
+
 def build_reading_index(json_path: Path) -> dict[str, dict[str, Any]]:
     """Rohe JMdict-JSON in einen kompakten Lesungs-Index umwandeln.
 
-    `{"しあい": {"kanji": "試合", "meaning": "Spiel; Wettkampf"}, …}`
-    Nur die *erste* Sense (Wortbedeutung) wird übernommen – reicht für eine
-    Karteikarte; bei mehreren Wörtern mit derselben Lesung gewinnt das erste
-    (JMdict listet gebräuchliche Wörter zuerst).
+    `{"しあい": {"kanji": "試合", "meaning": "Spiel", "meaning_extra": "Wettkampf"}, …}`
+    `meaning` ist bewusst nur die *erste, kurze* Glosse (das ist die eigentliche
+    Bedeutung für die Kartenvorderseite/den Titel); alles Weitere – zusätzliche
+    Glossen der ersten Sense sowie in Klammern angehängte Nutzungshinweise –
+    landet in `meaning_extra` als kleinere Zusatzerklärung. Nur die *erste*
+    Sense wird übernommen; bei mehreren Wörtern mit derselben Lesung gewinnt
+    das erste (JMdict listet gebräuchliche Wörter zuerst).
     """
     data = json.loads(json_path.read_text(encoding="utf-8"))
     index: dict[str, dict[str, Any]] = {}
@@ -132,12 +154,15 @@ def build_reading_index(json_path: Path) -> dict[str, dict[str, Any]]:
                 break
         if not glosses:
             continue
-        meaning = "; ".join(glosses[:MAX_GLOSSES])
+        primary, note = _split_primary_and_note(glosses[0])
+        extra_parts = ([note] if note else []) + glosses[1:MAX_GLOSSES]
+        meaning_extra = "; ".join(extra_parts) if extra_parts else None
         for kana in kana_texts:
             if kana not in index:
                 index[kana] = {
                     "kanji": kanji_texts[0] if kanji_texts else None,
-                    "meaning": meaning,
+                    "meaning": primary,
+                    "meaning_extra": meaning_extra,
                 }
     return index
 

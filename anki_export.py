@@ -368,7 +368,7 @@ _KANA_BACK = """
 {{FrontSide}}
 <hr id="answer">
 <div class="wk-back">
-  <div class="wk-refhead"><span class="wk-ref small">{{Word}}</span><span class="wk-meaning">{{Meaning}}</span></div>
+  <div class="wk-refhead"><span class="wk-ref small">{{Word}}</span>{{Meaning}}</div>
   {{KanjiHintHtml}}
   {{SentenceHtml}}
   <div class="wk-doclink">Quelle: JMdict (EDRDG)</div>
@@ -474,6 +474,15 @@ def _meanings_html(meanings: list[str]) -> str:
 def _first_plain(meanings: list[str]) -> str:
     """Primäre Bedeutung als reiner Text – Vergleichsfeld für Anki {{type:Field}}."""
     return _esc(meanings[0]) if meanings else ""
+
+
+def _kana_meaning_html(meaning: str, meaning_extra: str | None) -> str:
+    """Dictionary-Karten-Bedeutung wie `_meanings_html`: die kurze Kernbedeutung
+    fett/groß, zusätzliche Glossen/Nutzungshinweise (`meaning_extra`) klein und
+    gedämpft dahinter – statt alles gleich groß in einem Satz zu verketten."""
+    primary = _esc(meaning)
+    secondary = f'<span class="sec">&nbsp;· {_esc(meaning_extra)}</span>' if meaning_extra else ""
+    return f'<span class="wk-meaning">{primary}{secondary}</span>'
 
 
 def _mnemonics_html(meaning_mnemonic: str | None, reading_mnemonic: str | None) -> str:
@@ -683,11 +692,11 @@ def _custom_note(genanki: Any, model: Any, card: kc.CustomCard) -> Any:
 def _kana_note(genanki: Any, model: Any, card: kc.KanaCard) -> Any:
     fields = [
         _esc(card.word),
-        _esc(card.meaning),
+        _kana_meaning_html(card.meaning, card.meaning_extra),
         _kanji_hint_html(card.kanji_hint),
         _sentences_html(card.sentence_ja, card.sentence_translation, None, []),
         _tags_html(card.tags),
-        _esc((card.meaning or "").split(";")[0].strip()),
+        _esc(card.meaning),
     ]
     guid = genanki.guid_for("wkcards", "kana", card.card_id) if card.card_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)

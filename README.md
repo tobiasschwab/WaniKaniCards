@@ -526,8 +526,14 @@ eine Position nach hinten.
 **Wörterbuch-Fallback** (`dictionary.py`, unabhängig von WaniKani): lädt die
 deutsche Edition von [JMdict-simplified](https://github.com/scriptin/jmdict-simplified)
 (`jmdict-ger-*.json.zip`, JSON, per GitHub-Releases-API immer die neueste
-Version) einmalig herunter und baut einen Lesung→{Kanji, deutsche Bedeutung}-
-Index, gecacht unter `.cache/jmdict/`. Für
+Version) einmalig herunter und baut einen Lesung→{Kanji, Bedeutung,
+Zusatzerklärung}-Index, gecacht unter `.cache/jmdict/`. Die deutsche Edition
+packt Nutzungshinweise oft direkt in Klammern hinter die erste Glosse (z. B.
+„ich (vertraulich im Ton; Männersprache; …)" für 僕/ぼく) – `meaning` ist
+deshalb bewusst nur die kurze Kernbedeutung vor der Klammer, alles Weitere
+(die Klammer-Erklärung plus etwaige zusätzliche Glossen derselben Sense)
+landet in `meaning_extra` und wird auf Karte/Popup/Wortliste kleiner und
+gedämpft angezeigt statt in einem langen Satz verkettet. Für
 Text-Modus-Wörter ohne Kanji UND ohne WaniKani-Treffer liefert
 `dictionary.lookup_reading()` die Anzeige-Daten für den neuen, WaniKani-
 unabhängigen Kartentyp `KanaCard` (`kanji_cards.build_kana_card()`) –
@@ -563,6 +569,16 @@ Key, Netzwerkfehler, Quota, kaputte/abweichende Antwort) bleibt die
 Janome-Tokenisierung für genau diesen Satz unverändert (nie ein harter
 Abbruch für den gesamten Text). `dictionary_form` ersetzt dabei Janomes
 `base_form` als Schlüssel für den WaniKani-/JMdict-Abgleich.
+
+Eindeutige Sätze werden mit begrenzter Parallelität (`ThreadPoolExecutor`,
+max. 4 gleichzeitig) statt streng seriell angefragt – bei längeren Texten
+sonst viele Minuten Wartezeit in einem einzigen gunicorn-Worker. Jeder
+Request nutzt ein (Connect-, Read-)Timeout von (10s, 25s) statt eines
+einzelnen 30s-Werts, damit eine tote Verbindung (z. B. Netzwerk-Policy im
+Docker-Deployment) nicht unbegrenzt hängt. Start, Dauer und Fehlerursache
+jeder Gemini-Anfrage werden per `logging` protokolliert (INFO/WARNING,
+sichtbar über `docker logs`) – vorher war ein hängender Request von außen
+nicht von einem stillen Erfolg zu unterscheiden.
 
 Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-
 Liste: bereits exportierte/manuell markierte WaniKani-Subjects (Anzeige-Daten

@@ -5,7 +5,11 @@ const api = async (url, opts) => {
   const r = await fetch(url, opts);
   let data = null;
   try { data = await r.json(); } catch (_) {}
-  if (!r.ok) throw new Error((data && data.error) || `HTTP ${r.status}`);
+  if (!r.ok) {
+    const err = new Error((data && data.error) || `HTTP ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
   return data;
 };
 
@@ -89,11 +93,15 @@ function _setConnPill(el, connected, connectedLabel) {
   el.textContent = connected ? (connectedLabel || "Verbunden") : "Nicht verbunden";
   el.className = "pill " + (connected ? "pill-ok" : "pill-off");
 }
+function _setConnDot(el, name, connected) {
+  el.className = "conn-dot " + (connected ? "on" : "off");
+  el.title = `${name}: ${connected ? "verbunden" : "nicht verbunden"}`;
+}
 async function loadSettings() {
   const s = await api("/api/settings");
-  const pill = $("#tokenPill");
-  pill.textContent = s.token_set ? "WaniKani verbunden" : "WaniKani nicht verbunden";
-  pill.className = "pill " + (s.token_set ? "pill-ok" : "pill-warn");
+  _setConnDot($("#connWanikani"), "WaniKani", s.token_set);
+  _setConnDot($("#connDeepl"), "DeepL", s.deepl_key_set);
+  _setConnDot($("#connGemini"), "Gemini", s.gemini_key_set);
   if (s.token_set) $("#tokenInput").placeholder = s.token_hint || "";
   _setConnPill($("#tokenRowPill"), s.token_set);
   if (s.deepl_key_set) $("#deeplInput").placeholder = s.deepl_key_hint || "";
@@ -239,13 +247,18 @@ function clearCompose() {
 async function doTextProcess(useGemini) {
   const text = $("#textInput").value;
   if (!text.trim()) return;
-  $("#textStatus").textContent = useGemini ? "Analysiere mit Gemini…" : "Analysiere…";
+  $("#textStatus").textContent = useGemini ? "Analysiere mit Gemini… (kann bei langen Texten 1–2 Minuten dauern)" : "Analysiere…";
   let r;
   try {
-    r = await api("/api/text-annotate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample(), use_gemini: !!useGemini }) });
+    // Gemini-Anfragen laufen pro Satz gegen eine externe API – ohne
+    // Zeitlimit könnte ein Netzwerkproblem die Oberfläche unbegrenzt in
+    // "Analysiere…" hängen lassen, ohne dass sichtbar wird, woran es liegt.
+    const opts = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample(), use_gemini: !!useGemini }) };
+    if (useGemini) opts.signal = AbortSignal.timeout(150000);
+    r = await api("/api/text-annotate", opts);
   } catch (e) {
     $("#textStatus").textContent = "";
-    toast(e.message, true);
+    toast(e.name === "TimeoutError" ? "Zeitüberschreitung – Gemini hat zu lange gebraucht (Text kürzen oder erneut versuchen)." : e.message, true);
     return;
   }
   $("#textStatus").textContent = "";
@@ -316,6 +329,8 @@ function openWordPopup(el, seg) {
   }
   $("#wpLevel").textContent = isDict ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "") : (seg.level ? `Lv ${seg.level}` : "");
   $("#wpMeaning").textContent = seg.meaning || "";
+  $("#wpMeaningExtra").textContent = seg.meaning_extra || "";
+  $("#wpMeaningExtra").classList.toggle("hidden", !seg.meaning_extra);
   let note = "";
   if (isGrammarOnly) note = "Kein Karteikarten-Wort – reine Grammatik-Erklärung.";
   else if (seg.manually_known) note = "✓ manuell als bekannt markiert";
@@ -464,9 +479,10 @@ function renderWortliste() {
     if (e.already_exported) badges.push('<span class="tag-mini exported">✓ exportiert</span>');
     if (e.card_created) badges.push('<span class="tag-mini exported">✓ Karte erstellt</span>');
     if (e.manually_known) badges.push('<span class="tag-mini manual">bekannt markiert</span>');
+    const extra = e.meaning_extra ? `<span class="wl-meaning-extra">${escapeHtml(e.meaning_extra)}</span>` : "";
     row.innerHTML = `
       <span class="wl-char">${escapeHtml(e.characters)}</span>
-      <span class="wl-meaning">${escapeHtml(e.meaning)}</span>
+      <span class="wl-meaning">${escapeHtml(e.meaning)}${extra}</span>
       <span class="wl-badges">${badges.join("")}</span>`;
     if (e.removable) {
       const del = document.createElement("button");
@@ -478,11 +494,22 @@ function renderWortliste() {
   }
 }
 
+// Beide möglichen Löschungen (manuelle Markierung, Dictionary-Karte)
+// unabhängig voneinander versuchen, statt beim ersten Fehler abzubrechen –
+// ein 404 heißt nur "schon weg" (z. B. nach einem Doppelklick) und zählt als
+// Erfolg. Nur ein unerwarteter Fehler verhindert das Entfernen aus der Liste,
+// mit einer Meldung, was genau schiefging.
 async function removeWortlisteEntry(e) {
-  try {
-    if (e.manually_known) await api(`/api/known/${e.id}`, { method: "DELETE" });
-    if (e.source === "dictionary" && e.card_created) await api(`/api/kanacards/${e.id}`, { method: "DELETE" });
-  } catch (err) { toast(err.message, true); return; }
+  const errors = [];
+  if (e.manually_known) {
+    try { await api(`/api/known/${e.id}`, { method: "DELETE" }); }
+    catch (err) { if (err.status !== 404) errors.push(err.message); }
+  }
+  if (e.source === "dictionary" && e.card_created) {
+    try { await api(`/api/kanacards/${e.id}`, { method: "DELETE" }); }
+    catch (err) { if (err.status !== 404) errors.push(err.message); }
+  }
+  if (errors.length) { toast(`${e.characters} konnte nicht entfernt werden: ${errors.join("; ")}`, true); return; }
   wortlisteEntries = wortlisteEntries.filter((x) => x.id !== e.id);
   renderWortliste();
   toast(`${e.characters} entfernt`);

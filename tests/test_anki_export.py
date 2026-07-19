@@ -163,18 +163,38 @@ def test_kana_note_fields():
     genanki = ae._require_genanki()
     models = ae._build_models(genanki)
     card = kc.KanaCard(
-        word="しあい", kanji_hint="試合", meaning="match; game; contest",
+        word="しあい", kanji_hint="試合", meaning="Spiel",
         sentence_ja="しあいがはじまりました。", sentence_translation="Das Spiel hat begonnen.",
         tags=["Dictionary"], card_id="kana_abc",
     )
     note = ae._kana_note(genanki, models["kana"], card)
     assert note.fields[0] == "しあい"
-    assert note.fields[1] == "match; game; contest"
+    assert "Spiel" in note.fields[1]
+    assert "wk-meaning" in note.fields[1]
     assert "試合" in note.fields[2]
     assert "しあいがはじまりました" in note.fields[3]
     assert "Das Spiel hat begonnen." in note.fields[3]
     assert "Dictionary" in note.fields[4]
-    assert note.fields[5] == "match"  # MeaningPlain: nur der erste Gloss-Eintrag
+    assert note.fields[5] == "Spiel"  # MeaningPlain: nur die Kern-Bedeutung
+
+
+def test_kana_note_meaning_extra_shown_as_secondary():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(word="ぼく", meaning="ich", meaning_extra="vertraulich im Ton; Kleiner", card_id="kana_boku")
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert '<span class="wk-meaning">ich' in note.fields[1]
+    assert '<span class="sec">' in note.fields[1]
+    assert "vertraulich im Ton; Kleiner" in note.fields[1]
+    assert note.fields[5] == "ich"  # MeaningPlain zeigt weiterhin nur die Kernbedeutung
+
+
+def test_kana_note_without_meaning_extra_omits_secondary_span():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(word="さあ", meaning="well now", meaning_extra=None, card_id="kana_saa2")
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert '<span class="sec">' not in note.fields[1]
 
 
 def test_kana_note_without_kanji_hint_omits_it():

@@ -16,10 +16,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -28,6 +30,8 @@ import requests
 
 import dictionary
 import gemini_client
+
+logger = logging.getLogger(__name__)
 
 try:
     from dotenv import load_dotenv
@@ -177,7 +181,8 @@ class KanaCard:
 
     word: str = ""                          # Hiragana/Katakana-Schreibweise (Vorderseite)
     kanji_hint: str | None = None           # Kanji-Schreibweise laut JMdict, nur als Hinweis
-    meaning: str = ""                       # Bedeutung (JMdict, Deutsch)
+    meaning: str = ""                       # Kern-Bedeutung (JMdict, Deutsch) – kurz, für den Titel
+    meaning_extra: str | None = None        # weitere Glossen/Nutzungshinweise, klein als Zusatz
     sentence_ja: str | None = None          # Satz aus dem Text-Modus, in dem das Wort vorkam
     sentence_translation: str | None = None  # DeepL-Übersetzung des Satzes (optional)
     tags: list[str] = field(default_factory=list)
@@ -813,6 +818,7 @@ def build_kana_card(
         word=word,
         kanji_hint=entry.get("kanji"),
         meaning=entry["meaning"],
+        meaning_extra=entry.get("meaning_extra"),
         sentence_ja=sentence,
         tags=["Dictionary"],
         card_id=kana_card_id(word),
@@ -830,6 +836,7 @@ def build_kana_card_from_dict(d: dict[str, Any]) -> KanaCard:
         word=str(d.get("word") or ""),
         kanji_hint=d.get("kanji_hint"),
         meaning=str(d.get("meaning") or ""),
+        meaning_extra=d.get("meaning_extra"),
         sentence_ja=d.get("sentence_ja"),
         sentence_translation=d.get("sentence_translation"),
         tags=tags,
@@ -1381,8 +1388,8 @@ def annotate_text(
       "kind", "meaning", "level"}` – ein per Lemma gegen WaniKani
       abgeglichenes Wort (Vokabel/Kanji/Radical, Vokabel bevorzugt).
     - `{"type": "word", "source": "dictionary", "text", "lemma", "sentence",
-      "id", "kind": "Dict", "meaning", "kanji_hint"}` – nur für Tokens
-      **ohne Kanji** (reines Hiragana/Katakana) UND ohne WaniKani-Treffer:
+      "id", "kind": "Dict", "meaning", "meaning_extra", "kanji_hint"}` – nur
+      für Tokens **ohne Kanji** (reines Hiragana/Katakana) UND ohne WaniKani-Treffer:
       WaniKani indiziert Vokabeln über die Kanji-Schreibweise, matcht solche
       Wörter also nie (typisch für vereinfachte Lesetexte, die bewusst
       Hiragana statt Kanji verwenden). Fallback über JMdict (siehe
@@ -1413,13 +1420,9 @@ def annotate_text(
     tokenizer = _get_tokenizer()
     lines = text.split("\n")
 
-    # Erste Runde: pro Zeile Janome-Tokens zu Satz-Gruppen bündeln. Mit
-    # Gemini-Key wird jede Gruppe versuchsweise durch Gemini ersetzt (siehe
-    # Fallback-Logik oben). Dabei alle vorkommenden Grundformen (Janome-Lemma
-    # bzw. Gemini-`dictionary_form`) sammeln für eine gebündelte WK-Anfrage.
+    # Erste Runde: pro Zeile Janome-Tokens zu Satz-Gruppen bündeln (noch ohne
+    # Gemini – das passiert erst danach, gebündelt und parallel, siehe unten).
     line_groups: list[list[dict[str, Any]]] = []
-    all_lemmas: dict[str, None] = {}
-    gemini_cache: dict[str, dict[str, Any] | None] = {}
 
     for line in lines:
         sentences = _split_sentences(line)
@@ -1444,36 +1447,72 @@ def annotate_text(
                     cur_entries = []
         if cur_entries:
             groups.append({"sentence": cur_sentence, "entries": cur_entries})
+        line_groups.append(groups)
 
+    # Gemini-Anfragen gebündelt und mit begrenzter Parallelität abschicken
+    # (statt Satz für Satz seriell) – bei langen Texten sonst viele Minuten
+    # Wartezeit, in denen der Worker blockiert und im Frontend nichts als
+    # "Analysiere…" zu sehen ist. Jeder eindeutige Satz wird nur einmal
+    # angefragt, unabhängig davon, wie oft er im Text vorkommt.
+    gemini_cache: dict[str, dict[str, Any] | None] = {}
+    if gemini_key:
+        unique_sentences = {
+            g["sentence"] for groups in line_groups for g in groups if g["sentence"].strip()
+        }
+        if unique_sentences:
+            logger.info(
+                "Gemini-Analyse: %d eindeutige(r) Satz/Sätze über %s", len(unique_sentences), gemini_model,
+            )
+            with ThreadPoolExecutor(max_workers=min(4, len(unique_sentences))) as pool:
+                futures = {
+                    pool.submit(
+                        gemini_client.analyze_sentence,
+                        sentence_text, gemini_key, model=gemini_model, use_cache=use_cache,
+                    ): sentence_text
+                    for sentence_text in unique_sentences
+                }
+                for future in as_completed(futures):
+                    sentence_text = futures[future]
+                    try:
+                        gemini_cache[sentence_text] = future.result()
+                    except Exception:  # nie hart abbrechen – dieser Satz fällt auf Janome zurück
+                        logger.exception("Gemini-Analyse für einen Satz fehlgeschlagen, Fallback auf Janome.")
+                        gemini_cache[sentence_text] = None
+
+    # Zweite Runde: Gemini-Ergebnisse (falls vorhanden) in die Satz-Gruppen
+    # übernehmen – nur wenn die Tokens exakt zum Original-Text rekonstruieren
+    # (Fallback-Garantie), dabei alle vorkommenden Grundformen (Janome-Lemma
+    # bzw. Gemini-`dictionary_form`) für eine gebündelte WK-Anfrage sammeln.
+    all_lemmas: dict[str, None] = {}
+    for groups in line_groups:
         for g in groups:
             original_text = "".join(s for s, _ in g["entries"])
             g["source"] = "janome"
             g["grammar_notes"] = None
             g["translation_de"] = None
 
-            if gemini_key and g["sentence"].strip():
-                sentence_text = g["sentence"]
-                if sentence_text not in gemini_cache:
-                    gemini_cache[sentence_text] = gemini_client.analyze_sentence(
-                        sentence_text, gemini_key, model=gemini_model, use_cache=use_cache,
+            result = gemini_cache.get(g["sentence"])
+            if result:
+                gtoks = [
+                    (
+                        t.get("surface") or "",
+                        (t.get("dictionary_form") or t.get("surface") or "").strip(),
+                        t.get("function") or "",
                     )
-                result = gemini_cache[sentence_text]
-                if result:
-                    gtoks = [
-                        (
-                            t.get("surface") or "",
-                            (t.get("dictionary_form") or t.get("surface") or "").strip(),
-                            t.get("function") or "",
-                        )
-                        for t in result.get("tokens", [])
-                        if t.get("surface")
-                    ]
-                    if "".join(s for s, _, _ in gtoks) == original_text:
-                        g["entries"] = [(s, l) for s, l, _ in gtoks]
-                        g["functions"] = [f for _, _, f in gtoks]
-                        g["source"] = "gemini"
-                        g["grammar_notes"] = result.get("grammar_notes") or None
-                        g["translation_de"] = result.get("translation_de") or None
+                    for t in result.get("tokens", [])
+                    if t.get("surface")
+                ]
+                if "".join(s for s, _, _ in gtoks) == original_text:
+                    g["entries"] = [(s, l) for s, l, _ in gtoks]
+                    g["functions"] = [f for _, _, f in gtoks]
+                    g["source"] = "gemini"
+                    g["grammar_notes"] = result.get("grammar_notes") or None
+                    g["translation_de"] = result.get("translation_de") or None
+                else:
+                    logger.info(
+                        "Gemini-Tokens rekonstruieren den Satz nicht exakt, Fallback auf Janome: %r",
+                        g["sentence"][:40],
+                    )
 
             if "functions" not in g:
                 g["functions"] = [None] * len(g["entries"])
@@ -1481,8 +1520,6 @@ def annotate_text(
             for _surface, lemma in g["entries"]:
                 if lemma and lemma != "*":
                     all_lemmas.setdefault(lemma, None)
-
-        line_groups.append(groups)
 
     # Grundformen gebündelt gegen WaniKani abgleichen (slugs-Filter, wie bei
     # den anderen Modi) – auch Nicht-Treffer sind völlig normal (Partikel etc.).
@@ -1552,6 +1589,7 @@ def annotate_text(
                                 "id": kana_card_id(lemma),
                                 "kind": "Dict",
                                 "meaning": entry["meaning"],
+                                "meaning_extra": entry.get("meaning_extra"),
                                 "kanji_hint": entry.get("kanji"),
                                 "level": None,
                             }

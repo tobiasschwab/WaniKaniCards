@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -27,7 +28,16 @@ from typing import Any
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini"
+
+# (connect, read) statt einem einzelnen Wert: eine tote/blockierte Verbindung
+# (z. B. DNS/Firewall-Problem im Docker-Netz) darf höchstens 10s zum Verbin-
+# den brauchen, das eigentliche Warten auf die Antwort maximal 25s – sonst
+# hängt ein Satz (und damit ein ganzer gunicorn-Worker) im schlimmsten Fall
+# lange fest, ohne dass im Frontend oder Log erkennbar ist, woran es liegt.
+_REQUEST_TIMEOUT = (10, 25)
 
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -98,10 +108,14 @@ def analyze_sentence(
     if not sentence or not api_key:
         return None
 
+    short = sentence if len(sentence) <= 40 else sentence[:40] + "…"
+
     cache_file = _cache_path(sentence, model) if use_cache else None
     if cache_file and cache_file.is_file():
         try:
-            return json.loads(cache_file.read_text(encoding="utf-8"))
+            result = json.loads(cache_file.read_text(encoding="utf-8"))
+            logger.info("Gemini: Cache-Treffer für Satz %r (%s)", short, model)
+            return result
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -115,30 +129,46 @@ def analyze_sentence(
         },
     }
 
+    logger.info("Gemini: Anfrage für Satz %r (%s) …", short, model)
+    t0 = time.monotonic()
     backoff = 1.0
     resp = None
-    for _attempt in range(4):
+    for attempt in range(4):
         try:
-            resp = session.post(url, params={"key": api_key}, json=body, timeout=30)
-        except requests.RequestException:
+            resp = session.post(url, params={"key": api_key}, json=body, timeout=_REQUEST_TIMEOUT)
+        except requests.RequestException as exc:
+            logger.warning(
+                "Gemini: Netzwerkfehler bei Satz %r nach %.1fs (%s): %s",
+                short, time.monotonic() - t0, type(exc).__name__, exc,
+            )
             return None
         if resp.status_code == 429 or resp.status_code >= 500:
+            logger.info(
+                "Gemini: HTTP %s für Satz %r, Versuch %d/4 – warte %.0fs",
+                resp.status_code, short, attempt + 1, backoff,
+            )
             time.sleep(backoff)
             backoff = min(backoff * 2, 8)
             continue
         break
     if resp is None or not resp.ok:
+        status = resp.status_code if resp is not None else "?"
+        logger.warning("Gemini: Anfrage für Satz %r fehlgeschlagen (HTTP %s)", short, status)
         return None
 
     try:
         data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
         result = json.loads(text)
-    except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+    except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Gemini: Antwort für Satz %r nicht auswertbar (%s): %s", short, type(exc).__name__, exc)
         return None
 
     if not isinstance(result.get("tokens"), list):
+        logger.warning("Gemini: Antwort für Satz %r ohne 'tokens'-Liste", short)
         return None
+
+    logger.info("Gemini: Satz %r analysiert in %.1fs (%d Tokens)", short, time.monotonic() - t0, len(result["tokens"]))
 
     if cache_file:
         try:

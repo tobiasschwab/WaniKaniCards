@@ -17,10 +17,16 @@
           <p class="tagline">Japanisch lesen, merken, üben – mit WaniKani, Wörterbuch &amp; KI-Grammatik</p>
         </div>
       </div>
-      <button id="settingsToggle" class="icon-btn" title="Einstellungen">
-        <span class="gear">⚙</span>
-        <span id="tokenPill" class="pill pill-warn">WaniKani nicht verbunden</span>
-      </button>
+      <div class="header-actions">
+        <div class="conn-row" id="connRow">
+          <span class="conn-dot off" id="connWanikani" title="WaniKani: nicht verbunden"><span class="dot"></span>WaniKani</span>
+          <span class="conn-dot off" id="connDeepl" title="DeepL: nicht verbunden"><span class="dot"></span>DeepL</span>
+          <span class="conn-dot off" id="connGemini" title="Gemini: nicht verbunden"><span class="dot"></span>Gemini</span>
+        </div>
+        <button id="settingsToggle" class="icon-btn" title="Einstellungen">
+          <span class="gear">⚙</span>
+        </button>
+      </div>
     </header>
 
     <!-- Einstellungen (Modal) -->
@@ -223,6 +229,7 @@
           <span id="wpLevel" class="muted"></span>
         </div>
         <div class="word-popup-meaning" id="wpMeaning"></div>
+        <div class="word-popup-meaning-extra hidden" id="wpMeaningExtra"></div>
         <div id="wpExportedNote" class="word-popup-note hidden">✓ bereits exportiert</div>
         <div id="wpActions" class="row gap" style="margin-top:10px">
           <button id="wpAdd" class="btn primary small">+ Zur Tabelle</button>
