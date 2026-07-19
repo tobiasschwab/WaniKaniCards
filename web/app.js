@@ -421,6 +421,13 @@ function renderKiTable(rows) {
 }
 
 // ---------- Wort-Popup (gemeinsam für Text- und KI-Modus) ----------
+// Im KI-Modus zeigt die Vokabeln-Spalte die Grundform (seg.lemma), nicht die
+// im Satz vorkommende, ggf. flektierte Schreibweise (seg.text) – Popup-Titel
+// und Toasts sollen dasselbe Wort nennen, das gerade angeklickt/hinzugefügt wurde.
+function _wpLabel(seg) {
+  return activeWordMode === "ki" ? (seg.lemma || seg.text) : seg.text;
+}
+
 function makeWordToken(seg, mode, label) {
   const span = document.createElement("span");
   span.className = "word-token " + seg.status.replace(/_/g, "-");
@@ -437,7 +444,7 @@ function openWordPopup(el, seg, mode = "text") {
   const pop = $("#wordPopup");
   const isDict = seg.source === "dictionary";
   const isAi = seg.source === "ai";
-  $("#wpChar").textContent = seg.text;
+  $("#wpChar").textContent = _wpLabel(seg);
   $("#wpKind").textContent = isAi ? "✨ " + seg.kind : seg.kind;
   $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : isAi ? "gemini" : seg.object);
   $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : isAi ? "Quelle: KI (Gemini)" : "Quelle: WaniKani";
@@ -482,8 +489,8 @@ async function addWordFromPopup() {
   if (seg.kind === "Vocab" && seg.sentence) {
     sentenceOverrides[String(seg.id)] = { ja: seg.sentence, en: null };
   }
-  appendComposition(comp, seg.text);
-  toast(`${seg.text} zur Tabelle hinzugefügt`);
+  appendComposition(comp, _wpLabel(seg));
+  toast(`${_wpLabel(seg)} zur Tabelle hinzugefügt`);
   closeWordPopup();
 }
 
@@ -498,8 +505,8 @@ async function createKanaCardFromPopup() {
     });
   } catch (e) { toast(e.message, true); return; }
   setSegReady(seg, true);
-  appendComposition([card], seg.text);
-  toast(`Dictionary-Karte für ${seg.text} erstellt und zur Tabelle hinzugefügt`);
+  appendComposition([card], _wpLabel(seg));
+  toast(`Dictionary-Karte für ${_wpLabel(seg)} erstellt und zur Tabelle hinzugefügt`);
   closeWordPopup();
 }
 
@@ -516,8 +523,8 @@ async function createAiKanaCardFromPopup() {
     });
   } catch (e) { toast(e.message, true); return; }
   setSegReady(seg, true);
-  appendComposition([card], seg.text);
-  toast(`KI-Karte für ${seg.text} erstellt und zur Tabelle hinzugefügt`);
+  appendComposition([card], _wpLabel(seg));
+  toast(`KI-Karte für ${_wpLabel(seg)} erstellt und zur Tabelle hinzugefügt`);
   closeWordPopup();
 }
 
@@ -562,7 +569,7 @@ async function toggleKnownFromPopup() {
     await api(`/api/known/${seg.id}`, { method: makeKnown ? "POST" : "DELETE" });
   } catch (e) { toast(e.message, true); return; }
   setSegManuallyKnown(seg, makeKnown);
-  toast(makeKnown ? `${seg.text} als bekannt markiert` : `${seg.text} nicht mehr als bekannt markiert`);
+  toast(makeKnown ? `${_wpLabel(seg)} als bekannt markiert` : `${_wpLabel(seg)} nicht mehr als bekannt markiert`);
   closeWordPopup();
 }
 // ---------- Wortliste: alle bekannten Wörter (WaniKani + Dictionary + manuell) ----------

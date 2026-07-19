@@ -114,17 +114,17 @@
                 </div>
                 <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Satztexte werden dafür an Googles Gemini-API gesendet.</span>
               </label>
-              <label class=”field” style=”margin-top:10px”>
-                <span class=”label”>Modell</span>
-                <div class=”token-row”>
-                  <select id=”geminiModel” class=”select”>
-                    <option value=”gemini-flash-latest”>gemini-flash-latest (schnell/günstig, empfohlen)</option>
-                    <option value=”gemini-flash-lite-latest”>gemini-flash-lite-latest (am günstigsten)</option>
-                    <option value=”gemini-pro-latest”>gemini-pro-latest (beste Qualität, braucht kostenpflichtiges Konto)</option>
+              <label class="field" style="margin-top:10px">
+                <span class="label">Modell</span>
+                <div class="token-row">
+                  <select id="geminiModel" class="select">
+                    <option value="gemini-flash-latest">gemini-flash-latest (schnell/günstig, empfohlen)</option>
+                    <option value="gemini-flash-lite-latest">gemini-flash-lite-latest (am günstigsten)</option>
+                    <option value="gemini-pro-latest">gemini-pro-latest (beste Qualität, braucht kostenpflichtiges Konto)</option>
                   </select>
-                  <button id=”geminiRefreshModels” type=”button” class=”ghost-btn” title=”Verfügbare Modelle von Google abrufen”>🔄</button>
+                  <button id="geminiRefreshModels" type="button" class="ghost-btn" title="Verfügbare Modelle von Google abrufen">🔄</button>
                 </div>
-                <span class=”hint”>Mit 🔄 werden die aktuell für diesen API-Key verfügbaren Modelle direkt bei Google abgefragt (braucht einen gespeicherten Key). <code>pro</code>-Modelle haben im kostenlosen Kontingent meist <strong>kein</strong> Guthaben (HTTP 429 „quota exceeded”, nicht nur Rate-Limit) und brauchen ein Google-Konto mit aktivierter Abrechnung – für Gratis-Nutzung <code>flash</code>/<code>flash-lite</code> wählen.</span>
+                <span class="hint">Mit 🔄 werden die aktuell für diesen API-Key verfügbaren Modelle direkt bei Google abgefragt (braucht einen gespeicherten Key). <code>pro</code>-Modelle haben im kostenlosen Kontingent meist <strong>kein</strong> Guthaben (HTTP 429 „quota exceeded", nicht nur Rate-Limit) und brauchen ein Google-Konto mit aktivierter Abrechnung – für Gratis-Nutzung <code>flash</code>/<code>flash-lite</code> wählen.</span>
               </label>
               <div class="row gap">
                 <button id="geminiSave" class="btn primary">Speichern</button>
