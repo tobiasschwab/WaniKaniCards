@@ -155,16 +155,18 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    versuchen"** fragt dann nur diesen einen Satz erneut an, statt den ganzen
    Text neu zu analysieren.
 
-   **🔤 Neue Vokabeln in diesem Text (nach Häufigkeit):** eine kompakte,
-   deduplizierte Liste aller noch unbekannten Vokabeln über den gesamten
-   Text hinweg, sortiert nach Vorkommenshäufigkeit (ein Wort, das 5× auftaucht,
-   lohnt sich eher zu lernen als eins, das nur einmal vorkommt) – standardmäßig
-   nur die Top 10, „Alle N anzeigen" klappt den Rest auf. Wort anklicken öffnet
-   dasselbe Wort-Popup wie in der Vokabeln-Spalte der Tabelle. **„+ Alle
-   unbekannten hinzufügen"** übernimmt stattdessen alle unbekannten Vokabeln
-   des Textes auf einen Klick in die Karten-Tabelle (WaniKani-Treffer
-   gebündelt in einem Abgleich, Dictionary-/KI-Wörter nacheinander) – bleibt
-   ein bewusster Klick, spart aber bei langen Texten das einzelne Anklicken
+   **🔤 Vokabeln in diesem Text (nach Häufigkeit):** eine kompakte,
+   deduplizierte Liste **aller** Vokabeln über den gesamten Text hinweg
+   (bekannt und unbekannt), sortiert nach Vorkommenshäufigkeit (ein Wort,
+   das 5× auftaucht, lohnt sich eher zu lernen als eins, das nur einmal
+   vorkommt) – standardmäßig nur die Top 10, „Alle N anzeigen" klappt den
+   Rest auf. Grün/Blau zeigt sofort, welche der häufigsten Wörter schon
+   bekannt sind und welche noch fehlen. Wort anklicken öffnet dasselbe
+   Wort-Popup wie in der Vokabeln-Spalte der Tabelle. **„+ Alle unbekannten
+   hinzufügen"** übernimmt stattdessen alle unbekannten Vokabeln des Textes
+   auf einen Klick in die Karten-Tabelle (WaniKani-Treffer gebündelt in
+   einem Abgleich, Dictionary-/KI-Wörter nacheinander) – bleibt ein
+   bewusster Klick, spart aber bei langen Texten das einzelne Anklicken
    jedes Worts.
 
    **🔊 Original-Satz vorlesen:** ein Lautsprecher-Symbol neben jedem Satz

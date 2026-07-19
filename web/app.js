@@ -594,7 +594,7 @@ function _kiFrequencyEntries() {
   const counts = new Map();
   for (const row of kiRows) {
     for (const s of row.segments || []) {
-      if (s.type !== "word" || s.known) continue;
+      if (s.type !== "word") continue;
       const key = s.source + ":" + s.id;
       if (!counts.has(key)) counts.set(key, { seg: s, count: 0 });
       counts.get(key).count++;
@@ -615,7 +615,9 @@ function renderKiFrequencyList() {
   chips.className = "ki-freq-chips";
   for (const { seg, count } of shown) {
     const chip = document.createElement("button");
-    chip.type = "button"; chip.className = "ki-freq-chip"; chip.title = seg.meaning || "";
+    chip.type = "button";
+    chip.className = "ki-freq-chip " + (seg.status || "unknown").replace(/_/g, "-");
+    chip.title = seg.meaning || "";
     chip.innerHTML = `<span>${escapeHtml(seg.lemma || seg.text)}</span><span class="c">×${count}</span>`;
     chip.addEventListener("click", (e) => openWordPopup(e.currentTarget, seg, "ki"));
     chips.append(chip);
@@ -1307,7 +1309,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#wlContextClose").addEventListener("click", closeWlContext);
   document.addEventListener("click", (e) => {
     const pop = $("#wordPopup");
-    if (!pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.classList.contains("word-token")) closeWordPopup();
+    if (!pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.closest(".word-token, .ki-freq-chip")) closeWordPopup();
     const wlPop = $("#wlContextPopup");
     if (!wlPop.classList.contains("hidden") && !wlPop.contains(e.target) && !e.target.closest(".chip-btn")) closeWlContext();
   });

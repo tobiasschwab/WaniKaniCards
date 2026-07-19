@@ -367,6 +367,10 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 }
 .ki-freq-chip:hover { background: var(--bg); }
 .ki-freq-chip .c { color: var(--muted); font-size: 11px; }
+.ki-freq-chip.unknown { color: var(--accent-2); border-color: var(--accent-2); }
+.ki-freq-chip.known { color: var(--ok); border-color: var(--ok); }
+.ki-freq-chip.unknown:hover { background: rgba(0,180,216,.1); }
+.ki-freq-chip.known:hover { background: rgba(22,163,74,.1); }
 .ki-pct-badge {
   display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
   background: hsla(var(--pct-hue), 70%, 45%, .18); color: hsl(var(--pct-hue), 75%, 32%);
