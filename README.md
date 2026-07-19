@@ -571,14 +571,24 @@ Abbruch für den gesamten Text). `dictionary_form` ersetzt dabei Janomes
 `base_form` als Schlüssel für den WaniKani-/JMdict-Abgleich.
 
 Eindeutige Sätze werden mit begrenzter Parallelität (`ThreadPoolExecutor`,
-max. 4 gleichzeitig) statt streng seriell angefragt – bei längeren Texten
-sonst viele Minuten Wartezeit in einem einzigen gunicorn-Worker. Jeder
-Request nutzt ein (Connect-, Read-)Timeout von (10s, 25s) statt eines
-einzelnen 30s-Werts, damit eine tote Verbindung (z. B. Netzwerk-Policy im
-Docker-Deployment) nicht unbegrenzt hängt. Start, Dauer und Fehlerursache
-jeder Gemini-Anfrage werden per `logging` protokolliert (INFO/WARNING,
-sichtbar über `docker logs`) – vorher war ein hängender Request von außen
-nicht von einem stillen Erfolg zu unterscheiden.
+max. 2 gleichzeitig) statt streng seriell angefragt – bei längeren Texten
+sonst viele Minuten Wartezeit in einem einzigen gunicorn-Worker. Bewusst
+niedrig gehalten (nicht höher): mehr Parallelität verschärft nur die
+Rate-Limit-Kollisionen, v. a. bei `gemini-2.5-pro`, dessen Gratis-Kontingent
+deutlich enger ist als bei `flash`/`flash-lite` (im Zweifel die Modellwahl
+in den Einstellungen wechseln). Jeder Request nutzt ein (Connect-, Read-)
+Timeout von (10s, 25s) statt eines einzelnen 30s-Werts, damit eine tote
+Verbindung (z. B. Netzwerk-Policy im Docker-Deployment) nicht unbegrenzt
+hängt. Bei HTTP 429 wird die von Google selbst empfohlene Wartezeit
+(`Retry-After`-Header bzw. `RetryInfo.retryDelay` in der Fehlerantwort)
+befolgt statt eines geratenen Backoffs – ein Rate-Limit-Fenster läuft oft
+über ~60s, ein Backoff, der nach 8s aufgibt, schlägt in der Zeit einfach
+mehrfach erfolglos fehl, statt einmal lange genug zu warten. Insgesamt darf
+ein einzelner Satz höchstens ~70s auf Rate-Limit-Erholung warten, danach
+fällt er auf Janome zurück statt endlos zu blockieren. Start, Dauer und
+Fehlerursache jeder Gemini-Anfrage werden per `logging` protokolliert (INFO/
+WARNING, sichtbar über `docker logs`) – vorher war ein hängender oder an
+Rate-Limits scheiternder Request von außen nicht zu unterscheiden.
 
 Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-
 Liste: bereits exportierte/manuell markierte WaniKani-Subjects (Anzeige-Daten

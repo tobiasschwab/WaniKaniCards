@@ -117,10 +117,11 @@
               <label class="field" style="margin-top:10px">
                 <span class="label">Modell</span>
                 <select id="geminiModel" class="select">
-                  <option value="gemini-2.5-flash">gemini-2.5-flash (schnell/günstig)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (schnell/günstig, empfohlen)</option>
                   <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (am günstigsten)</option>
-                  <option value="gemini-2.5-pro">gemini-2.5-pro (beste Qualität)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (beste Qualität, sehr enges Gratis-Kontingent)</option>
                 </select>
+                <span class="hint">Bei Texten mit vielen Sätzen: <code>flash</code>/<code>flash-lite</code> haben deutlich großzügigere kostenlose Rate-Limits als <code>pro</code> – <code>pro</code> stößt bei mehreren Sätzen im kostenlosen Kontingent oft sofort an HTTP-429-Grenzen.</span>
               </label>
               <div class="row gap">
                 <button id="geminiSave" class="btn primary">Speichern</button>

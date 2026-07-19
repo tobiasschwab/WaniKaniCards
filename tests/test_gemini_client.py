@@ -13,10 +13,11 @@ import gemini_client as gc  # noqa: E402
 
 
 class _FakeResp:
-    def __init__(self, *, status_code=200, json_data=None):
+    def __init__(self, *, status_code=200, json_data=None, headers=None):
         self.status_code = status_code
         self.ok = status_code < 400
         self._json = json_data
+        self.headers = headers or {}
 
     def json(self):
         return self._json
@@ -134,3 +135,51 @@ def test_analyze_sentence_backoff_retries_on_429_then_succeeds(tmp_path, monkeyp
     result = gc.analyze_sentence("テスト", "key", session=_FlakySession(), use_cache=False)
     assert result is not None
     assert calls["n"] == 3
+
+
+def test_server_retry_delay_reads_retry_after_header():
+    resp = _FakeResp(status_code=429, headers={"Retry-After": "35"})
+    assert gc._server_retry_delay(resp) == 35.0
+
+
+def test_server_retry_delay_reads_retry_info_detail():
+    resp = _FakeResp(status_code=429, json_data={
+        "error": {"details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "41.5s"}]}
+    })
+    assert gc._server_retry_delay(resp) == 41.5
+
+
+def test_server_retry_delay_returns_none_without_hints():
+    resp = _FakeResp(status_code=429, json_data={"error": {"message": "quota exceeded"}})
+    assert gc._server_retry_delay(resp) is None
+
+
+def test_analyze_sentence_honors_server_retry_delay(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "CACHE_DIR", tmp_path / "gemini")
+    sleeps = []
+    monkeypatch.setattr(gc.time, "sleep", lambda s: sleeps.append(s))
+
+    calls = {"n": 0}
+
+    class _FlakySession:
+        def post(self, url, params=None, json=None, timeout=30):
+            calls["n"] += 1
+            if calls["n"] < 2:
+                return _FakeResp(status_code=429, headers={"Retry-After": "12"})
+            return _FakeResp(json_data=_gemini_body([{"surface": "x", "dictionary_form": "x", "function": "y"}]))
+
+    result = gc.analyze_sentence("テスト", "key", session=_FlakySession(), use_cache=False)
+    assert result is not None
+    assert sleeps == [12.0]  # server-empfohlene Wartezeit statt der geratenen 2s
+
+
+def test_analyze_sentence_gives_up_after_max_total_wait(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "CACHE_DIR", tmp_path / "gemini")
+    monkeypatch.setattr(gc.time, "sleep", lambda *_a, **_k: None)
+
+    class _AlwaysRateLimited:
+        def post(self, url, params=None, json=None, timeout=30):
+            return _FakeResp(status_code=429, headers={"Retry-After": "9999"})
+
+    result = gc.analyze_sentence("テスト", "key", session=_AlwaysRateLimited(), use_cache=False)
+    assert result is None  # gibt irgendwann auf statt einen Satz ewig zu blockieren

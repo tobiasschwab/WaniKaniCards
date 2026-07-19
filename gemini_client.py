@@ -88,6 +88,33 @@ def _cache_path(sentence: str, model: str) -> Path:
     return CACHE_DIR / f"{key}.json"
 
 
+def _server_retry_delay(resp: requests.Response) -> float | None:
+    """Von Google empfohlene Wartezeit aus einer 429-Antwort lesen (`Retry-After`-
+    Header oder `RetryInfo` in der JSON-Fehlerantwort).
+
+    Zuverlässiger als eine geratene Backoff-Zeit: Rate-Limits (v. a. bei
+    `gemini-2.5-pro`, dessen Free-Tier-Kontingent deutlich enger ist als bei
+    `flash`/`flash-lite`) laufen über ein Zeitfenster von oft ~60s – ein reines
+    Backoff bis max. 8s wartet dann bei jedem Versuch zu kurz und schlägt
+    dutzende Male hintereinander mit HTTP 429 fehl, statt einmal lange genug
+    zu warten und danach zu klappen.
+    """
+    retry_after = resp.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return float(retry_after)
+        except ValueError:
+            pass
+    try:
+        for detail in resp.json().get("error", {}).get("details", []):
+            delay = detail.get("retryDelay")
+            if isinstance(detail.get("@type"), str) and detail["@type"].endswith("RetryInfo") and delay:
+                return float(str(delay).rstrip("s"))
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
 def analyze_sentence(
     sentence: str,
     api_key: str,
@@ -131,9 +158,11 @@ def analyze_sentence(
 
     logger.info("Gemini: Anfrage für Satz %r (%s) …", short, model)
     t0 = time.monotonic()
-    backoff = 1.0
+    backoff = 2.0
+    total_waited = 0.0
+    max_total_wait = 70.0  # ein Satz darf insgesamt nicht länger blockieren
     resp = None
-    for attempt in range(4):
+    for attempt in range(5):
         try:
             resp = session.post(url, params={"key": api_key}, json=body, timeout=_REQUEST_TIMEOUT)
         except requests.RequestException as exc:
@@ -143,17 +172,28 @@ def analyze_sentence(
             )
             return None
         if resp.status_code == 429 or resp.status_code >= 500:
+            if total_waited >= max_total_wait or attempt == 4:
+                break
+            wait = _server_retry_delay(resp) if resp.status_code == 429 else None
+            source = "vom Server empfohlen"
+            if wait is None:
+                wait, source = backoff, "geschätzt"
+                backoff = min(backoff * 2, 20)
+            wait = min(wait, max_total_wait - total_waited)
             logger.info(
-                "Gemini: HTTP %s für Satz %r, Versuch %d/4 – warte %.0fs",
-                resp.status_code, short, attempt + 1, backoff,
+                "Gemini: HTTP %s für Satz %r, Versuch %d/5 – warte %.0fs (%s)",
+                resp.status_code, short, attempt + 1, wait, source,
             )
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 8)
+            time.sleep(wait)
+            total_waited += wait
             continue
         break
     if resp is None or not resp.ok:
         status = resp.status_code if resp is not None else "?"
-        logger.warning("Gemini: Anfrage für Satz %r fehlgeschlagen (HTTP %s)", short, status)
+        logger.warning(
+            "Gemini: Anfrage für Satz %r endgültig fehlgeschlagen (HTTP %s) nach %.1fs",
+            short, status, time.monotonic() - t0,
+        )
         return None
 
     try:

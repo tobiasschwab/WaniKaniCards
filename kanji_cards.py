@@ -1463,7 +1463,11 @@ def annotate_text(
             logger.info(
                 "Gemini-Analyse: %d eindeutige(r) Satz/Sätze über %s", len(unique_sentences), gemini_model,
             )
-            with ThreadPoolExecutor(max_workers=min(4, len(unique_sentences))) as pool:
+            # Niedrige Parallelität: mehr gleichzeitige Requests verschärfen
+            # nur die Rate-Limit-Kollisionen (v. a. bei gemini-2.5-pro, dessen
+            # Free-Tier-Kontingent sehr eng ist) – 2 gleichzeitig reicht, um
+            # trotzdem schneller zu sein als streng seriell.
+            with ThreadPoolExecutor(max_workers=min(2, len(unique_sentences))) as pool:
                 futures = {
                     pool.submit(
                         gemini_client.analyze_sentence,
