@@ -259,21 +259,14 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .text-display .text-line { margin: 0 0 10px; }
 .text-display .text-line:last-child { margin-bottom: 0; }
 .word-token { cursor: pointer; border-radius: 4px; padding: 0 1px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
-.word-token.unknown-wanikani { color: var(--accent); text-decoration-color: var(--accent); }
-.word-token.unknown-dictionary { color: var(--warn); text-decoration-color: var(--warn); }
-.word-token.known-wanikani { color: var(--ok); text-decoration-color: var(--ok); }
-.word-token.known-dictionary { color: var(--accent-2); text-decoration-color: var(--accent-2); }
-.word-token.known-manual { color: var(--known-manual); text-decoration-color: var(--known-manual); }
+.word-token.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
+.word-token.known { color: var(--ok); text-decoration-color: var(--ok); }
 .word-token:hover { background: rgba(109,59,245,.1); }
-.word-token.known-wanikani:hover { background: rgba(22,163,74,.1); }
-.word-token.known-dictionary:hover { background: rgba(0,180,216,.1); }
-.word-token.known-manual:hover { background: rgba(219,39,119,.1); }
+.word-token.known:hover { background: rgba(22,163,74,.1); }
+.word-token.unknown:hover { background: rgba(0,180,216,.1); }
 .word-legend { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
-.word-legend.unknown-wanikani { color: var(--accent); text-decoration-color: var(--accent); }
-.word-legend.unknown-dictionary { color: var(--warn); text-decoration-color: var(--warn); }
-.word-legend.known-wanikani { color: var(--ok); text-decoration-color: var(--ok); }
-.word-legend.known-dictionary { color: var(--accent-2); text-decoration-color: var(--accent-2); }
-.word-legend.known-manual { color: var(--known-manual); text-decoration-color: var(--known-manual); }
+.word-legend.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
+.word-legend.known { color: var(--ok); text-decoration-color: var(--ok); }
 
 /* Wort-Popup */
 .word-popup {

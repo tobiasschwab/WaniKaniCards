@@ -94,18 +94,20 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
    Hiragana statt Kanji verwenden (z. B. NHK Easy News), treffen darüber also
    fast nie. Für Wörter **ohne jedes Kanji**, die WaniKani nicht kennt, greift
    deshalb automatisch ein Fallback über [JMdict](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project)
-   (Open-Source-Wörterbuch, einmalig als JSON geladen und unter `.cache/jmdict/`
-   zwischengespeichert). Kanji-haltige unbekannte Wörter bleiben bewusst
+   (Open-Source-Wörterbuch, deutsche Edition, einmalig als JSON geladen und
+   unter `.cache/jmdict/` zwischengespeichert). Kanji-haltige unbekannte Wörter bleiben bewusst
    Klartext (die gehören als Kanji gelernt, nicht als Dictionary-Karte).
-   Fünf Farben im Text zeigen den Status jedes Worts:
+   Zwei Farben im Text zeigen den Status jedes Worts – unabhängig davon, ob
+   es über WaniKani oder das Wörterbuch kommt und ob es manuell markiert oder
+   über eine Karte „bekannt" wurde:
 
    | Farbe | Bedeutung |
    |---|---|
-   | Pink „bekannt markiert" | manuell als bekannt markiert, unabhängig von Quelle/Karte |
-   | Grün „bekannt · WaniKani" | WaniKani-Treffer, bereits exportiert |
-   | Türkis „bekannt · Wörterbuch" | Dictionary-Treffer, Karte bereits erstellt |
-   | Violett „unbekannt · WaniKani" | WaniKani-Treffer, noch nichts davon |
-   | Orange „unbekannt · Wörterbuch" | Dictionary-Treffer, noch nichts davon |
+   | Grün „bekannt" | manuell als bekannt markiert **oder** Karte/Export existiert bereits |
+   | Blau „unbekannt" | weder markiert noch Karte/Export vorhanden |
+
+   Details (Quelle WaniKani/Wörterbuch, ob manuell markiert oder weil eine
+   Karte existiert) zeigt das Popup beim Anklicken des Worts.
 
    Für Dictionary-Wörter erzeugt das Popup statt „Zur Tabelle" den Button
    **„Dictionary-Karte erstellen"** – ein neuer, WaniKani-unabhängiger
@@ -480,10 +482,11 @@ angewendet (`resolve_subject_deck()` → `build_card()` / `build_vocab_card()`)
 – WaniKanis eigene Beispielsätze gehen dabei nicht verloren, sie rutschen nur
 eine Position nach hinten.
 
-**Wörterbuch-Fallback** (`dictionary.py`, unabhängig von WaniKani): lädt
-[JMdict-simplified](https://github.com/scriptin/jmdict-simplified) (JSON, per
-GitHub-Releases-API immer die neueste Version) einmalig herunter und baut
-einen Lesung→{Kanji, Bedeutung}-Index, gecacht unter `.cache/jmdict/`. Für
+**Wörterbuch-Fallback** (`dictionary.py`, unabhängig von WaniKani): lädt die
+deutsche Edition von [JMdict-simplified](https://github.com/scriptin/jmdict-simplified)
+(`jmdict-ger-*.json.zip`, JSON, per GitHub-Releases-API immer die neueste
+Version) einmalig herunter und baut einen Lesung→{Kanji, deutsche Bedeutung}-
+Index, gecacht unter `.cache/jmdict/`. Für
 Text-Modus-Wörter ohne Kanji UND ohne WaniKani-Treffer liefert
 `dictionary.lookup_reading()` die Anzeige-Daten für den neuen, WaniKani-
 unabhängigen Kartentyp `KanaCard` (`kanji_cards.build_kana_card()`) –

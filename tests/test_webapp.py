@@ -169,7 +169,7 @@ def test_api_text_annotate_marks_manually_known_words(tmp_path, monkeypatch):
         "/api/text-annotate", json={"text": "大きい", "sample": True}
     ).get_json()
     word2 = next(s for line in second["lines"] for s in line if s["type"] == "word")
-    assert word2["status"] == "known_manual"
+    assert word2["status"] == "known"
     assert word2["known"] is True
     assert word2["manually_known"] is True
     assert second["stats"]["percent"] == 100.0
@@ -190,7 +190,7 @@ def test_api_text_annotate_classifies_dictionary_words(tmp_path, monkeypatch):
     data = r.get_json()
     words = [s for line in data["lines"] for s in line if s["type"] == "word"]
     assert len(words) == 1
-    assert words[0]["status"] == "unknown_dictionary"
+    assert words[0]["status"] == "unknown"
     assert words[0]["known"] is False
     assert words[0]["manually_known"] is False
     assert words[0]["ready"] is False
@@ -216,7 +216,7 @@ def test_api_text_annotate_ready_true_when_dictionary_card_already_created(tmp_p
     assert word2["id"] == word["id"]
     assert word2["ready"] is True
     assert word2["manually_known"] is False
-    assert word2["status"] == "known_dictionary"
+    assert word2["status"] == "known"
     assert word2["known"] is True
 
 

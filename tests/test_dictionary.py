@@ -30,6 +30,7 @@ def _jmdict_fixture() -> dict:
                             {"lang": "eng", "text": "match", "gender": None, "type": None},
                             {"lang": "eng", "text": "game", "gender": None, "type": None},
                             {"lang": "ger", "text": "Spiel", "gender": None, "type": None},
+                            {"lang": "ger", "text": "Wettkampf", "gender": None, "type": None},
                         ],
                     }
                 ],
@@ -39,21 +40,21 @@ def _jmdict_fixture() -> dict:
                 "id": "2",
                 "kanji": [],
                 "kana": [{"text": "さあ", "common": True, "tags": [], "appliesToKanji": ["*"]}],
-                "sense": [{"partOfSpeech": [], "gloss": [{"lang": "eng", "text": "well now", "gender": None, "type": None}]}],
+                "sense": [{"partOfSpeech": [], "gloss": [{"lang": "ger", "text": "nun", "gender": None, "type": None}]}],
             },
             {
-                # Keine englische Bedeutung -> muss übersprungen werden.
+                # Keine deutsche Bedeutung -> muss übersprungen werden.
                 "id": "3",
                 "kanji": [{"text": "無し", "common": False, "tags": []}],
                 "kana": [{"text": "なし", "common": False, "tags": [], "appliesToKanji": ["*"]}],
-                "sense": [{"partOfSpeech": [], "gloss": [{"lang": "ger", "text": "ohne", "gender": None, "type": None}]}],
+                "sense": [{"partOfSpeech": [], "gloss": [{"lang": "eng", "text": "without", "gender": None, "type": None}]}],
             },
             {
                 # Zweiter Eintrag mit derselben Lesung wie Wort 1 -> erster gewinnt.
                 "id": "4",
                 "kanji": [{"text": "仕合", "common": False, "tags": []}],
                 "kana": [{"text": "しあい", "common": False, "tags": [], "appliesToKanji": ["*"]}],
-                "sense": [{"partOfSpeech": [], "gloss": [{"lang": "eng", "text": "duplicate reading, should be ignored", "gender": None, "type": None}]}],
+                "sense": [{"partOfSpeech": [], "gloss": [{"lang": "ger", "text": "sollte ignoriert werden (Dublette)", "gender": None, "type": None}]}],
             },
             {
                 # Viele Glosses -> auf MAX_GLOSSES gekappt.
@@ -64,12 +65,12 @@ def _jmdict_fixture() -> dict:
                     {
                         "partOfSpeech": [],
                         "gloss": [
-                            {"lang": "eng", "text": "big", "gender": None, "type": None},
-                            {"lang": "eng", "text": "large", "gender": None, "type": None},
-                            {"lang": "eng", "text": "huge", "gender": None, "type": None},
-                            {"lang": "eng", "text": "great", "gender": None, "type": None},
-                            {"lang": "eng", "text": "grand", "gender": None, "type": None},
-                            {"lang": "eng", "text": "vast", "gender": None, "type": None},
+                            {"lang": "ger", "text": "groß", "gender": None, "type": None},
+                            {"lang": "ger", "text": "riesig", "gender": None, "type": None},
+                            {"lang": "ger", "text": "gewaltig", "gender": None, "type": None},
+                            {"lang": "ger", "text": "gigantisch", "gender": None, "type": None},
+                            {"lang": "ger", "text": "enorm", "gender": None, "type": None},
+                            {"lang": "ger", "text": "immens", "gender": None, "type": None},
                         ],
                     }
                 ],
@@ -86,17 +87,17 @@ def test_build_reading_index_maps_kana_to_kanji_and_meaning(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
-    assert index["しあい"] == {"kanji": "試合", "meaning": "match; game"}
+    assert index["しあい"] == {"kanji": "試合", "meaning": "Spiel; Wettkampf"}
 
 
 def test_build_reading_index_handles_kana_only_word_without_kanji(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
-    assert index["さあ"] == {"kanji": None, "meaning": "well now"}
+    assert index["さあ"] == {"kanji": None, "meaning": "nun"}
 
 
-def test_build_reading_index_skips_words_without_english_gloss(tmp_path):
+def test_build_reading_index_skips_words_without_german_gloss(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
@@ -114,7 +115,7 @@ def test_build_reading_index_limits_glosses_to_max(tmp_path):
     p = tmp_path / "jmdict.json"
     p.write_text(json.dumps(_jmdict_fixture(), ensure_ascii=False), encoding="utf-8")
     index = dic.build_reading_index(p)
-    assert index["おおきい"]["meaning"] == "big; large; huge; great"
+    assert index["おおきい"]["meaning"] == "groß; riesig; gewaltig; gigantisch"
 
 
 # --------------------------------------------------------------------------- #
@@ -147,18 +148,19 @@ class _FakeSession:
         return self._responses.get(url, _FakeResp(status_code=404))
 
 
-def test_find_asset_picks_eng_json_zip_asset():
+def test_find_asset_picks_ger_json_zip_asset():
     release = {
         "assets": [
             {"name": "jmdict-examples-eng-3.6.1.json.zip", "browser_download_url": "https://x/examples.zip"},
             {"name": "jmdict-eng-3.6.1.json.zip", "browser_download_url": "https://x/eng.zip"},
+            {"name": "jmdict-ger-3.6.1.json.zip", "browser_download_url": "https://x/ger.zip"},
             {"name": "jmnedict-all-3.6.1.json.zip", "browser_download_url": "https://x/names.zip"},
         ]
     }
     session = _FakeSession({dic._RELEASES_API: _FakeResp(json_data=release)})
     name, url = dic._find_asset(session)
-    assert name == "jmdict-eng-3.6.1.json.zip"
-    assert url == "https://x/eng.zip"
+    assert name == "jmdict-ger-3.6.1.json.zip"
+    assert url == "https://x/ger.zip"
 
 
 def test_find_asset_raises_when_no_matching_asset():
@@ -178,36 +180,36 @@ def test_download_jmdict_extracts_json_from_zip(tmp_path, monkeypatch):
     fixture_bytes = json.dumps(_jmdict_fixture(), ensure_ascii=False).encode("utf-8")
     zip_bytes_path = tmp_path / "src.zip"
     with zipfile.ZipFile(zip_bytes_path, "w") as zf:
-        zf.writestr("jmdict-eng-3.6.1.json", fixture_bytes)
+        zf.writestr("jmdict-ger-3.6.1.json", fixture_bytes)
     zip_bytes = zip_bytes_path.read_bytes()
 
-    release = {"assets": [{"name": "jmdict-eng-3.6.1.json.zip", "browser_download_url": "https://x/eng.zip"}]}
+    release = {"assets": [{"name": "jmdict-ger-3.6.1.json.zip", "browser_download_url": "https://x/ger.zip"}]}
     session = _FakeSession({
         dic._RELEASES_API: _FakeResp(json_data=release),
-        "https://x/eng.zip": _FakeResp(content=zip_bytes),
+        "https://x/ger.zip": _FakeResp(content=zip_bytes),
     })
 
     json_path = dic.download_jmdict(session=session)
     assert json_path.is_file()
     assert json.loads(json_path.read_text(encoding="utf-8")) == _jmdict_fixture()
-    assert (tmp_path / "jmdict" / "jmdict-eng-3.6.1.json.zip").is_file()
+    assert (tmp_path / "jmdict" / "jmdict-ger-3.6.1.json.zip").is_file()
 
 
 def test_download_jmdict_skips_download_if_zip_already_cached(tmp_path, monkeypatch):
     jdir = tmp_path / "jmdict"
     jdir.mkdir()
     fixture_bytes = json.dumps(_jmdict_fixture(), ensure_ascii=False).encode("utf-8")
-    zip_path = jdir / "jmdict-eng-3.6.1.json.zip"
+    zip_path = jdir / "jmdict-ger-3.6.1.json.zip"
     with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.writestr("jmdict-eng-3.6.1.json", fixture_bytes)
+        zf.writestr("jmdict-ger-3.6.1.json", fixture_bytes)
     monkeypatch.setattr(dic, "JMDICT_DIR", jdir)
 
-    release = {"assets": [{"name": "jmdict-eng-3.6.1.json.zip", "browser_download_url": "https://x/eng.zip"}]}
+    release = {"assets": [{"name": "jmdict-ger-3.6.1.json.zip", "browser_download_url": "https://x/ger.zip"}]}
     session = _FakeSession({dic._RELEASES_API: _FakeResp(json_data=release)})  # kein Eintrag für die Zip-URL!
 
     json_path = dic.download_jmdict(session=session)
     assert json_path.is_file()
-    assert "https://x/eng.zip" not in session.calls  # nicht erneut heruntergeladen
+    assert "https://x/ger.zip" not in session.calls  # nicht erneut heruntergeladen
 
 
 # --------------------------------------------------------------------------- #

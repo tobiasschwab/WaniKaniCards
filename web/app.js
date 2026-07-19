@@ -90,6 +90,7 @@ async function loadSettings() {
   const pill = $("#tokenPill");
   if (s.token_set) { pill.textContent = "Token gesetzt"; pill.className = "pill pill-ok"; $("#tokenInput").placeholder = s.token_hint || ""; }
   else { pill.textContent = "Kein Token"; pill.className = "pill pill-warn"; }
+  if (s.deepl_key_set) { $("#deeplInput").placeholder = s.deepl_key_hint || ""; }
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
   if (d.types && d.types.length) chipcheckSet("type", d.types);
@@ -287,10 +288,14 @@ function openWordPopup(el, seg) {
   $("#wpChar").textContent = seg.text;
   $("#wpKind").textContent = seg.kind;
   $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : seg.object);
+  $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : "Quelle: WaniKani";
   $("#wpLevel").textContent = isDict ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "") : (seg.level ? `Lv ${seg.level}` : "");
   $("#wpMeaning").textContent = seg.meaning || "";
-  $("#wpExportedNote").textContent = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
-  $("#wpExportedNote").classList.toggle("hidden", !seg.ready);
+  let note = "";
+  if (seg.manually_known) note = "✓ manuell als bekannt markiert";
+  else if (seg.ready) note = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
+  $("#wpExportedNote").textContent = note;
+  $("#wpExportedNote").classList.toggle("hidden", !note);
   $("#wpAdd").textContent = isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
   $("#wpAdd").disabled = isDict && seg.ready;
   $("#wpKnown").textContent = seg.manually_known ? "Bekannt-Markierung entfernen" : "Als bekannt markieren";
@@ -353,8 +358,7 @@ function applySegChange(seg, patch) {
       total++;
       if (s.id === seg.id && s.source === seg.source) {
         Object.assign(s, patch);
-        const kind = s.source === "dictionary" ? "dictionary" : "wanikani";
-        s.status = s.manually_known ? "known_manual" : (s.ready ? `known_${kind}` : `unknown_${kind}`);
+        s.status = (s.manually_known || s.ready) ? "known" : "unknown";
         s.known = s.manually_known || s.ready;
       }
       if (s.known) known++;
@@ -679,6 +683,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const r = await api("/api/test-token", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
       st.textContent = `OK – ${r.username} (Level ${r.level})`; st.className = "status ok";
     } catch (e) { st.textContent = "Fehlgeschlagen: " + e.message; st.className = "status err"; }
+  });
+  $("#deeplShow").addEventListener("click", () => { const i = $("#deeplInput"); i.type = i.type === "password" ? "text" : "password"; });
+  $("#deeplSave").addEventListener("click", async () => {
+    const st = $("#deeplStatus");
+    try {
+      await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deepl_key: $("#deeplInput").value }) });
+      $("#deeplInput").value = ""; await loadSettings(); toast("Gespeichert"); st.textContent = "DeepL-Key gespeichert ✓"; st.className = "status ok";
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
   });
 
   $("#btnLevel").addEventListener("click", async () => {
