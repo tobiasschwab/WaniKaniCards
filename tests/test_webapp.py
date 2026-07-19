@@ -579,6 +579,33 @@ def test_api_wortliste_combines_wanikani_dictionary_and_manual(tmp_path, monkeyp
     assert man["removable"] is True
 
 
+def test_api_wortliste_ai_sourced_entry_shows_ki_kind_and_sentence_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
+    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
+    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
+    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "kanacards").mkdir()
+    client = webapp.app.test_client()
+
+    webapp.write_kana({
+        "id": "aikana_x", "word": "入る", "reading": "はいる", "meaning": "hineingehen",
+        "source": "ai", "tags": ["KI"], "sentence_ja": "高校に入りました。",
+        "sentence_translation": "Ich bin in die Oberschule eingetreten.",
+        "sentence_audio_url": "data:audio/wav;base64,AAAA", "updated_at": "x",
+    })
+
+    r = client.get("/api/wortliste?sample=1")
+    data = r.get_json()
+    entry = next(e for e in data["entries"] if e["id"] == "aikana_x")
+    assert entry["source"] == "ai"
+    assert entry["kind"] == "KI"
+    assert entry["reading"] == "はいる"
+    assert entry["sentence_ja"] == "高校に入りました。"
+    assert entry["sentence_translation"] == "Ich bin in die Oberschule eingetreten."
+    assert entry["sentence_audio_url"] == "data:audio/wav;base64,AAAA"
+
+
 def test_api_wortliste_add_manual_then_remove(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
     monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")

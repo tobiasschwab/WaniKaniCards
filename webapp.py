@@ -767,22 +767,30 @@ def api_wortliste() -> Any:
             }
         )
 
-    dict_ids = sorted(set(kana_records) | {i for i in manual if isinstance(i, str) and i.startswith("kana_")})
+    dict_ids = sorted(
+        set(kana_records)
+        | {i for i in manual if isinstance(i, str) and (i.startswith("kana_") or i.startswith("aikana_"))}
+    )
     for wid in dict_ids:
         card = kana_records.get(wid) or {}
         m = meta.get(wid, {})
+        is_ai = card.get("source") == "ai"
         entries.append(
             {
                 "id": wid,
-                "source": "dictionary",
+                "source": "ai" if is_ai else "dictionary",
                 "characters": card.get("word") or m.get("characters") or wid,
+                "reading": card.get("reading"),
                 "meaning": card.get("meaning") or m.get("meaning", ""),
                 "meaning_extra": card.get("meaning_extra"),
-                "kind": "Dict",
+                "kind": "KI" if is_ai else "Dict",
                 "level": None,
                 "card_created": wid in kana_records,
                 "manually_known": wid in manual,
                 "removable": True,
+                "sentence_ja": card.get("sentence_ja"),
+                "sentence_translation": card.get("sentence_translation"),
+                "sentence_audio_url": card.get("sentence_audio_url"),
             }
         )
 

@@ -254,7 +254,7 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .tag-mini.radical { color: #0891b2; border-color: #bae6f2; background: rgba(0,180,216,.08); }
 .tag-mini.vocabulary { color: #a2792e; border-color: #ecd9b0; background: rgba(162,121,46,.08); }
 .tag-mini.dictionary { color: #00889e; border-color: #a6e6f2; background: rgba(0,180,216,.08); }
-.tag-mini.gemini { color: #4f7a5c; border-color: #bfdac8; background: rgba(79,122,92,.1); }
+.tag-mini.gemini, .tag-mini.ai { color: #4f7a5c; border-color: #bfdac8; background: rgba(79,122,92,.1); }
 .tag-mini.manual { color: var(--known-manual); border-color: #f6bfdd; background: rgba(219,39,119,.08); }
 .tag-mini.exported { color: #16a34a; border-color: #bbf1cf; background: rgba(22,163,74,.08); margin-left: 6px; }
 .cards-table tbody tr.is-exported { opacity: .55; }
@@ -352,6 +352,21 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .ki-cell.ki-error { color: var(--accent-2); font-style: italic; }
 .ki-cell.ki-components { font-size: 13px; }
 .ki-cell.ki-pct { text-align: center; }
+
+/* Hover-Verknüpfung: Vokabel-Chip <-> Stelle im Original-Satz */
+.ki-jp-word, .word-token.ki-hl { transition: background .1s; }
+[data-hl].ki-hl { background: rgba(109,59,245,.18); border-radius: 3px; }
+
+/* Häufigkeits-Liste (Vokabeln nach Vorkommen im Text, Top 10 + aufklappbar) */
+.ki-freq-wrap { margin-bottom: 14px; }
+.ki-freq-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--muted); margin-bottom: 8px; }
+.ki-freq-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ki-freq-chip {
+  border: 1px solid var(--border); background: var(--bg-elev); border-radius: 999px; cursor: pointer;
+  padding: 4px 10px; font-size: 13px; display: inline-flex; gap: 6px; align-items: baseline; color: var(--text);
+}
+.ki-freq-chip:hover { background: var(--bg); }
+.ki-freq-chip .c { color: var(--muted); font-size: 11px; }
 .ki-pct-badge {
   display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
   background: hsla(var(--pct-hue), 70%, 45%, .18); color: hsl(var(--pct-hue), 75%, 32%);

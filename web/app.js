@@ -269,8 +269,16 @@ function clearCompose() {
   renderTable([], "Karten", "subject");
 }
 
-// ---------- Text-Modus (reine Janome+WaniKani-Analyse, kein Gemini) ----------
-async function doTextProcess() {
+// ---------- Text-Modus: eine Eingabe, zwei Analyse-Arten ----------
+// "Schnell" (reine Janome+WaniKani-Analyse, kein Gemini) und "KI" (Gemini,
+// siehe unten) teilen sich Textarea + Analysieren-Button, damit man
+// denselben Text nicht zweimal einfügen muss – der Segmented-Schalter
+// entscheidet, welcher Endpunkt/welche Ergebnisansicht dran ist.
+function doTextProcess() {
+  return segValue("textAnalysisMode") === "ki" ? doKiProcess() : doTextProcessFast();
+}
+
+async function doTextProcessFast() {
   const text = $("#textInput").value;
   if (!text.trim()) return;
   $("#textStatus").textContent = "Analysiere…";
@@ -290,10 +298,12 @@ async function doTextProcess() {
   updateTextStats(r.stats);
   $("#textInputWrap").classList.add("hidden");
   $("#textResultWrap").classList.remove("hidden");
+  $("#kiResultWrap").classList.add("hidden");
 }
 
 function backToTextEdit() {
   $("#textResultWrap").classList.add("hidden");
+  $("#kiResultWrap").classList.add("hidden");
   $("#textInputWrap").classList.remove("hidden");
   closeWordPopup();
 }
@@ -325,9 +335,9 @@ function renderAnnotatedText(lines) {
 const KI_STORAGE_KEY = "shiori_ki_state";
 
 async function doKiProcess() {
-  const text = $("#kiInput").value;
+  const text = $("#textInput").value;
   if (!text.trim()) return;
-  $("#kiStatus").textContent = "Analysiere mit KI… (kann bei langen Texten 1–2 Minuten dauern)";
+  $("#textStatus").textContent = "Analysiere mit KI… (kann bei langen Texten 1–2 Minuten dauern)";
   let r;
   try {
     // Gemini-Anfragen laufen gegen eine externe API – ohne Zeitlimit könnte
@@ -338,23 +348,19 @@ async function doKiProcess() {
       signal: AbortSignal.timeout(150000),
     });
   } catch (e) {
-    $("#kiStatus").textContent = "";
+    $("#textStatus").textContent = "";
     toast(e.name === "TimeoutError" ? "Zeitüberschreitung – KI hat zu lange gebraucht (Text kürzen oder erneut versuchen)." : e.message, true);
     return;
   }
-  $("#kiStatus").textContent = "";
+  $("#textStatus").textContent = "";
   kiRows = r.rows || [];
   renderKiTable(kiRows);
+  renderKiFrequencyList();
   updateKiStats(r.stats);
-  $("#kiInputWrap").classList.add("hidden");
+  $("#textInputWrap").classList.add("hidden");
+  $("#textResultWrap").classList.add("hidden");
   $("#kiResultWrap").classList.remove("hidden");
   saveKiStateToStorage();
-}
-
-function backToKiEdit() {
-  $("#kiResultWrap").classList.add("hidden");
-  $("#kiInputWrap").classList.remove("hidden");
-  closeWordPopup();
 }
 
 function updateKiStats(stats) {
@@ -391,13 +397,13 @@ function _kiRowsForStorage(rows) {
     translation_de: row.translation_de,
     grammar_notes: row.grammar_notes,
     error: row.error,
-    segments: (row.segments || []).map(({ _row, ...rest }) => rest),
+    segments: (row.segments || []).map(({ _row, _hlKey, ...rest }) => rest),
   }));
 }
 
 function saveKiStateToStorage() {
   try {
-    localStorage.setItem(KI_STORAGE_KEY, JSON.stringify({ text: $("#kiInput").value, rows: _kiRowsForStorage(kiRows) }));
+    localStorage.setItem(KI_STORAGE_KEY, JSON.stringify({ text: $("#textInput").value, rows: _kiRowsForStorage(kiRows) }));
   } catch (_) { /* z. B. privater Modus ohne localStorage - einfach nicht persistieren */ }
 }
 
@@ -405,11 +411,14 @@ function restoreKiStateFromStorage() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(KI_STORAGE_KEY) || "null"); } catch (_) { saved = null; }
   if (!saved || !Array.isArray(saved.rows) || !saved.rows.length) return;
-  $("#kiInput").value = saved.text || "";
+  $("#textInput").value = saved.text || "";
+  segSet("textAnalysisMode", "ki");
   kiRows = saved.rows;
   renderKiTable(kiRows);
+  renderKiFrequencyList();
   updateKiStats(_recomputeKiStats(kiRows));
-  $("#kiInputWrap").classList.add("hidden");
+  $("#textInputWrap").classList.add("hidden");
+  $("#textResultWrap").classList.add("hidden");
   $("#kiResultWrap").classList.remove("hidden");
 }
 
@@ -515,6 +524,7 @@ async function retryKiRow(row, idx, btn) {
     if (newRow) {
       kiRows[idx] = newRow;
       renderKiTable(kiRows);
+      renderKiFrequencyList();
       updateKiStats(_recomputeKiStats(kiRows));
       saveKiStateToStorage();
     }
@@ -568,7 +578,53 @@ async function addAllUnknownFromKi() {
     btn.disabled = false;
   }
   saveKiStateToStorage();
+  renderKiFrequencyList();
   toast(added ? `${added} Wörter zur Tabelle hinzugefügt` : "Nichts hinzugefügt");
+}
+
+// "Neue Vokabeln in diesem Text" (nach Häufigkeit, nur noch unbekannte):
+// zeigt kompakt die Top 10, damit man bei langen Texten nicht von der schieren
+// Menge erschlagen wird – "Alle anzeigen" klappt bei Bedarf den Rest auf.
+let kiFreqExpanded = false;
+
+function _kiFrequencyEntries() {
+  const counts = new Map();
+  for (const row of kiRows) {
+    for (const s of row.segments || []) {
+      if (s.type !== "word" || s.known) continue;
+      const key = s.source + ":" + s.id;
+      if (!counts.has(key)) counts.set(key, { seg: s, count: 0 });
+      counts.get(key).count++;
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count);
+}
+
+function renderKiFrequencyList() {
+  const outerWrap = $("#kiFreqWrap");
+  const listWrap = $("#kiFreqList");
+  const entries = _kiFrequencyEntries();
+  outerWrap.classList.toggle("hidden", !entries.length);
+  if (!entries.length) return;
+  const shown = kiFreqExpanded ? entries : entries.slice(0, 10);
+  listWrap.innerHTML = "";
+  const chips = document.createElement("div");
+  chips.className = "ki-freq-chips";
+  for (const { seg, count } of shown) {
+    const chip = document.createElement("button");
+    chip.type = "button"; chip.className = "ki-freq-chip"; chip.title = seg.meaning || "";
+    chip.innerHTML = `<span>${escapeHtml(seg.lemma || seg.text)}</span><span class="c">×${count}</span>`;
+    chip.addEventListener("click", (e) => openWordPopup(e.currentTarget, seg, "ki"));
+    chips.append(chip);
+  }
+  listWrap.append(chips);
+  if (entries.length > 10) {
+    const toggle = document.createElement("button");
+    toggle.type = "button"; toggle.className = "btn small";
+    toggle.textContent = kiFreqExpanded ? "Weniger anzeigen" : `Alle ${entries.length} anzeigen`;
+    toggle.addEventListener("click", () => { kiFreqExpanded = !kiFreqExpanded; renderKiFrequencyList(); });
+    listWrap.append(toggle);
+  }
 }
 
 function renderKiTable(rows) {
@@ -578,13 +634,14 @@ function renderKiTable(rows) {
     const tr = document.createElement("div");
     tr.className = "ki-row";
     const jpCell = document.createElement("div"); jpCell.className = "ki-cell ki-sentence";
-    const jpText = document.createElement("span"); jpText.textContent = row.sentence;
+    const jpTextWrap = document.createElement("span");
     const speakBtn = document.createElement("button");
     speakBtn.type = "button"; speakBtn.className = "ki-speak-btn"; speakBtn.textContent = "🔊";
     speakBtn.title = "Satz vorlesen (Gemini)";
     speakBtn.addEventListener("click", () => playRowAudio(row, speakBtn));
-    jpCell.append(jpText, speakBtn);
     if (row.error) {
+      jpTextWrap.textContent = row.sentence;
+      jpCell.append(jpTextWrap, speakBtn);
       const errCell = document.createElement("div"); errCell.className = "ki-cell ki-error"; errCell.dataset.label = "Fehler";
       errCell.textContent = "⚠ " + row.error + " ";
       const retryBtn = document.createElement("button");
@@ -599,6 +656,25 @@ function renderKiTable(rows) {
     words.forEach((s) => { s._row = row; });
     const knownCount = words.filter((s) => s.known).length;
 
+    // Original-Satz aus den Segmenten aufbauen (statt einem Text-Knoten),
+    // damit jedes Wort einen Hover-Verknüpfungs-Hook (data-hl) zur
+    // gleichnamigen Vokabeln-Spalten-Stelle bekommt – rein visuell/optional,
+    // der Satz selbst bleibt unverändert (kein Einfärben nach bekannt/unbekannt).
+    let wordIdx = 0;
+    for (const seg of row.segments) {
+      if (seg.type === "word") {
+        const span = document.createElement("span");
+        span.className = "ki-jp-word";
+        span.textContent = seg.text;
+        seg._hlKey = `${idx}-${wordIdx++}`;
+        span.dataset.hl = seg._hlKey;
+        jpTextWrap.append(span);
+      } else {
+        jpTextWrap.append(document.createTextNode(seg.text));
+      }
+    }
+    jpCell.append(jpTextWrap, speakBtn);
+
     const pctCell = document.createElement("div"); pctCell.className = "ki-cell ki-pct"; pctCell.dataset.label = "Bekannt";
     pctCell.innerHTML = _pctBadgeHtml(knownCount, words.length);
 
@@ -610,7 +686,9 @@ function renderKiTable(rows) {
     vocabCell.className = "ki-cell ki-components" + (kiBlurEnabled ? " ki-blur" : ""); vocabCell.dataset.label = "Vokabeln";
     words.forEach((seg, i) => {
       if (i > 0) vocabCell.append(document.createTextNode(" · "));
-      vocabCell.append(makeWordToken(seg, "ki", seg.lemma || seg.text));
+      const tok = makeWordToken(seg, "ki", seg.lemma || seg.text);
+      if (seg._hlKey) tok.dataset.hl = seg._hlKey;
+      vocabCell.append(tok);
     });
 
     const remarkCell = document.createElement("div");
@@ -773,7 +851,7 @@ function applySegChange(seg, patch) {
     span.className = "word-token " + span._seg.status.replace(/_/g, "-");
   });
   const stats = { known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 };
-  if (isKi) { updateKiStats(stats); saveKiStateToStorage(); } else updateTextStats(stats);
+  if (isKi) { updateKiStats(stats); saveKiStateToStorage(); renderKiFrequencyList(); } else updateTextStats(stats);
 }
 
 async function toggleKnownFromPopup() {
@@ -829,6 +907,12 @@ function renderWortliste() {
       <span class="wl-char">${escapeHtml(e.characters)}</span>
       <span class="wl-meaning">${escapeHtml(e.meaning)}${extra}</span>
       <span class="wl-badges">${badges.join("")}</span>`;
+    if (e.sentence_ja) {
+      const ctx = document.createElement("button");
+      ctx.className = "chip-btn"; ctx.textContent = "📄"; ctx.title = "Satz-Kontext anzeigen";
+      ctx.onclick = (ev) => openWlContext(ev.currentTarget, e);
+      row.append(ctx);
+    }
     if (e.removable) {
       const del = document.createElement("button");
       del.className = "chip-btn danger"; del.textContent = "✕"; del.title = "Entfernen";
@@ -838,6 +922,28 @@ function renderWortliste() {
     list.append(row);
   }
 }
+
+// Zeigt den Satz, aus dem ein Dictionary-/KI-Wort ursprünglich stammt (auf
+// der KanaCard gespeichert, siehe kanji_cards.KanaCard.sentence_ja) – für
+// WaniKani-Wörter (noch) nicht verfügbar, da dort kein eigener Satz-Kontext
+// mitgespeichert wird.
+function openWlContext(el, entry) {
+  $("#wlContextJa").textContent = entry.sentence_ja || "";
+  $("#wlContextDe").textContent = entry.sentence_translation || "";
+  $("#wlContextDe").classList.toggle("hidden", !entry.sentence_translation);
+  const audioEl = $("#wlContextAudio");
+  if (entry.sentence_audio_url) { audioEl.src = entry.sentence_audio_url; audioEl.classList.remove("hidden"); }
+  else { audioEl.removeAttribute("src"); audioEl.classList.add("hidden"); }
+  const pop = $("#wlContextPopup");
+  pop.classList.remove("hidden");
+  const rect = el.getBoundingClientRect();
+  const popW = pop.offsetWidth || 260;
+  let left = rect.left;
+  if (left + popW > window.innerWidth - 10) left = window.innerWidth - popW - 10;
+  pop.style.left = `${Math.max(10, left)}px`;
+  pop.style.top = `${rect.bottom + 8}px`;
+}
+function closeWlContext() { $("#wlContextPopup").classList.add("hidden"); }
 
 // Beide möglichen Löschungen (manuelle Markierung, Dictionary-Karte)
 // unabhängig voneinander versuchen, statt beim ersten Fehler abzubrechen –
@@ -850,7 +956,7 @@ async function removeWortlisteEntry(e) {
     try { await api(`/api/known/${e.id}`, { method: "DELETE" }); }
     catch (err) { if (err.status !== 404) errors.push(err.message); }
   }
-  if (e.source === "dictionary" && e.card_created) {
+  if ((e.source === "dictionary" || e.source === "ai") && e.card_created) {
     try { await api(`/api/kanacards/${e.id}`, { method: "DELETE" }); }
     catch (err) { if (err.status !== 404) errors.push(err.message); }
   }
@@ -1069,11 +1175,11 @@ async function loadHistory() {
 document.addEventListener("DOMContentLoaded", () => {
   initChipcheck("type"); initSegmented("duplex"); initSegmented("layout", applyLayoutState);
   initSegmented("format", applyFormatState);
+  initSegmented("textAnalysisMode");
   initSegmented("modeTabs", (v) => {
     $("#modeLevel").classList.toggle("hidden", v !== "level");
     $("#modeCompose").classList.toggle("hidden", v !== "compose");
     $("#modeText").classList.toggle("hidden", v !== "text");
-    $("#modeKi").classList.toggle("hidden", v !== "ki");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
     $("#modeWortliste").classList.toggle("hidden", v !== "wortliste");
     document.querySelectorAll(".tab-group").forEach((g) => {
@@ -1169,8 +1275,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnComposeClear3").addEventListener("click", clearCompose);
   $("#btnTextProcess").addEventListener("click", doTextProcess);
   $("#btnTextEdit").addEventListener("click", backToTextEdit);
-  $("#btnKiProcess").addEventListener("click", doKiProcess);
-  $("#btnKiEdit").addEventListener("click", backToKiEdit);
+  $("#btnKiEdit").addEventListener("click", backToTextEdit);
   $("#btnKiBlurToggle").addEventListener("click", toggleKiBlur);
   $("#btnKiAddAllUnknown").addEventListener("click", addAllUnknownFromKi);
   $("#btnKiPlayAll").addEventListener("click", toggleKiPlayAll);
@@ -1181,12 +1286,27 @@ document.addEventListener("DOMContentLoaded", () => {
     const cell = e.target.closest(".ki-blur");
     if (cell) { cell.classList.remove("ki-blur"); e.stopPropagation(); }
   }, true);
+  // Hover-Verknüpfung: Vokabel-Chip <-> Stelle im Original-Satz (data-hl teilt
+  // sich Vokabeln-Token und Japanisch-Wort-Span über dieselbe Zeile/Position).
+  $("#kiTable").addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[data-hl]");
+    if (!el) return;
+    document.querySelectorAll(`#kiTable [data-hl="${el.dataset.hl}"]`).forEach((n) => n.classList.add("ki-hl"));
+  });
+  $("#kiTable").addEventListener("mouseout", (e) => {
+    const el = e.target.closest("[data-hl]");
+    if (!el) return;
+    document.querySelectorAll(`#kiTable [data-hl="${el.dataset.hl}"]`).forEach((n) => n.classList.remove("ki-hl"));
+  });
   $("#wpAdd").addEventListener("click", wpAddClicked);
   $("#wpKnown").addEventListener("click", toggleKnownFromPopup);
   $("#wordPopupClose").addEventListener("click", closeWordPopup);
+  $("#wlContextClose").addEventListener("click", closeWlContext);
   document.addEventListener("click", (e) => {
     const pop = $("#wordPopup");
     if (!pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.classList.contains("word-token")) closeWordPopup();
+    const wlPop = $("#wlContextPopup");
+    if (!wlPop.classList.contains("hidden") && !wlPop.contains(e.target) && !e.target.closest(".chip-btn")) closeWlContext();
   });
 
   // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)

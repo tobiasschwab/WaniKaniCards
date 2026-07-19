@@ -145,7 +145,6 @@
             <button data-v="level" class="active">Level-Stapel</button>
             <button data-v="compose">Suche</button>
             <button data-v="text">Aus Text</button>
-            <button data-v="ki">KI</button>
             <button data-v="custom">Frei erstellen</button>
           </div>
         </div>
@@ -191,7 +190,8 @@
         <p class="hint">Treffer anklicken → alle enthaltenen Kanji &amp; Radicals werden rekursiv aufgelöst und an die Tabelle unten <strong>angehängt</strong>. Mehrere Vokabeln nacheinander suchen &amp; anklicken, um sie zu kombinieren. „Tabelle leeren“ setzt zurück.</p>
       </div>
 
-      <!-- Text-Modus: Volltext lemmatisieren, Wörter im Lesefluss anklicken -->
+      <!-- Text-Modus: ein Text, zwei Analyse-Arten (gemeinsame Eingabe, damit
+           man denselben Text nicht doppelt einfügen muss) -->
       <div id="modeText" class="mode hidden">
         <div id="textInputWrap">
           <label class="field">
@@ -199,12 +199,16 @@
             <textarea id="textInput" class="text" rows="8" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
           </label>
           <div class="row gap">
-            <button id="btnTextProcess" class="btn primary">Verarbeiten</button>
+            <div class="segmented" id="textAnalysisMode" data-value="fast">
+              <button data-v="fast" class="active">Schnell (kostenlos)</button>
+              <button data-v="ki">✨ Mit KI (Übersetzung, Grammatik)</button>
+            </div>
+            <button id="btnTextProcess" class="btn primary">Analysieren</button>
             <span id="textStatus" class="muted"></span>
           </div>
-          <p class="hint">Text einfügen, erkannte Wörter anklicken.</p>
+          <p class="hint">„Schnell" lemmatisiert nur und gleicht gegen WaniKani ab (kostenlos, kein Key nötig). „Mit KI" nutzt zusätzlich Gemini für Satzübersetzung, Grammatik-Erklärung und eine Vokabel-Tabelle (Gemini-Key in den Einstellungen nötig, sendet den Text an Google).</p>
           <button type="button" class="disclosure-toggle" data-target="textHelp">▾ Wie funktioniert die Analyse?</button>
-          <p id="textHelp" class="hint disclosure-body hidden">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. Für eine KI-gestützte Analyse (Satzübersetzung, Grammatik-Erklärung) den Tab „KI" verwenden.</p>
+          <p id="textHelp" class="hint disclosure-body hidden">„Schnell": Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani/JMdict abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. „Mit KI": Gemini zerlegt den Text satzweise in eine Tabelle mit Übersetzung, Grammatik-Notizen und den Vokabeln in Grundform.</p>
         </div>
 
         <div id="textResultWrap" class="hidden">
@@ -219,21 +223,6 @@
             <span class="word-legend unknown">unbekannt</span>
             &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
           </p>
-        </div>
-      </div>
-
-      <!-- KI-Modus: Text von Gemini in Sätze zerlegen lassen (Übersetzung + Grammatik + anklickbare Wörter) -->
-      <div id="modeKi" class="mode hidden">
-        <div id="kiInputWrap">
-          <label class="field">
-            <span class="label">Japanischer Text</span>
-            <textarea id="kiInput" class="text" rows="8" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
-          </label>
-          <div class="row gap">
-            <button id="btnKiProcess" class="btn primary">✨ Mit KI analysieren</button>
-            <span id="kiStatus" class="muted"></span>
-          </div>
-          <p class="hint">Zerlegt jeden Satz per Gemini in Übersetzung, Grammatik-Notizen und Bestandteile – braucht einen Gemini-API-Key in den Einstellungen, sendet die Sätze an Google.</p>
         </div>
 
         <div id="kiResultWrap" class="hidden">
@@ -256,6 +245,10 @@
               </select>
             </label>
           </div>
+          <div id="kiFreqWrap" class="ki-freq-wrap hidden">
+            <div class="ki-freq-title">🔤 Neue Vokabeln in diesem Text (nach Häufigkeit)</div>
+            <div id="kiFreqList"></div>
+          </div>
           <div class="ki-table" id="kiTableWrap">
             <div class="ki-row ki-head">
               <div class="ki-cell">Japanisch</div>
@@ -266,7 +259,7 @@
             </div>
             <div id="kiTable"></div>
           </div>
-          <p class="hint">Deutsch/Vokabeln/Bemerkung sind zunächst verschwommen – einzelne Zelle anklicken zum Aufdecken, oder oben „🙈 Verschwommen" umschalten. Vokabel anklicken (wenn aufgedeckt): über WaniKani hinzufügen (falls vorhanden) oder KI-Definition als Karte anlegen. „+ Alle unbekannten hinzufügen" übernimmt alle noch unbekannten Vokabeln des Textes auf einmal. Bei einem fehlgeschlagenen Satz nur diesen per „🔄 Erneut versuchen" neu anfragen, statt den ganzen Text.</p>
+          <p class="hint">Deutsch/Vokabeln/Bemerkung sind zunächst verschwommen – einzelne Zelle anklicken zum Aufdecken, oder oben „🙈 Verschwommen" umschalten. Vokabel anklicken (wenn aufgedeckt): über WaniKani hinzufügen (falls vorhanden) oder KI-Definition als Karte anlegen. „+ Alle unbekannten hinzufügen" übernimmt alle noch unbekannten Vokabeln des Textes auf einmal. Bei einem fehlgeschlagenen Satz nur diesen per „🔄 Erneut versuchen" neu anfragen, statt den ganzen Text. Vokabel und Satz-Stelle beim Hovern gegenseitig hervorgehoben.</p>
         </div>
       </div>
 
@@ -286,6 +279,15 @@
           <button id="wpAdd" class="btn primary small">+ Zur Tabelle</button>
           <button id="wpKnown" class="btn small">Als bekannt markieren</button>
         </div>
+      </div>
+
+      <!-- Kontext-Popup (Wortliste): zeigt den Satz, aus dem ein Dictionary-/KI-Wort stammt -->
+      <div id="wlContextPopup" class="word-popup hidden">
+        <button id="wlContextClose" class="word-popup-close" title="Schließen">✕</button>
+        <div class="word-popup-meta"><span class="muted">Fundstelle</span></div>
+        <div class="word-popup-meaning" id="wlContextJa"></div>
+        <div class="word-popup-meaning-extra" id="wlContextDe"></div>
+        <audio id="wlContextAudio" controls class="hidden" style="margin-top:8px;width:100%"></audio>
       </div>
 
       <!-- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) -->

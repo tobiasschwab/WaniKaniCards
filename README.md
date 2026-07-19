@@ -55,9 +55,9 @@ Jede **Vorderseite** trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level
 z. B. `KANJI` / `LV 1`); die Rückseite zeigt – sofern ein Token gesetzt ist –
 dezent unten rechts den **WaniKani-Benutzernamen**.
 
-## Fünf Wege zu den Karten (Web)
+## Vier Wege zu den Karten (Web)
 
-Die Moduswahl ist in zwei Gruppen sortiert: **„Karten erstellen"** (die fünf
+Die Moduswahl ist in zwei Gruppen sortiert: **„Karten erstellen"** (die vier
 Wege unten) und **„Wortschatz"** (die [Wortliste](#wortliste) – dort geht es
 ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
 
@@ -70,12 +70,16 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    nacheinander suchen und anklicken **hängt** deren Kompositionen an dieselbe
    Tabelle an (dedupliziert); **„Tabelle leeren“** setzt zurück.
 3. **Aus Text:** einen kompletten mehrzeiligen japanischen Text einfügen
-   (Artikel, Kapitel, Dialog …) und **verarbeiten**. Der Text wird
-   **lemmatisiert** ([Janome](https://github.com/mocobeta/janome), reines
-   Python – jedes Wort auf seine Wörterbuch-Grundform zurückgeführt, z. B.
-   „大きく" → „大きい") und gegen WaniKani abgeglichen. Anschließend erscheint
-   der Text **schreibgeschützt**, mit jedem erkannten Wort **anklickbar** und
-   farblich markiert: <br>
+   (Artikel, Kapitel, Dialog …) – **eine** gemeinsame Eingabe für zwei
+   Analyse-Arten (Segmented-Schalter über dem „Analysieren"-Button), damit
+   man denselben Text nicht zweimal einfügen muss:
+
+   **„Schnell (kostenlos)"** – der Text wird **lemmatisiert**
+   ([Janome](https://github.com/mocobeta/janome), reines Python – jedes Wort
+   auf seine Wörterbuch-Grundform zurückgeführt, z. B. „大きく" → „大きい") und
+   gegen WaniKani abgeglichen. Anschließend erscheint der Text
+   **schreibgeschützt**, mit jedem erkannten Wort **anklickbar** und farblich
+   markiert: <br>
    ![Text-Modus: farbig markierte Wörter](previews/webui_text.png) <br>
    Ein Klick öffnet ein Popup mit Bedeutung, Typ und Level – von dort aus
    **gezielt einzelne Wörter** zur Tabelle hinzufügen (rekursiv inkl. Kanji &amp;
@@ -111,16 +115,13 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    | Blau „unbekannt" | weder markiert noch Karte/Export vorhanden |
 
    Details (Quelle WaniKani/Wörterbuch, ob manuell markiert oder weil eine
-   Karte existiert) zeigt das Popup beim Anklicken des Worts.
-
-   Für Dictionary-Wörter erzeugt das Popup statt „Zur Tabelle" den Button
+   Karte existiert) zeigt das Popup beim Anklicken des Worts. Für
+   Dictionary-Wörter erzeugt das Popup statt „Zur Tabelle" den Button
    **„Dictionary-Karte erstellen"** – ein neuer, WaniKani-unabhängiger
-   Kartentyp (siehe [Dictionary-Karten](#dictionary-karten)).
+   Kartentyp (siehe [Dictionary-Karten](#dictionary-karten)). Dieser
+   Analyse-Weg nutzt **kein** Gemini – ohne API-Key, ohne Kosten.
 
-   Dieser Modus nutzt **kein** Gemini – reine Janome+WaniKani-Analyse, ohne
-   API-Key, ohne Kosten. Für eine KI-gestützte Analyse mit Satzübersetzung
-   und Grammatik-Erklärung siehe den nächsten Punkt.
-4. **KI:** derselbe mehrzeilige Text, aber satzweise per
+   **„✨ Mit KI (Übersetzung, Grammatik)"** – derselbe Text, aber satzweise per
    [Gemini-API](https://ai.google.dev/) analysiert (Key + Modell in den
    Einstellungen hinterlegen – die Modell-Liste lässt sich dort per 🔄 live
    von Google abrufen) statt nur lemmatisiert. Ergebnis ist eine Tabelle mit
@@ -136,19 +137,35 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
 
    Deutsch/Vokabeln/Bemerkung sind zum Selbsttest zunächst **verschwommen** –
    einzelne Zelle anklicken deckt nur sie auf, „🙈 Verschwommen"/„👁 Sichtbar"
-   oben schaltet alle auf einmal um. Eine aufgedeckte Vokabel anklicken öffnet
-   dasselbe Wort-Popup wie im „Aus Text"-Modus, aus dem Beispiel im
-   Aufgabentext: 家 (in WaniKani vorhanden) oder 入りました → Grundform 入る
-   (ebenfalls in WaniKani) lassen sich direkt **„Über WaniKani hinzufügen"**.
-   Kennt weder WaniKani noch das JMdict-Wörterbuch die Grundform, bietet das
-   Popup stattdessen **„KI-Karte erstellen"** an – die kurze deutsche
-   Bedeutung stammt dann direkt von Gemini statt aus dem Wörterbuch (siehe
+   oben schaltet alle auf einmal um. Beim **Hovern** über eine Vokabel wird
+   die zugehörige Stelle im Original-Satz mit hervorgehoben (und umgekehrt) –
+   rein optisch, der Satz selbst bleibt unangetastet. Eine aufgedeckte Vokabel
+   anklicken öffnet dasselbe Wort-Popup wie beim „Schnell"-Weg: 家 (in
+   WaniKani vorhanden) oder 入りました → Grundform 入る (ebenfalls in
+   WaniKani) lassen sich direkt **„Über WaniKani hinzufügen"**. Kennt weder
+   WaniKani noch das JMdict-Wörterbuch die Grundform, bietet das Popup
+   stattdessen **„KI-Karte erstellen"** an – die kurze deutsche Bedeutung
+   stammt dann direkt von Gemini statt aus dem Wörterbuch (siehe
    [Dictionary-Karten](#dictionary-karten), gleiche Karten-Infrastruktur, nur
    mit `Quelle: KI (Gemini)` statt `Quelle: JMdict`). Es wird **nie
    automatisch** für alle Wörter eine Karte erzeugt – nur ein bewusster Klick
    legt eine an. Scheitert die Analyse für einen einzelnen Satz (Netzwerk,
    Quota, Wortgrenzen passen nicht exakt zum Original), bekommt nur dieser
-   Satz eine Fehlermeldung statt den ganzen Text abzubrechen.
+   Satz eine Fehlermeldung statt den ganzen Text abzubrechen – **„🔄 Erneut
+   versuchen"** fragt dann nur diesen einen Satz erneut an, statt den ganzen
+   Text neu zu analysieren.
+
+   **🔤 Neue Vokabeln in diesem Text (nach Häufigkeit):** eine kompakte,
+   deduplizierte Liste aller noch unbekannten Vokabeln über den gesamten
+   Text hinweg, sortiert nach Vorkommenshäufigkeit (ein Wort, das 5× auftaucht,
+   lohnt sich eher zu lernen als eins, das nur einmal vorkommt) – standardmäßig
+   nur die Top 10, „Alle N anzeigen" klappt den Rest auf. Wort anklicken öffnet
+   dasselbe Wort-Popup wie in der Vokabeln-Spalte der Tabelle. **„+ Alle
+   unbekannten hinzufügen"** übernimmt stattdessen alle unbekannten Vokabeln
+   des Textes auf einen Klick in die Karten-Tabelle (WaniKani-Treffer
+   gebündelt in einem Abgleich, Dictionary-/KI-Wörter nacheinander) – bleibt
+   ein bewusster Klick, spart aber bei langen Texten das einzelne Anklicken
+   jedes Worts.
 
    **🔊 Original-Satz vorlesen:** ein Lautsprecher-Symbol neben jedem Satz
    ruft Gemini's eigene Sprachausgabe auf (`gemini_client.synthesize_speech()`,
@@ -159,23 +176,16 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    `<audio>`-Element, wie das bestehende WaniKani-Audio). Pro Satz wird nur
    einmal angefragt (client- **und** serverseitig unter `.cache/gemini_tts/`
    gecacht) – erneutes Abspielen oder ein späteres Karte-Erstellen für
-   denselben Satz braucht keinen zweiten Request. Aktuell auf den KI-Modus
-   begrenzt (nicht in „Aus Text" oder „Frei erstellen"). **„▶ Alle vorlesen"**
-   spielt alle Sätze nacheinander ab (überspringt fehlgeschlagene Zeilen,
-   Button wird währenddessen zum Stopp-Schalter); das **Tempo**-Dropdown
-   (0,75×–1,5×) gilt für Einzel- und Sammel-Wiedergabe gleichermaßen.
+   denselben Satz braucht keinen zweiten Request. Aktuell nur beim „Mit
+   KI"-Weg verfügbar. **„▶ Alle vorlesen"** spielt alle Sätze nacheinander ab
+   (überspringt fehlgeschlagene Zeilen, Button wird währenddessen zum
+   Stopp-Schalter); das **Tempo**-Dropdown (0,75×–1,5×) gilt für Einzel- und
+   Sammel-Wiedergabe gleichermaßen.
 
-   **Effizienz-Funktionen:** **„+ Alle unbekannten hinzufügen"** übernimmt
-   alle noch unbekannten Vokabeln des ganzen Textes auf einen Klick (WaniKani-
-   Treffer gebündelt in einem Abgleich, Dictionary-/KI-Wörter nacheinander) –
-   bleibt ein bewusster Klick, spart aber bei langen Texten das einzelne
-   Anklicken jedes Worts. Schlägt die Analyse für einen einzelnen Satz fehl,
-   holt **„🔄 Erneut versuchen"** nur diesen einen Satz erneut, statt den
-   ganzen Text neu anzufragen. Das zuletzt analysierte Ergebnis (Text +
-   Tabelle) wird zusätzlich im Browser gemerkt (`localStorage`) – ein
-   versehentlicher Reload wirft die Analyse nicht weg und kostet keine
-   erneute Gemini-Anfrage.
-5. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
+   **Persistenz:** Das zuletzt per „Mit KI" analysierte Ergebnis (Text +
+   Tabelle) wird im Browser gemerkt (`localStorage`) – ein versehentlicher
+   Reload wirft die Analyse nicht weg und kostet keine erneute Gemini-Anfrage.
+4. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
    starten mit einem **Layout-Vorschlag** (Vorderseite: groß & zentriert;
@@ -231,10 +241,16 @@ WaniKani-/Dictionary-Karte oder **manuell direkt hier** hinzugekommen sind:
   WaniKani-Wörtern entfernt es nur die manuelle „bekannt"-Markierung – bleibt
   das Wort exportiert, taucht es weiterhin auf, jetzt aber ohne den „bekannt
   markiert"-Badge (ein Export lässt sich nicht rückgängig machen). Bei
-  Dictionary-Wörtern hingegen wird die **Karte selbst gelöscht** (und die
+  Dictionary-/KI-Wörtern hingegen wird die **Karte selbst gelöscht** (und die
   manuelle Markierung, falls gesetzt) – der Eintrag verschwindet komplett,
-  da eine Dictionary-Karte anders als ein Export jederzeit neu erstellt
-  werden kann.
+  da eine solche Karte anders als ein Export jederzeit neu erstellt werden
+  kann.
+- **📄 Kontext:** Dictionary- und KI-Wörter tragen den Original-Satz, aus dem
+  sie stammen (`KanaCard.sentence_ja`/`sentence_translation`/
+  `sentence_audio_url`) – ein Klick auf das 📄-Symbol zeigt Satz, Übersetzung
+  und (falls vorhanden) die vorgelesene Audio in einem Popup. Für
+  WaniKani-Wörter (noch) nicht verfügbar, da dort kein eigener Satz-Kontext
+  mitgespeichert wird.
 
 ## Druck-Layouts (`--layout`)
 
