@@ -164,11 +164,14 @@ WaniKani-/Dictionary-Karte oder **manuell direkt hier** hinzugekommen sind:
 - **Volltextsuche** filtert clientseitig nach Zeichen oder Bedeutung.
 - **Manuell hinzufügen:** Wort + Bedeutung eintragen – unabhängig von
   WaniKani/Wörterbuch, für Wörter, die man einfach schon von woanders kennt.
-- **Entfernen** (✕) ist nur möglich, wenn der Eintrag manuell markiert wurde
-  (rein manuelle Einträge verschwinden dabei komplett; bei WaniKani-/
-  Dictionary-Wörtern wird nur die manuelle Markierung entfernt – bleibt das
-  Wort exportiert bzw. als Karte erstellt, taucht es weiterhin auf, jetzt aber
-  ohne den „bekannt markiert"-Badge).
+- **Entfernen** (✕): rein manuelle Einträge verschwinden komplett. Bei
+  WaniKani-Wörtern entfernt es nur die manuelle „bekannt"-Markierung – bleibt
+  das Wort exportiert, taucht es weiterhin auf, jetzt aber ohne den „bekannt
+  markiert"-Badge (ein Export lässt sich nicht rückgängig machen). Bei
+  Dictionary-Wörtern hingegen wird die **Karte selbst gelöscht** (und die
+  manuelle Markierung, falls gesetzt) – der Eintrag verschwindet komplett,
+  da eine Dictionary-Karte anders als ein Export jederzeit neu erstellt
+  werden kann.
 
 ## Druck-Layouts (`--layout`)
 

@@ -648,7 +648,7 @@ def api_wortliste() -> Any:
                 "level": None,
                 "card_created": wid in kana_records,
                 "manually_known": wid in manual,
-                "removable": wid in manual,
+                "removable": True,
             }
         )
 

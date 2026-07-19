@@ -222,7 +222,7 @@ function appendComposition(newCards, label) {
 function clearCompose() {
   composeAccum = []; composeLabels = []; sentenceOverrides = {};
   cards = []; selected.clear();
-  $("#tablePanel").classList.add("hidden");
+  renderTable([], "Karten", "subject");
 }
 
 // ---------- Text-Modus ----------
@@ -333,14 +333,16 @@ async function addWordFromPopup() {
 async function createKanaCardFromPopup() {
   const seg = activeWordSeg;
   if (!seg || seg.ready) return;
+  let card;
   try {
-    await api("/api/kanacards", {
+    card = await api("/api/kanacards", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ word: seg.lemma || seg.text, sentence: seg.sentence }),
     });
   } catch (e) { toast(e.message, true); return; }
   setSegReady(seg, true);
-  toast(`Dictionary-Karte für ${seg.text} erstellt`);
+  appendComposition([card], seg.text);
+  toast(`Dictionary-Karte für ${seg.text} erstellt und zur Tabelle hinzugefügt`);
   closeWordPopup();
 }
 
@@ -436,7 +438,8 @@ function renderWortliste() {
 
 async function removeWortlisteEntry(e) {
   try {
-    await api(`/api/known/${e.id}`, { method: "DELETE" });
+    if (e.manually_known) await api(`/api/known/${e.id}`, { method: "DELETE" });
+    if (e.source === "dictionary" && e.card_created) await api(`/api/kanacards/${e.id}`, { method: "DELETE" });
   } catch (err) { toast(err.message, true); return; }
   wortlisteEntries = wortlisteEntries.filter((x) => x.id !== e.id);
   renderWortliste();
@@ -581,7 +584,13 @@ async function doRender() {
     });
   }
   if (tableMode === "custom") body.custom_ids = ids.map(String);
-  else { body.subject_ids = ids; if (Object.keys(sentenceOverrides).length) body.sentence_overrides = sentenceOverrides; }
+  else {
+    const kanaIds = ids.filter((i) => String(i).startsWith("kana_"));
+    const subjectIds = ids.filter((i) => !String(i).startsWith("kana_"));
+    body.subject_ids = subjectIds;
+    if (kanaIds.length) body.kana_ids = kanaIds;
+    if (Object.keys(sentenceOverrides).length) body.sentence_overrides = sentenceOverrides;
+  }
   $("#btnRender").disabled = true;
   $("#progress").classList.remove("hidden"); $("#progressText").textContent = "Wird erzeugt…";
   try {
@@ -603,7 +612,7 @@ function pollJob(id) {
     else if (job.status === "running") $("#progressText").textContent = isAnki ? "Anki-Paket wird gebaut…" : "PDF wird gebaut…";
     if (job.status === "done" || job.status === "error") {
       updateRenderBtn(); $("#progress").classList.add("hidden");
-      if (job.status === "done") { showPreview(job); toast(`Fertig: ${job.n_cards} Karten`); }
+      if (job.status === "done") toast(`Fertig: ${job.n_cards} Karten`);
       else { const el = $("#renderError"); el.textContent = "⚠ " + (job.error || "Fehlgeschlagen"); el.classList.remove("hidden"); toast("Fehlgeschlagen", true); }
       loadHistory();
       return;
@@ -613,18 +622,7 @@ function pollJob(id) {
   tick();
 }
 
-// ---------- Vorschau + Verlauf ----------
-function showPreview(job) {
-  const isAnki = (job.params && job.params.format) === "anki";
-  const url = isAnki ? `/api/jobs/${job.id}/apkg` : `/api/jobs/${job.id}/pdf`;
-  $("#previewEmpty").classList.add("hidden");
-  $("#previewIcon").textContent = isAnki ? "🎴" : "📄";
-  $("#previewReadyText").innerHTML = isAnki
-    ? "Anki-Paket bereit – herunterladen und in Anki importieren (Datei → Importieren)."
-    : "PDF bereit zum Download.";
-  $("#downloadBtn").href = `${url}?download=1`;
-  $("#previewReady").classList.remove("hidden");
-}
+// ---------- Verlauf ----------
 async function loadHistory() {
   let jobs = [];
   try { jobs = await api("/api/jobs"); } catch (_) {}
@@ -643,10 +641,9 @@ async function loadHistory() {
       <div class="h-actions"></div>`;
     const act = li.querySelector(".h-actions");
     if (j.status === "done") {
-      const v = document.createElement("button"); v.className = "chip-btn"; v.textContent = "Vorschau"; v.onclick = () => showPreview(j);
       const d = document.createElement("a"); d.className = "chip-btn"; d.textContent = isAnki ? "Anki" : "PDF";
       d.href = `/api/jobs/${j.id}/${isAnki ? "apkg" : "pdf"}?download=1`; d.setAttribute("download", "");
-      act.append(v, d);
+      act.append(d);
     }
     const del = document.createElement("button"); del.className = "chip-btn danger"; del.textContent = "✕"; del.title = "Löschen";
     del.onclick = async () => { await api(`/api/jobs/${j.id}`, { method: "DELETE" }); loadHistory(); };
@@ -664,7 +661,6 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#modeText").classList.toggle("hidden", v !== "text");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
     $("#modeWortliste").classList.toggle("hidden", v !== "wortliste");
-    $("#tablePanel").classList.add("hidden");
     if (v === "custom") loadCustoms();
     if (v === "wortliste") loadWortliste();
   });

@@ -220,7 +220,7 @@
     </section>
 
     <!-- Tabelle + Rendern -->
-    <section id="tablePanel" class="panel hidden">
+    <section id="tablePanel" class="panel">
       <div class="table-head">
         <h2 id="tableTitle">Karten</h2>
         <div class="row gap">
@@ -280,22 +280,6 @@
         <button id="btnRender" class="btn primary big" disabled>PDF erzeugen (0)</button>
         <div id="progress" class="progress hidden"><div class="spinner"></div><span id="progressText">Wird erzeugt…</span></div>
         <div id="renderError" class="error hidden"></div>
-      </div>
-    </section>
-
-    <!-- Vorschau -->
-    <section class="panel preview">
-      <div class="preview-head">
-        <h2>Vorschau</h2>
-      </div>
-      <div id="previewEmpty" class="preview-empty">
-        <div class="ph-icon">📄</div>
-        <p>Noch keine Datei – Karten auflisten, auswählen und <strong>erzeugen</strong>.</p>
-      </div>
-      <div id="previewReady" class="preview-empty hidden">
-        <div id="previewIcon" class="ph-icon">📄</div>
-        <p id="previewReadyText">Fertig.</p>
-        <a id="downloadBtn" class="btn primary" download>Download</a>
       </div>
     </section>
 

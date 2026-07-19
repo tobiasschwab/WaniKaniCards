@@ -318,7 +318,7 @@ def test_api_wortliste_combines_wanikani_dictionary_and_manual(tmp_path, monkeyp
     dct = next(e for e in data["entries"] if e["source"] == "dictionary")
     assert dct["characters"] == "しあい"
     assert dct["card_created"] is True
-    assert dct["removable"] is False
+    assert dct["removable"] is True  # Dictionary-Karten lassen sich immer löschen (kein Export-Verlauf)
 
     man = next(e for e in data["entries"] if e["source"] == "manual")
     assert man["characters"] == "genki"
