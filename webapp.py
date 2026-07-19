@@ -553,7 +553,18 @@ def api_text_annotate() -> Any:
     if use_gemini:
         s = load_settings()
         gemini_key = s.get("gemini_key") or None
-        gemini_model = s.get("gemini_model") or gemini_model
+        stored_model = s.get("gemini_model")
+        if stored_model in kc.gemini_client.AVAILABLE_MODELS:
+            gemini_model = stored_model
+        elif stored_model:
+            # Vor der "-latest"-Umstellung gespeicherter, inzwischen von
+            # Google deprecateter Modellname (z. B. "gemini-2.5-flash") ->
+            # auf den aktuellen Default ausweichen statt an Google zu senden
+            # und dort mit HTTP 404 "no longer available" zu scheitern.
+            logger.warning(
+                "Gespeichertes Gemini-Modell %r ist nicht mehr verfügbar, verwende Default %r.",
+                stored_model, gemini_model,
+            )
         if not gemini_key:
             return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
     logger.info(

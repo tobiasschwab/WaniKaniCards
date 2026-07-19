@@ -41,8 +41,17 @@ _REQUEST_TIMEOUT = (10, 25)
 
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
-DEFAULT_MODEL = "gemini-2.5-flash"
-AVAILABLE_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro")
+
+# "-latest"-Aliase statt fest codierter Versionsnummern (z. B. "gemini-2.5-
+# flash"): Google deprecatet konkrete Modellversionen regelmäßig für neue
+# Projekte/Keys ("model X is no longer available to new users") – die Alias-
+# Namen zeigen dagegen dauerhaft auf die aktuell aktive Version derselben
+# Preis-/Geschwindigkeitsklasse, ohne dass der Code hinterhergepflegt werden
+# muss. `*-pro-latest` hat auf dem kostenlosen Tier i. d. R. **kein**
+# Kontingent (Quota-Limit 0) und braucht ein Konto mit aktivierter
+# Abrechnung – für Gratis-Nutzung sind `flash`/`flash-lite` die richtige Wahl.
+DEFAULT_MODEL = "gemini-flash-latest"
+AVAILABLE_MODELS = ("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest")
 
 _RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -67,10 +76,16 @@ _RESPONSE_SCHEMA = {
 
 _PROMPT_TEMPLATE = """Du bist ein professioneller Japanisch-Lehrer. Analysiere den folgenden japanischen Satz für mich. Gehe strikt Schritt für Schritt vor:
 
-1. Zerlege den Satz in JEDES einzelne Wort, Partikel und Grammatikelement.
-   Gib zu jedem: surface (Schreibweise wie im Satz), dictionary_form
-   (Grundform/Wörterbuchform, z. B. bei Verben die Present-Wörterbuchform),
-   function (kurze grammatikalische Funktion/Bedeutung, auf Deutsch).
+1. Zerlege den Satz in JEDES einzelne Wort, Partikel und Grammatikelement –
+   OHNE etwas auszulassen. Das schließt Satzzeichen (｡ 。 、 ! ? …) am Ende
+   oder mitten im Satz ausdrücklich mit ein, jedes als eigenes Token. Die
+   surface-Felder aller Tokens müssen, aneinandergereiht, exakt wieder den
+   kompletten Original-Satz ergeben (Zeichen für Zeichen, nichts fehlt).
+   Gib zu jedem Token: surface (Schreibweise wie im Satz), dictionary_form
+   (Grundform/Wörterbuchform, z. B. bei Verben die Present-Wörterbuchform;
+   bei Satzzeichen einfach dasselbe Zeichen), function (kurze
+   grammatikalische Funktion/Bedeutung, auf Deutsch; bei Satzzeichen z. B.
+   "Satzzeichen").
 2. Erkläre kurz die wichtigsten Grammatik-Besonderheiten des Satzes
    (grammar_notes, auf Deutsch).
 3. Gib eine natürliche, flüssige deutsche Übersetzung für den Gesamtsatz an

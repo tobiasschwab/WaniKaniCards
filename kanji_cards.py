@@ -1368,6 +1368,33 @@ def _is_kana_only(text: str) -> bool:
     return bool(text) and not _KANJI_RE.search(text)
 
 
+def _reconcile_gemini_tokens(
+    gtoks: list[tuple[str, str, str]], original_text: str
+) -> list[tuple[str, str, str]] | None:
+    """Prüfen, ob Gemini-Tokens zum Original-Satz passen – bei Bedarf um
+    fehlende Satzzeichen am Ende ergänzen, statt strikt auf Zeichengleichheit
+    zu bestehen.
+
+    Gemini lässt das abschließende Satzzeichen (｡ 。 ! ? …) in der Tokenliste
+    ganz regelmäßig weg, obwohl der Prompt explizit danach fragt – eine reine
+    `"".join(...) == original_text`-Prüfung würde dadurch praktisch JEDEN
+    normalen Satz (die fast alle mit 。 enden) verwerfen und den Gemini-Pfad
+    faktisch nie aktivieren. Fehlt daher nur ein reiner Satzzeichen-/Symbol-
+    Rest am Ende (keine Buchstaben/Kana/Kanji), wird er als eigenes, funk-
+    tionsloses Token angehängt (rendert als normaler Text). Fehlt mehr als
+    das – oder käme etwas anderes durcheinander – gilt die Rekonstruktion als
+    gescheitert (`None`), der Aufrufer fällt dann auf Janome zurück.
+    """
+    reconstructed = "".join(s for s, _, _ in gtoks)
+    if reconstructed == original_text:
+        return gtoks
+    if original_text.startswith(reconstructed):
+        gap = original_text[len(reconstructed):]
+        if gap and not re.search(r"\w", gap, flags=re.UNICODE):
+            return [*gtoks, (gap, gap, "")]
+    return None
+
+
 def annotate_text(
     text: str,
     *,
@@ -1506,9 +1533,10 @@ def annotate_text(
                     for t in result.get("tokens", [])
                     if t.get("surface")
                 ]
-                if "".join(s for s, _, _ in gtoks) == original_text:
-                    g["entries"] = [(s, l) for s, l, _ in gtoks]
-                    g["functions"] = [f for _, _, f in gtoks]
+                reconciled = _reconcile_gemini_tokens(gtoks, original_text)
+                if reconciled is not None:
+                    g["entries"] = [(s, l) for s, l, _ in reconciled]
+                    g["functions"] = [f for _, _, f in reconciled]
                     g["source"] = "gemini"
                     g["grammar_notes"] = result.get("grammar_notes") or None
                     g["translation_de"] = result.get("translation_de") or None

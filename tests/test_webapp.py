@@ -238,7 +238,7 @@ def test_api_text_annotate_use_gemini_passes_settings_key_and_model(tmp_path, mo
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
     (tmp_path / "jobs").mkdir()
     client = webapp.app.test_client()
-    client.post("/api/settings", json={"gemini_key": "mykey", "gemini_model": "gemini-2.5-pro"})
+    client.post("/api/settings", json={"gemini_key": "mykey", "gemini_model": "gemini-pro-latest"})
 
     seen = {}
 
@@ -253,7 +253,32 @@ def test_api_text_annotate_use_gemini_passes_settings_key_and_model(tmp_path, mo
     r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
     assert r.status_code == 200
     assert seen["gemini_key"] == "mykey"
-    assert seen["gemini_model"] == "gemini-2.5-pro"
+    assert seen["gemini_model"] == "gemini-pro-latest"
+
+
+def test_api_text_annotate_falls_back_to_default_model_when_stored_model_is_stale(tmp_path, monkeypatch):
+    # Vor der "-latest"-Umstellung gespeicherter, von Google inzwischen für
+    # neue Keys deprecateter Modellname -> statt ihn an Google zu senden
+    # (HTTP 404 "no longer available") auf den aktuellen Default ausweichen.
+    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
+    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    (tmp_path / "jobs").mkdir()
+    client = webapp.app.test_client()
+    webapp.save_settings({**webapp.load_settings(), "gemini_key": "mykey", "gemini_model": "gemini-2.5-flash"})
+
+    seen = {}
+
+    def fake_annotate_text(text, *, use_cache=True, sample=False, gemini_key=None, gemini_model=None):
+        seen["gemini_model"] = gemini_model
+        return [[]]
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc, "annotate_text", fake_annotate_text)
+
+    r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
+    assert r.status_code == 200
+    assert seen["gemini_model"] == kc.gemini_client.DEFAULT_MODEL
 
 
 def test_api_text_annotate_gemini_grammar_only_word_excluded_from_stats(tmp_path, monkeypatch):
@@ -287,13 +312,13 @@ def test_api_settings_get_set_gemini_key_and_model(tmp_path, monkeypatch):
 
     r0 = client.get("/api/settings").get_json()
     assert r0["gemini_key_set"] is False
-    assert r0["gemini_model"] == "gemini-2.5-flash"
+    assert r0["gemini_model"] == "gemini-flash-latest"
 
-    client.post("/api/settings", json={"gemini_key": "sekret", "gemini_model": "gemini-2.5-pro"})
+    client.post("/api/settings", json={"gemini_key": "sekret", "gemini_model": "gemini-pro-latest"})
     r1 = client.get("/api/settings").get_json()
     assert r1["gemini_key_set"] is True
     assert r1["gemini_key_hint"].endswith("kret")
-    assert r1["gemini_model"] == "gemini-2.5-pro"
+    assert r1["gemini_model"] == "gemini-pro-latest"
 
 
 def test_api_settings_post_ignores_unknown_gemini_model(tmp_path, monkeypatch):
@@ -301,7 +326,7 @@ def test_api_settings_post_ignores_unknown_gemini_model(tmp_path, monkeypatch):
     client = webapp.app.test_client()
     client.post("/api/settings", json={"gemini_model": "not-a-real-model"})
     r = client.get("/api/settings").get_json()
-    assert r["gemini_model"] == "gemini-2.5-flash"  # ungültiger Wert wird ignoriert
+    assert r["gemini_model"] == "gemini-flash-latest"  # ungültiger Wert wird ignoriert
 
 
 # --------------------------------------------------------------------------- #

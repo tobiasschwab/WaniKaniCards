@@ -40,6 +40,7 @@ from kanji_cards import (  # noqa: E402
     _resolve_audio_url,
     _split_sentences,
     _is_kana_only,
+    _reconcile_gemini_tokens,
 )
 
 import dictionary as dic
@@ -848,6 +849,53 @@ def test_annotate_text_uses_gemini_tokens_when_reconstruction_matches(monkeypatc
     assert info["text"] == ""
     assert info["grammar_notes"] == "Notiz"
     assert info["translation_de"] == "Übersetzung"
+
+
+def test_reconcile_gemini_tokens_exact_match_passes_through():
+    gtoks = [("大きい", "大きい", "Adjektiv"), ("。", "。", "Satzzeichen")]
+    assert _reconcile_gemini_tokens(gtoks, "大きい。") == gtoks
+
+
+def test_reconcile_gemini_tokens_appends_missing_trailing_punctuation():
+    # Gemini lässt das abschließende 。 regelmäßig weg, obwohl der Prompt
+    # explizit danach fragt -> wird als eigenes, funktionsloses Token ergänzt
+    # statt die ganze Satzgruppe zu verwerfen.
+    gtoks = [("大きい", "大きい", "Adjektiv")]
+    result = _reconcile_gemini_tokens(gtoks, "大きい。")
+    assert result == [("大きい", "大きい", "Adjektiv"), ("。", "。", "")]
+
+
+def test_reconcile_gemini_tokens_rejects_missing_word_characters():
+    # Fehlt mehr als reine Satzzeichen (hier ein ganzes Wort) -> kein Ergänzen,
+    # sondern Fallback auf Janome (None signalisiert das dem Aufrufer).
+    gtoks = [("大きい", "大きい", "Adjektiv")]
+    assert _reconcile_gemini_tokens(gtoks, "大きい猫。") is None
+
+
+def test_reconcile_gemini_tokens_rejects_unrelated_mismatch():
+    gtoks = [("komplett anders", "x", "y")]
+    assert _reconcile_gemini_tokens(gtoks, "大きい山です。") is None
+
+
+def test_annotate_text_uses_gemini_when_trailing_punctuation_is_missing(monkeypatch):
+    # Regressionstest für einen realen Bug: Gemini liefert regelmäßig KEIN
+    # Token für das abschließende 。, obwohl es im Prompt gefordert wird –
+    # eine strikte Rekonstruktions-Prüfung hätte dadurch praktisch jeden
+    # normalen (auf 。 endenden) Satz verworfen und den Gemini-Pfad faktisch
+    # nie aktiviert.
+    tokens = [
+        {"surface": "大きい", "dictionary_form": "大きい", "function": "Adjektiv"},
+        {"surface": "猫", "dictionary_form": "猫", "function": "Nomen"},
+        {"surface": "です", "dictionary_form": "です", "function": "Kopula"},
+        # bewusst kein Token für das abschließende "。"
+    ]
+    monkeypatch.setattr(gemini_client, "analyze_sentence", _fake_gemini(tokens))
+    lines = annotate_text("大きい猫です。", sample=True, gemini_key="dummy")
+    segs = lines[0]
+    assert "".join(s["text"] for s in segs) == "大きい猫です。"
+    assert any(s.get("source") == "gemini" for s in segs)
+    info = next(s for s in segs if s["type"] == "sentence-info")
+    assert info["grammar_notes"] == "Notiz"
 
 
 def test_annotate_text_falls_back_to_janome_when_gemini_reconstruction_mismatches(monkeypatch):

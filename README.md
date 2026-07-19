@@ -564,19 +564,33 @@ garantiert valides JSON (Tokens mit `dictionary_form` + grammatikalischer
 Funktion, `grammar_notes`, `translation_de`) statt Markdown-Tabellen-Parsing.
 Ergebnisse werden pro Satz unter `.cache/gemini/` gecacht (Schlüssel: Modell +
 Satztext). `annotate_text()` ersetzt eine Janome-Satzgruppe nur durch Gemini,
-wenn dessen Tokens **exakt** zum Original-Text rekonstruieren – sonst (kein
-Key, Netzwerkfehler, Quota, kaputte/abweichende Antwort) bleibt die
+wenn dessen Tokens zum Original-Text rekonstruieren – dabei bewusst **nicht**
+strikt zeichengleich: Gemini lässt das abschließende Satzzeichen (｡ 。 ! ?)
+trotz expliziter Prompt-Anweisung regelmäßig weg, eine rein strikte Prüfung
+hätte praktisch jeden normalen (auf 。 endenden) Satz verworfen und den
+Gemini-Pfad faktisch nie aktiviert. `_reconcile_gemini_tokens()` ergänzt
+einen fehlenden reinen Satzzeichen-Rest am Ende als eigenes Token; fehlt
+mehr als das (Wörter, Quota, Netzwerkfehler, kaputte Antwort), bleibt die
 Janome-Tokenisierung für genau diesen Satz unverändert (nie ein harter
 Abbruch für den gesamten Text). `dictionary_form` ersetzt dabei Janomes
 `base_form` als Schlüssel für den WaniKani-/JMdict-Abgleich.
+
+Modellwahl über `-latest`-Aliase (`gemini-flash-latest`/`-flash-lite-latest`/
+`-pro-latest`) statt fest codierter Versionsnummern (z. B. `gemini-2.5-flash`)
+– Google deprecatet konkrete Versionen regelmäßig für neue Projekte/Keys
+("model X is no longer available to new users"), die Alias-Namen zeigen
+dauerhaft auf die aktuell aktive Version. `pro-latest` hat auf dem
+kostenlosen Tier meist **kein** Kontingent (HTTP 429 "quota exceeded",
+`limit: 0`) und braucht ein Konto mit aktivierter Abrechnung. Ein vor dieser
+Umstellung gespeicherter, jetzt ungültiger Modellname in `settings.json`
+wird beim nächsten Request automatisch durch den aktuellen Default ersetzt
+(mit Log-Hinweis), statt an Google gesendet zu werden und dort zu scheitern.
 
 Eindeutige Sätze werden mit begrenzter Parallelität (`ThreadPoolExecutor`,
 max. 2 gleichzeitig) statt streng seriell angefragt – bei längeren Texten
 sonst viele Minuten Wartezeit in einem einzigen gunicorn-Worker. Bewusst
 niedrig gehalten (nicht höher): mehr Parallelität verschärft nur die
-Rate-Limit-Kollisionen, v. a. bei `gemini-2.5-pro`, dessen Gratis-Kontingent
-deutlich enger ist als bei `flash`/`flash-lite` (im Zweifel die Modellwahl
-in den Einstellungen wechseln). Jeder Request nutzt ein (Connect-, Read-)
+Rate-Limit-Kollisionen. Jeder Request nutzt ein (Connect-, Read-)
 Timeout von (10s, 25s) statt eines einzelnen 30s-Werts, damit eine tote
 Verbindung (z. B. Netzwerk-Policy im Docker-Deployment) nicht unbegrenzt
 hängt. Bei HTTP 429 wird die von Google selbst empfohlene Wartezeit
