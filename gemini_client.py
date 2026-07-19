@@ -529,3 +529,80 @@ def synthesize_speech(
         except OSError:
             pass
     return wav
+
+
+# --------------------------------------------------------------------------- #
+# Bild-Transkription (PDF-Import: Seiten ohne Textlayer, direkt hochgeladene
+# Bilder) – siehe pdf_import.py
+# --------------------------------------------------------------------------- #
+
+_OCR_CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini_ocr"
+
+_OCR_PROMPT = """Transkribiere GENAU den japanischen (und ggf. deutschen/englischen) Text in diesem Bild.
+Gib NUR den reinen Text zurück, Zeile für Zeile wie im Bild angeordnet -
+keine Übersetzung, keine Erklärung, keine Markdown-Formatierung, keine
+Anführungszeichen drumherum. Furigana (kleine Lesehilfen über oder neben
+Kanji) NICHT mit ausgeben, nur den eigentlichen Haupttext. Ist kein
+lesbarer Text im Bild, gib einen leeren String zurück."""
+
+
+def _ocr_cache_path(image_bytes: bytes, model: str) -> Path:
+    key = hashlib.sha1(model.encode("utf-8") + b"\0" + image_bytes).hexdigest()
+    return _OCR_CACHE_DIR / f"{key}.txt"
+
+
+def transcribe_image(
+    image_bytes: bytes,
+    api_key: str,
+    *,
+    mime_type: str = "image/png",
+    model: str = DEFAULT_MODEL,
+    session: requests.Session | None = None,
+    use_cache: bool = True,
+) -> str | None:
+    """Text aus einem Bild transkribieren (OCR per Gemini) – für PDF-Seiten
+    ohne Textlayer oder direkt hochgeladene Bilder (siehe `pdf_import.py`).
+    Nutzt dasselbe Chat-Modell wie die Satzanalyse statt eines separaten
+    OCR-Produkts (z. B. Google Cloud Vision) – ein Key reicht für alles.
+
+    Gibt den transkribierten Text zurück (leerer String, wenn nichts
+    lesbar war), oder `None` bei fehlendem Bild/Key, Netzwerkfehler, Quota
+    oder kaputter Antwort (fail-soft wie der Rest dieses Moduls)."""
+    if not image_bytes or not api_key:
+        return None
+
+    cache_file = _ocr_cache_path(image_bytes, model) if use_cache else None
+    if cache_file and cache_file.is_file():
+        try:
+            return cache_file.read_text(encoding="utf-8")
+        except OSError:
+            pass
+
+    session = session or requests.Session()
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    body = {
+        "contents": [{"parts": [
+            {"text": _OCR_PROMPT},
+            {"inlineData": {"mimeType": mime_type, "data": b64}},
+        ]}],
+    }
+    url = f"{_API_BASE}/models/{model}:generateContent"
+    label = f"Bild-Transkription ({len(image_bytes)} Bytes, {model})"
+    resp = _post_with_retry(url, api_key, body, session, label)
+    if resp is None:
+        return None
+
+    try:
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        logger.warning("Gemini: Transkriptions-Antwort für %s nicht auswertbar (%s): %s", label, type(exc).__name__, exc)
+        return None
+
+    text = (text or "").strip()
+    if cache_file:
+        try:
+            _OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+    return text

@@ -4,3 +4,4 @@ weasyprint>=60
 python-dotenv>=1.0
 genanki>=0.13
 janome>=0.5
+pymupdf>=1.24

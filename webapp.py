@@ -25,6 +25,7 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 import anki_export as ae
 import kanji_cards as kc
+import pdf_import
 
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
 # im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
@@ -68,6 +69,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder=None)
+
+# 20 MB reicht für die allermeisten gescannten Lesehefte/Fotos bequem, ohne
+# dass ein versehentlich falscher Upload (Video, riesiger Bildband) den
+# Server unnötig belastet. Als Flask-Config gesetzt, damit ein zu großer
+# Body schon von Werkzeug abgelehnt wird, statt erst komplett in den
+# Speicher gelesen zu werden (siehe api_text_extract()).
+_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = _MAX_UPLOAD_BYTES
 
 
 # ---------- Einstellungen ---------------------------------------------------- #
@@ -146,6 +155,16 @@ def _apply_token_env() -> str:
     token = load_settings().get("token", "")
     os.environ["WANIKANI_API_TOKEN"] = token or ""
     return token
+
+
+def _resolve_gemini_model(settings: dict[str, Any]) -> str:
+    """Gespeicherten Modellnamen übernehmen, wenn er wie ein gültiger
+    Gemini-Modellname aussieht (`gemini-*`) – sonst der aktuelle Default
+    (siehe `api_post_settings()`, dieselbe Validierung)."""
+    stored_model = settings.get("gemini_model")
+    if isinstance(stored_model, str) and stored_model.strip().startswith("gemini-"):
+        return stored_model.strip()
+    return kc.gemini_client.DEFAULT_MODEL
 
 
 def _fetch_username(token: str) -> str:
@@ -643,10 +662,7 @@ def api_text_annotate_ai() -> Any:
     gemini_key = s.get("gemini_key") or None
     if not gemini_key:
         return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
-    stored_model = s.get("gemini_model")
-    gemini_model = kc.gemini_client.DEFAULT_MODEL
-    if isinstance(stored_model, str) and stored_model.strip().startswith("gemini-"):
-        gemini_model = stored_model.strip()
+    gemini_model = _resolve_gemini_model(s)
 
     logger.info("text-annotate-ai: %d Zeichen, sample=%s, Modell=%s …", len(text), sample, gemini_model)
     t0 = time.monotonic()
@@ -685,6 +701,46 @@ def api_text_annotate_ai() -> Any:
             "stats": {"known": known_count, "total": total, "percent": percent},
         }
     )
+
+
+@app.post("/api/text-extract")
+def api_text_extract() -> Any:
+    """Text aus einer hochgeladenen PDF-Datei oder einem Bild extrahieren
+    (siehe `pdf_import.py`) – liefert reinen Text zurück, der dann genauso
+    wie manuell eingefügter Text durch „Aus Text"/„Mit KI" läuft.
+
+    PDF-Seiten mit Textlayer werden kostenlos direkt ausgelesen; Seiten ohne
+    Textlayer (Scans) und Bilder brauchen für die Texterkennung einen in
+    den Einstellungen hinterlegten Gemini-Key.
+    """
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Keine Datei hochgeladen."}), 400
+    data = file.read()
+    if not data:
+        return jsonify({"error": "Datei ist leer."}), 400
+    if len(data) > _MAX_UPLOAD_BYTES:
+        return jsonify({"error": f"Datei zu groß (max. {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)."}), 400
+
+    s = load_settings()
+    gemini_key = s.get("gemini_key") or None
+    gemini_model = _resolve_gemini_model(s)
+
+    logger.info("text-extract: %s (%d Bytes) …", file.filename, len(data))
+    t0 = time.monotonic()
+    try:
+        text = pdf_import.extract_text_from_upload(
+            data, file.filename, file.mimetype, gemini_key=gemini_key, gemini_model=gemini_model,
+        )
+    except pdf_import.ExtractionError as exc:
+        return jsonify({"error": str(exc)}), 400
+    logger.info("text-extract: fertig in %.1fs (%d Zeichen)", time.monotonic() - t0, len(text))
+
+    if not text.strip():
+        return jsonify(
+            {"error": "Kein Text gefunden – bei gescannten Seiten/Bildern wird ein Gemini-Key benötigt."}
+        ), 422
+    return jsonify({"text": text})
 
 
 def _coerce_known_id(raw: str) -> int | str:

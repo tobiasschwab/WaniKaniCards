@@ -435,3 +435,55 @@ def test_synthesize_speech_uses_cache_on_second_call(tmp_path, monkeypatch):
     second = gc.synthesize_speech("同じ文。", "key", session=session, use_cache=True)
     assert len(session.calls) == 1  # kein zweiter Request nötig
     assert first == second
+
+
+# --------------------------------------------------------------------------- #
+# transcribe_image (OCR für PDF-Seiten ohne Textlayer / hochgeladene Bilder)
+# --------------------------------------------------------------------------- #
+
+def _ocr_body(text: str) -> dict:
+    return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+
+
+def test_transcribe_image_returns_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_OCR_CACHE_DIR", tmp_path / "gemini_ocr")
+    session = _FakeSession({"key": _FakeResp(json_data=_ocr_body("大きい山です。"))})
+    text = gc.transcribe_image(b"\x89PNG...", "key", session=session, use_cache=False)
+    assert text == "大きい山です。"
+
+
+def test_transcribe_image_sends_inline_image_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_OCR_CACHE_DIR", tmp_path / "gemini_ocr")
+    session = _FakeSession({"key": _FakeResp(json_data=_ocr_body("x"))})
+    gc.transcribe_image(b"rawbytes", "key", mime_type="image/jpeg", session=session, use_cache=False)
+    sent = session.calls[0]["json"]
+    part = sent["contents"][0]["parts"][1]
+    assert part["inlineData"]["mimeType"] == "image/jpeg"
+    import base64
+    assert base64.b64decode(part["inlineData"]["data"]) == b"rawbytes"
+
+
+def test_transcribe_image_returns_none_without_image_or_key():
+    assert gc.transcribe_image(b"", "key", session=_FakeSession({})) is None
+    assert gc.transcribe_image(b"x", "", session=_FakeSession({})) is None
+
+
+def test_transcribe_image_returns_none_on_network_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_OCR_CACHE_DIR", tmp_path / "gemini_ocr")
+    assert gc.transcribe_image(b"x", "key", session=_FakeSession(error=True), use_cache=False) is None
+
+
+def test_transcribe_image_returns_none_on_malformed_response(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_OCR_CACHE_DIR", tmp_path / "gemini_ocr")
+    session = _FakeSession({"key": _FakeResp(json_data={"candidates": []})})
+    assert gc.transcribe_image(b"x", "key", session=session, use_cache=False) is None
+
+
+def test_transcribe_image_uses_cache_on_second_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_OCR_CACHE_DIR", tmp_path / "gemini_ocr")
+    session = _FakeSession({"key": _FakeResp(json_data=_ocr_body("同じ画像。"))})
+    first = gc.transcribe_image(b"sameimage", "key", session=session, use_cache=True)
+    assert len(session.calls) == 1
+    second = gc.transcribe_image(b"sameimage", "key", session=session, use_cache=True)
+    assert len(session.calls) == 1  # kein zweiter Request nötig
+    assert first == second == "同じ画像。"

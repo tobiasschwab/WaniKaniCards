@@ -74,6 +74,20 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    Analyse-Arten (Segmented-Schalter über dem „Analysieren"-Button), damit
    man denselben Text nicht zweimal einfügen muss:
 
+   **📄 PDF/Bild hochladen:** statt Copy-Paste lässt sich über den Button
+   über der Textbox direkt eine **PDF-Datei oder ein Bild** hochladen (z. B.
+   ein Foto einer Buchseite oder ein Scan) – der extrahierte Text landet in
+   derselben Textarea und läuft danach exakt wie manuell eingefügter Text
+   durch „Schnell" oder „Mit KI". Zweistufig statt „alles auf einmal": PDF-Seiten
+   mit **Textlayer** werden direkt und kostenlos ausgelesen ([PyMuPDF](https://pymupdf.readthedocs.io/),
+   keine System-Abhängigkeit wie poppler-utils). Nur Seiten **ohne** Textlayer
+   (Scans) sowie direkt hochgeladene Bilder werden per **Gemini-Vision**
+   transkribiert – dafür ist ein Gemini-Key in den Einstellungen nötig, reine
+   Textlayer-PDFs funktionieren auch ganz ohne Key. Grenzen: max. 20 MB pro
+   Datei, max. 30 Seiten pro PDF (danach werden nur die ersten 30 verarbeitet);
+   schlägt die Texterkennung für einzelne Seiten fehl, werden nur diese
+   übersprungen statt das ganze Dokument abzubrechen.
+
    **„Schnell (kostenlos)"** – der Text wird **lemmatisiert**
    ([Janome](https://github.com/mocobeta/janome), reines Python – jedes Wort
    auf seine Wörterbuch-Grundform zurückgeführt, z. B. „大きく" → „大きい") und
@@ -725,6 +739,30 @@ und Fehlerursache jeder Gemini-Anfrage werden per `logging` protokolliert
 (INFO/WARNING, sichtbar über `docker logs`) – vorher war ein hängender oder
 an Rate-Limits scheiternder Request von außen nicht zu unterscheiden.
 
+**PDF-/Bild-Import** (`pdf_import.py`, Endpunkt `POST /api/text-extract`):
+zweistufig statt „alles auf einmal mit Gemini", damit Text mit Textlayer
+kostenlos bleibt. [PyMuPDF](https://pymupdf.readthedocs.io/) (`fitz`, reines
+Python-Wheel ohne System-Abhängigkeit wie poppler-utils) liest jede PDF-Seite
+zunächst direkt aus (`page.get_text()`); nur Seiten, bei denen das (fast)
+nichts liefert – gescannte Seiten ohne Textlayer – werden als Bild gerendert
+(`page.get_pixmap(dpi=200)`) und per `gemini_client.transcribe_image()`
+transkribiert (dieselbe Gemini-Vision-Anfrage wie für direkt hochgeladene
+Bilder, `inlineData`/Base64 im `generateContent`-Request, kein
+`responseSchema` nötig, da reiner Text statt strukturiertem JSON). OCR-Ergebnisse
+werden wie die Satzanalyse unter `.cache/gemini_ocr/` gecacht (Schlüssel:
+Modell + Bild-Hash). Fehl-soft auf Seiten-/Bild-Ebene: scheitert OCR für eine
+einzelne Seite oder fehlt schlicht der Gemini-Key, wird nur diese Seite
+übersprungen statt das ganze Dokument abzubrechen; Bilder ohne Key liefern
+dagegen einen klaren Fehler (ein Bild hat per Definition keinen Textlayer,
+ohne OCR gäbe es sonst stillschweigend gar keinen Text). Ein Deckel von 30
+Seiten pro PDF und 20 MB pro Datei (`app.config["MAX_CONTENT_LENGTH"]` in
+`webapp.py`, lehnt zu große Uploads schon auf Werkzeug-Ebene ab, bevor der
+komplette Body in den Speicher gelesen wird) verhindert, dass ein
+versehentlich hochgeladenes sehr großes Dokument den Server minutenlang
+blockiert. Der extrahierte Text landet unverändert in derselben Textarea wie
+manuell eingefügter Text – „Schnell" und „Mit KI" behandeln ihn identisch,
+ohne eigenen Codepfad fürs Datei-Upload.
+
 Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-
 Liste: bereits exportierte/manuell markierte WaniKani-Subjects (Anzeige-Daten
 über das neue, nicht-rekursive `kc.resolve_subject_ids()` aufgelöst – anders
@@ -746,7 +784,9 @@ Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 (Aus-Text-Modus, inkl. Wörterbuch-Fallback) sowie `annotate_text_ai` (KI-Modus,
 Satz-Tabelle inkl. Fehlerfälle), `dictionary.py`
 (JMdict-Download/-Index, DeepL-Übersetzung), `gemini_client.py`
-(Satzanalyse, Caching, 429-Backoff, Fehlerfälle), `KanaCard`-Bau sowie das
+(Satzanalyse, Caching, 429-Backoff, Fehlerfälle, Bild-Transkription),
+`pdf_import.py` (Textlayer-Extraktion, OCR-Fallback für Scans/Bilder,
+Seiten-Deckel, Fehlerfälle), `KanaCard`-Bau sowie das
 Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
 Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen im
 Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/

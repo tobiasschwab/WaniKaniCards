@@ -278,6 +278,28 @@ function doTextProcess() {
   return segValue("textAnalysisMode") === "ki" ? doKiProcess() : doTextProcessFast();
 }
 
+// PDF/Bild-Upload: Text serverseitig extrahieren (Textlayer oder Gemini-OCR,
+// siehe pdf_import.py) und in dieselbe Textarea füllen wie manuell eingefügter
+// Text – die eigentliche Analyse läuft danach exakt wie sonst.
+async function doTextUpload(file) {
+  if (!file) return;
+  $("#textUploadStatus").textContent = `Extrahiere Text aus „${file.name}“… (kann bei Scans/OCR etwas dauern)`;
+  const fd = new FormData();
+  fd.append("file", file);
+  let r;
+  try {
+    r = await api("/api/text-extract", { method: "POST", body: fd, signal: AbortSignal.timeout(300000) });
+  } catch (e) {
+    $("#textUploadStatus").textContent = "";
+    toast(e.name === "TimeoutError" ? "Zeitüberschreitung bei der Texterkennung." : e.message, true);
+    return;
+  }
+  $("#textUploadStatus").textContent = "";
+  $("#textInput").value = r.text || "";
+  $("#textInput").focus();
+  toast(`Text aus „${file.name}“ eingefügt (${(r.text || "").length} Zeichen).`);
+}
+
 async function doTextProcessFast() {
   const text = $("#textInput").value;
   if (!text.trim()) return;
@@ -1279,6 +1301,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnComposeClear2").addEventListener("click", clearCompose);
   $("#btnComposeClear3").addEventListener("click", clearCompose);
   $("#btnTextProcess").addEventListener("click", doTextProcess);
+  $("#btnTextUpload").addEventListener("click", () => $("#textUploadFile").click());
+  $("#textUploadFile").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    doTextUpload(file);
+    e.target.value = "";
+  });
   $("#btnTextEdit").addEventListener("click", backToTextEdit);
   $("#btnKiEdit").addEventListener("click", backToTextEdit);
   $("#btnKiBlurToggle").addEventListener("click", toggleKiBlur);

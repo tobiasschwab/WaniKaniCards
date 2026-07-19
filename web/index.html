@@ -199,6 +199,11 @@
             <textarea id="textInput" class="text" rows="8" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
           </label>
           <div class="row gap">
+            <button id="btnTextUpload" class="btn small" type="button">📄 PDF/Bild hochladen</button>
+            <input id="textUploadFile" type="file" accept=".pdf,application/pdf,image/*" class="hidden" />
+            <span id="textUploadStatus" class="muted"></span>
+          </div>
+          <div class="row gap">
             <div class="segmented" id="textAnalysisMode" data-value="fast">
               <button data-v="fast" class="active">Schnell (kostenlos)</button>
               <button data-v="ki">✨ Mit KI (Übersetzung, Grammatik)</button>
@@ -207,6 +212,7 @@
             <span id="textStatus" class="muted"></span>
           </div>
           <p class="hint">„Schnell" lemmatisiert nur und gleicht gegen WaniKani ab (kostenlos, kein Key nötig). „Mit KI" nutzt zusätzlich Gemini für Satzübersetzung, Grammatik-Erklärung und eine Vokabel-Tabelle (Gemini-Key in den Einstellungen nötig, sendet den Text an Google).</p>
+          <p class="hint">PDF/Bild-Upload: Text mit Textlayer wird direkt ausgelesen (kostenlos); gescannte Seiten/Bilder brauchen für die Texterkennung einen Gemini-Key in den Einstellungen.</p>
           <button type="button" class="disclosure-toggle" data-target="textHelp">▾ Wie funktioniert die Analyse?</button>
           <p id="textHelp" class="hint disclosure-body hidden">„Schnell": Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani/JMdict abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. „Mit KI": Gemini zerlegt den Text satzweise in eine Tabelle mit Übersetzung, Grammatik-Notizen und den Vokabeln in Grundform.</p>
         </div>
