@@ -1632,8 +1632,15 @@ def annotate_text_ai(
             results = {}
 
     # Alle Grundformen aus erfolgreich analysierten Sätzen gebündelt gegen
-    # WaniKani abgleichen (wie annotate_text) – dieselbe Chunk-Suche.
-    parsed_by_sentence: dict[str, list[tuple[str, str, str, str, str]] | None] = {}
+    # WaniKani abgleichen (wie annotate_text) – dieselbe Chunk-Suche. Nur
+    # von Gemini als "echtes Wort" klassifizierte Tokens (is_content_word)
+    # werden überhaupt nachgeschlagen: Partikel/Kopula/Hilfsverben wie das
+    # Themen-は würden über eine reine Lesungs-Suche sonst zufällig auf ein
+    # völlig unpassendes Homograph-Wörterbuch-Wort treffen (z. B. "は" als
+    # eigenständiges Wort "Flügel") statt als Grammatikelement erkannt zu
+    # werden – Gemini kennt die tatsächliche Funktion im Satz, eine reine
+    # Lesungs-Suche nicht.
+    parsed_by_sentence: dict[str, list[tuple[str, str, str, str, str, bool]] | None] = {}
     all_lemmas: dict[str, None] = {}
     for sentence in unique_sentences:
         result = results.get(sentence)
@@ -1647,6 +1654,7 @@ def annotate_text_ai(
                 (t.get("reading") or "").strip(),
                 t.get("function") or "",
                 (t.get("meaning") or "").strip(),
+                bool(t.get("is_content_word", True)),
             )
             for t in result.get("tokens", [])
             if t.get("surface")
@@ -1656,8 +1664,8 @@ def annotate_text_ai(
         if reconciled is None:
             logger.info("KI-Tokens rekonstruieren den Satz nicht exakt: %r", sentence[:40])
             continue
-        for _surface, lemma, *_rest in reconciled:
-            if lemma and lemma != "*":
+        for _surface, lemma, _reading, _function, _meaning, is_content_word in reconciled:
+            if is_content_word and lemma and lemma != "*":
                 all_lemmas.setdefault(lemma, None)
 
     hits_by_chars: dict[str, list[dict[str, Any]]] = {}
@@ -1704,7 +1712,13 @@ def annotate_text_ai(
 
         segments: list[dict[str, Any]] = []
         buf = ""
-        for surface, lemma, reading, function, meaning_ai in reconciled:
+        for surface, lemma, reading, function, meaning_ai, is_content_word in reconciled:
+            if not is_content_word:
+                # Partikel/Kopula/Hilfsverb/Satzzeichen laut Gemini – kein
+                # Nachschlagen (siehe Kommentar oben), bleibt normaler Text.
+                # Die Bemerkung-Spalte (grammar_notes) erklärt die Funktion.
+                buf += surface
+                continue
             match = best_by_lemma.get(lemma)
             if match:
                 if buf:

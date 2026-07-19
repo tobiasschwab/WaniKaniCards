@@ -645,9 +645,9 @@ zeigt auf der Karte „Quelle: KI (Gemini)" statt „Quelle: JMdict (EDRDG)").
 **Gemini-Analyse** (`gemini_client.py`): ein REST-Call gegen
 `generativelanguage.googleapis.com` (kein SDK, reines `requests` wie bei
 DeepL/GitHub) mit `responseSchema` für garantiert valides JSON (Tokens mit
-`dictionary_form`, `reading`, grammatikalischer `function`, kurzer `meaning`)
-statt Markdown-Tabellen-Parsing. Ergebnisse werden pro Satz unter
-`.cache/gemini/` gecacht (Schlüssel: Modell + Satztext).
+`dictionary_form`, `reading`, grammatikalischer `function`, kurzer `meaning`,
+`is_content_word`) statt Markdown-Tabellen-Parsing. Ergebnisse werden pro
+Satz unter `.cache/gemini/` gecacht (Schlüssel: Modell + Satztext).
 `_reconcile_gemini_tokens()` prüft, ob Geminis Tokens zum Original-Satz
 rekonstruieren – dabei bewusst **nicht** strikt zeichengleich: Gemini lässt
 das abschließende Satzzeichen (｡ 。 ! ?) trotz expliziter Prompt-Anweisung
@@ -655,7 +655,20 @@ regelmäßig weg, eine rein strikte Prüfung hätte praktisch jeden normalen (au
 。 endenden) Satz verworfen. Die Funktion ergänzt einen fehlenden reinen
 Satzzeichen-Rest am Ende als eigenes Token und ist generisch für Tupel
 beliebiger Breite (3er-Tupel im alten Aus-Text-Kontext gibt es nicht mehr,
-der KI-Modus nutzt 5er-Tupel `(surface, lemma, reading, function, meaning)`).
+der KI-Modus nutzt 6er-Tupel `(surface, lemma, reading, function, meaning,
+is_content_word)`).
+
+**`is_content_word` verhindert falsche Wörterbuch-Treffer bei Partikeln:**
+JMdict indiziert Wörter über ihre Lesung – kurze Kana-Folgen wie „は" haben
+dort oft einen zufälligen Homograph-Eintrag als eigenständiges Wort (z. B.
+„は" = „Flügel", von 羽), unabhängig von der Themen-Partikel は, die dieselbe
+Lautung hat. Eine reine Lesungs-Suche kann das nicht unterscheiden und würde
+die Partikel fälschlich mit der falschen Wortbedeutung anzeigen. Gemini
+liefert pro Token deshalb `is_content_word` (echte Vokabel: Nomen/Verb/
+Adjektiv/Adverb vs. Partikel/Kopula/Hilfsverb/Satzzeichen) – nur bei
+`is_content_word: true` versucht `annotate_text_ai()` überhaupt einen
+WaniKani-/JMdict-/KI-Treffer; alles andere bleibt normaler, nicht anklick-
+barer Text (die Bemerkung-Spalte erklärt die grammatikalische Funktion).
 
 **Batch-Verarbeitung statt eines Requests pro Satz**: `analyze_sentences()`
 ist die zentrale Funktion – sie sammelt alle eindeutigen Sätze eines Textes,

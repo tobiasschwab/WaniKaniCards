@@ -828,13 +828,14 @@ def _fake_gemini(tokens, grammar_notes="Notiz", translation_de="Übersetzung"):
     return _analyze_sentences
 
 
-def _ai_tok(surface, dictionary_form=None, reading="", function="", meaning=""):
+def _ai_tok(surface, dictionary_form=None, reading="", function="", meaning="", is_content_word=True):
     return {
         "surface": surface,
         "dictionary_form": dictionary_form or surface,
         "reading": reading,
         "function": function,
         "meaning": meaning,
+        "is_content_word": is_content_word,
     }
 
 
@@ -905,6 +906,42 @@ def test_annotate_text_ai_marks_wanikani_and_dictionary_and_ai_sources(monkeypat
 
     wk_word = next(s for s in row["segments"] if s.get("source") == "wanikani")
     assert wk_word["text"] == "大きい"
+
+
+def test_annotate_text_ai_particle_is_not_looked_up_even_with_dictionary_homograph(monkeypatch):
+    # Regressionstest für einen realen Bug: die Themen-Partikel "は" (gesprochen
+    # "wa") hat im JMdict-Wörterbuch zufällig auch einen Eintrag als eigen-
+    # ständiges Wort ("Flügel", von 羽) - eine reine Lesungs-Suche würde die
+    # Partikel fälschlich als dieses völlig unpassende Wort anzeigen. Gemini
+    # kennt die tatsächliche Funktion im Satz (is_content_word=False) und
+    # das darf nicht überschrieben werden, auch wenn das Wörterbuch einen
+    # (falschen) Treffer für dieselbe Lesung hat.
+    tokens = [
+        _ai_tok("ぼく", reading="ぼく", function="Subjekt", meaning="ich"),
+        _ai_tok("は", function="Themen-Partikel", is_content_word=False),
+        _ai_tok("学生", reading="がくせい", function="Prädikat", meaning="Schüler"),
+        _ai_tok("だ", function="Kopula", is_content_word=False),
+        _ai_tok("。", function="Satzzeichen", is_content_word=False),
+    ]
+    monkeypatch.setattr(gemini_client, "analyze_sentences", _fake_gemini(tokens))
+    monkeypatch.setattr(
+        dic, "_index_cache",
+        {"は": {"kanji": "羽", "meaning": "Flügel"}, "ぼく": {"kanji": "僕", "meaning": "ich"}},
+    )
+
+    rows = annotate_text_ai("ぼくは学生だ。", gemini_key="dummy", sample=True)
+    row = rows[0]
+    assert row["error"] is None
+    assert "".join(s["text"] for s in row["segments"]) == "ぼくは学生だ。"
+
+    # "は" darf NICHT als Dictionary-Wort "Flügel" auftauchen - weder als
+    # eigenes Segment noch versteckt in einem anderen Wort.
+    assert not any(s.get("text") == "は" and s.get("type") == "word" for s in row["segments"])
+    assert not any(s.get("meaning") == "Flügel" for s in row["segments"])
+    # "ぼく" (davor) darf trotzdem ganz normal als Dictionary-Wort erkannt werden.
+    boku = next(s for s in row["segments"] if s.get("text") == "ぼく")
+    assert boku["source"] == "dictionary"
+    assert boku["meaning"] == "ich"
 
 
 def test_annotate_text_ai_marks_sentence_as_error_when_gemini_returns_none(monkeypatch):

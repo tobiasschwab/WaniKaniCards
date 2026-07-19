@@ -89,8 +89,9 @@ _TOKENS_SCHEMA = {
             "reading": {"type": "STRING"},
             "function": {"type": "STRING"},
             "meaning": {"type": "STRING"},
+            "is_content_word": {"type": "BOOLEAN"},
         },
-        "required": ["surface", "dictionary_form", "reading", "function", "meaning"],
+        "required": ["surface", "dictionary_form", "reading", "function", "meaning", "is_content_word"],
     },
 }
 
@@ -106,9 +107,17 @@ Present-Wörterbuchform; bei Satzzeichen einfach dasselbe Zeichen), reading
 function (kurze grammatikalische Funktion/Bedeutung, auf Deutsch; bei
 Satzzeichen z. B. "Satzzeichen"), meaning (kurze deutsche Kern-Bedeutung der
 dictionary_form, wie in einem Wörterbuch, z. B. "gehen" oder "Schule"; bei
-reinen Partikeln/Satzzeichen leer lassen). Erkläre außerdem kurz die
-wichtigsten Grammatik-Besonderheiten des Satzes (grammar_notes, auf Deutsch)
-und gib eine natürliche, flüssige deutsche Übersetzung an (translation_de)."""
+reinen Partikeln/Satzzeichen leer lassen), is_content_word (true für echte
+Vokabeln zum Lernen: Nomen, Verben, Adjektive, Adverbien – false für
+Partikel (は/が/を/に/で/も/の/…), Kopula (です/だ), Hilfsverben, Konjunktionen
+und Satzzeichen. Wichtig: is_content_word richtet sich NACH DER FUNKTION
+IM SATZ, nicht nach der reinen Lautung – z. B. ist die Themen-Partikel "は"
+(gesprochen "wa") immer false, auch wenn dieselbe Kana-Folge in einem
+Wörterbuch zufällig als eigenständiges Wort (z. B. "Flügel") auftauchen
+könnte; das Wörterbuch würde hier die falsche, zum Satz nicht passende
+Bedeutung liefern). Erkläre außerdem kurz die wichtigsten
+Grammatik-Besonderheiten des Satzes (grammar_notes, auf Deutsch) und gib
+eine natürliche, flüssige deutsche Übersetzung an (translation_de)."""
 
 _BATCH_RESPONSE_SCHEMA = {
     "type": "OBJECT",
