@@ -160,7 +160,21 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    einmal angefragt (client- **und** serverseitig unter `.cache/gemini_tts/`
    gecacht) – erneutes Abspielen oder ein späteres Karte-Erstellen für
    denselben Satz braucht keinen zweiten Request. Aktuell auf den KI-Modus
-   begrenzt (nicht in „Aus Text" oder „Frei erstellen").
+   begrenzt (nicht in „Aus Text" oder „Frei erstellen"). **„▶ Alle vorlesen"**
+   spielt alle Sätze nacheinander ab (überspringt fehlgeschlagene Zeilen,
+   Button wird währenddessen zum Stopp-Schalter); das **Tempo**-Dropdown
+   (0,75×–1,5×) gilt für Einzel- und Sammel-Wiedergabe gleichermaßen.
+
+   **Effizienz-Funktionen:** **„+ Alle unbekannten hinzufügen"** übernimmt
+   alle noch unbekannten Vokabeln des ganzen Textes auf einen Klick (WaniKani-
+   Treffer gebündelt in einem Abgleich, Dictionary-/KI-Wörter nacheinander) –
+   bleibt ein bewusster Klick, spart aber bei langen Texten das einzelne
+   Anklicken jedes Worts. Schlägt die Analyse für einen einzelnen Satz fehl,
+   holt **„🔄 Erneut versuchen"** nur diesen einen Satz erneut, statt den
+   ganzen Text neu anzufragen. Das zuletzt analysierte Ergebnis (Text +
+   Tabelle) wird zusätzlich im Browser gemerkt (`localStorage`) – ein
+   versehentlicher Reload wirft die Analyse nicht weg und kostet keine
+   erneute Gemini-Anfrage.
 5. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder

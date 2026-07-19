@@ -343,6 +343,12 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .ki-speak-btn { border: 0; background: none; cursor: pointer; font-size: 15px; padding: 0 2px; flex: 0 0 auto; opacity: .7; }
 .ki-speak-btn:hover { opacity: 1; }
 .ki-speak-btn:disabled { opacity: .4; cursor: default; }
+.ki-retry-btn {
+  border: 1px solid var(--border); background: var(--bg-elev); border-radius: 999px; cursor: pointer;
+  font-size: 12px; padding: 3px 10px; margin-top: 6px; color: var(--text);
+}
+.ki-retry-btn:hover { background: var(--bg); }
+.ki-retry-btn:disabled { opacity: .5; cursor: default; }
 .ki-cell.ki-error { color: var(--accent-2); font-style: italic; }
 .ki-cell.ki-components { font-size: 13px; }
 .ki-cell.ki-pct { text-align: center; }

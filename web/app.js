@@ -322,6 +322,8 @@ function renderAnnotatedText(lines) {
 }
 
 // ---------- KI-Modus (Gemini: Satz-Tabelle mit Übersetzung/Grammatik) ----------
+const KI_STORAGE_KEY = "shiori_ki_state";
+
 async function doKiProcess() {
   const text = $("#kiInput").value;
   if (!text.trim()) return;
@@ -346,6 +348,7 @@ async function doKiProcess() {
   updateKiStats(r.stats);
   $("#kiInputWrap").classList.add("hidden");
   $("#kiResultWrap").classList.remove("hidden");
+  saveKiStateToStorage();
 }
 
 function backToKiEdit() {
@@ -357,6 +360,57 @@ function backToKiEdit() {
 function updateKiStats(stats) {
   if (!stats || !stats.total) { $("#kiStats").innerHTML = '<span class="muted">Keine WaniKani-/Dictionary-Wörter erkannt.</span>'; return; }
   $("#kiStats").innerHTML = `<span class="pct">${String(stats.percent).replace(".", ",")} %</span> bekannt (${stats.known} von ${stats.total} erkannten Wörtern)`;
+}
+
+// Nach einer clientseitigen Änderung (z. B. Retry für einen Satz) die
+// Gesamt-Statistik neu aus den aktuellen kiRows berechnen, statt eine alte
+// Server-Antwort mitzuschleppen.
+function _recomputeKiStats(rows) {
+  let known = 0, total = 0;
+  for (const row of rows) {
+    for (const s of row.segments) {
+      if (s.type !== "word") continue;
+      total++;
+      if (s.known) known++;
+    }
+  }
+  return { known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 };
+}
+
+// Zuletzt analysierten KI-Text + Ergebnis lokal merken (localStorage), damit
+// ein Reload/Tab-Wechsel nicht die komplette Analyse verwirft – sonst kostet
+// jedes versehentliche Neuladen der Seite eine erneute Gemini-Anfrage für
+// denselben Text. Rein clientseitig, keine Server-Persistenz nötig.
+// Segmente tragen für die Audio-Karten-Erstellung eine `_row`-Rückreferenz
+// auf ihre Zeile (siehe renderKiTable) – das macht die Struktur zirkulär und
+// würde JSON.stringify() zum Absturz bringen. Für die Persistenz eine
+// bereinigte Kopie ohne diese (und andere flüchtige `_`-Felder) bauen.
+function _kiRowsForStorage(rows) {
+  return rows.map((row) => ({
+    sentence: row.sentence,
+    translation_de: row.translation_de,
+    grammar_notes: row.grammar_notes,
+    error: row.error,
+    segments: (row.segments || []).map(({ _row, ...rest }) => rest),
+  }));
+}
+
+function saveKiStateToStorage() {
+  try {
+    localStorage.setItem(KI_STORAGE_KEY, JSON.stringify({ text: $("#kiInput").value, rows: _kiRowsForStorage(kiRows) }));
+  } catch (_) { /* z. B. privater Modus ohne localStorage - einfach nicht persistieren */ }
+}
+
+function restoreKiStateFromStorage() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(KI_STORAGE_KEY) || "null"); } catch (_) { saved = null; }
+  if (!saved || !Array.isArray(saved.rows) || !saved.rows.length) return;
+  $("#kiInput").value = saved.text || "";
+  kiRows = saved.rows;
+  renderKiTable(kiRows);
+  updateKiStats(_recomputeKiStats(kiRows));
+  $("#kiInputWrap").classList.add("hidden");
+  $("#kiResultWrap").classList.remove("hidden");
 }
 
 // Verschwommen/Aufgedeckt für Deutsch/Vokabeln/Bemerkung: standardmäßig
@@ -392,21 +446,135 @@ function fetchRowAudio(row) {
   return row._audioPromise;
 }
 
+function _kiPlaybackRate() {
+  return parseFloat($("#kiSpeed").value) || 1;
+}
+
 async function playRowAudio(row, btn) {
   btn.disabled = true;
   const orig = btn.textContent;
   btn.textContent = "…";
   try {
     const uri = await fetchRowAudio(row);
-    await new Audio(uri).play();
+    const audio = new Audio(uri);
+    audio.playbackRate = _kiPlaybackRate();
+    await audio.play();
   } catch (e) { toast(e.message, true); }
   finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+// "Alle vorlesen": spielt Satz für Satz nacheinander ab (überspringt
+// fehlgeschlagene Zeilen), Button wird währenddessen zum Stopp-Schalter.
+let kiPlayingAll = false;
+let kiPlayAllStop = false;
+
+function _playAudioAndWait(uri, isStopped) {
+  return new Promise((resolve) => {
+    const audio = new Audio(uri);
+    audio.playbackRate = _kiPlaybackRate();
+    let done = false;
+    const finish = () => { if (!done) { done = true; clearInterval(watcher); resolve(); } };
+    audio.addEventListener("ended", finish);
+    audio.addEventListener("error", finish);
+    audio.play().catch(finish);
+    const watcher = setInterval(() => { if (isStopped()) { audio.pause(); finish(); } }, 150);
+  });
+}
+
+async function toggleKiPlayAll() {
+  const btn = $("#btnKiPlayAll");
+  if (kiPlayingAll) { kiPlayAllStop = true; return; }
+  kiPlayingAll = true; kiPlayAllStop = false;
+  btn.textContent = "⏹ Stopp";
+  for (const row of kiRows) {
+    if (kiPlayAllStop) break;
+    if (row.error || !row.sentence) continue;
+    try {
+      const uri = await fetchRowAudio(row);
+      await _playAudioAndWait(uri, () => kiPlayAllStop);
+    } catch (_) { /* diesen Satz überspringen, mit dem nächsten weitermachen */ }
+  }
+  kiPlayingAll = false;
+  btn.textContent = "▶ Alle vorlesen";
+}
+
+// Einen einzelnen gescheiterten Satz erneut anfragen, statt den ganzen Text
+// neu zu analysieren (spart Zeit/Kosten für bereits erfolgreich analysierte
+// Sätze).
+async function retryKiRow(row, idx, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = "…";
+  try {
+    const r = await api("/api/text-annotate-ai", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: row.sentence, sample: isSample() }),
+      signal: AbortSignal.timeout(60000),
+    });
+    const newRow = (r.rows || [])[0];
+    if (newRow) {
+      kiRows[idx] = newRow;
+      renderKiTable(kiRows);
+      updateKiStats(_recomputeKiStats(kiRows));
+      saveKiStateToStorage();
+    }
+  } catch (e) {
+    toast(e.message, true);
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+// "Alle unbekannten hinzufügen": bewusster Sammel-Klick statt automatischem
+// Hinzufügen aller Wörter – WaniKani-Treffer werden gebündelt in einem
+// resolve()-Aufruf abgeglichen, Dictionary-/KI-Wörter einzeln nacheinander
+// (nicht parallel, um DeepL/den Server nicht mit Anfragen zu fluten).
+async function addAllUnknownFromKi() {
+  if (!kiRows.length) return;
+  activeWordMode = "ki";
+  const allWords = kiRows.flatMap((row) => row.segments.filter((s) => s.type === "word"));
+  const unknown = allWords.filter((s) => !s.known);
+  if (!unknown.length) { toast("Keine unbekannten Wörter gefunden."); return; }
+
+  const btn = $("#btnKiAddAllUnknown");
+  btn.disabled = true;
+  let added = 0;
+  try {
+    const wkWords = unknown.filter((s) => s.source === "wanikani");
+    if (wkWords.length) {
+      const ids = [...new Set(wkWords.map((s) => s.id))];
+      const comp = await resolve({ mode: "compose", subject_ids: ids });
+      if (comp) {
+        for (const s of wkWords) {
+          if (s.kind === "Vocab" && s.sentence) sentenceOverrides[String(s.id)] = { ja: s.sentence, en: null };
+        }
+        appendComposition(comp, `${ids.length} Wörter`);
+        added += ids.length;
+      }
+    }
+    for (const seg of unknown) {
+      if (seg.source === "wanikani" || seg.ready) continue;
+      try {
+        const audioUrl = await _rowAudioForCard(seg);
+        const body = seg.source === "ai"
+          ? { word: seg.lemma || seg.text, source: "ai", meaning: seg.meaning, reading: seg.reading, sentence: seg.sentence, sentence_audio_url: audioUrl }
+          : { word: seg.lemma || seg.text, sentence: seg.sentence, sentence_audio_url: audioUrl };
+        const card = await api("/api/kanacards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        setSegReady(seg, true);
+        appendComposition([card], _wpLabel(seg));
+        added++;
+      } catch (_) { /* einzelnes Wort überspringen, Rest weiter hinzufügen */ }
+    }
+  } finally {
+    btn.disabled = false;
+  }
+  saveKiStateToStorage();
+  toast(added ? `${added} Wörter zur Tabelle hinzugefügt` : "Nichts hinzugefügt");
 }
 
 function renderKiTable(rows) {
   const wrap = $("#kiTable");
   wrap.innerHTML = "";
-  for (const row of rows) {
+  rows.forEach((row, idx) => {
     const tr = document.createElement("div");
     tr.className = "ki-row";
     const jpCell = document.createElement("div"); jpCell.className = "ki-cell ki-sentence";
@@ -418,10 +586,14 @@ function renderKiTable(rows) {
     jpCell.append(jpText, speakBtn);
     if (row.error) {
       const errCell = document.createElement("div"); errCell.className = "ki-cell ki-error"; errCell.dataset.label = "Fehler";
-      errCell.textContent = "⚠ " + row.error;
+      errCell.textContent = "⚠ " + row.error + " ";
+      const retryBtn = document.createElement("button");
+      retryBtn.type = "button"; retryBtn.className = "ki-retry-btn"; retryBtn.textContent = "🔄 Erneut versuchen";
+      retryBtn.addEventListener("click", () => retryKiRow(row, idx, retryBtn));
+      errCell.append(retryBtn);
       tr.append(jpCell, errCell);
       wrap.append(tr);
-      continue;
+      return;
     }
     const words = row.segments.filter((s) => s.type === "word");
     words.forEach((s) => { s._row = row; });
@@ -447,7 +619,7 @@ function renderKiTable(rows) {
 
     tr.append(jpCell, pctCell, deCell, vocabCell, remarkCell);
     wrap.append(tr);
-  }
+  });
 }
 
 // ---------- Wort-Popup (gemeinsam für Text- und KI-Modus) ----------
@@ -601,7 +773,7 @@ function applySegChange(seg, patch) {
     span.className = "word-token " + span._seg.status.replace(/_/g, "-");
   });
   const stats = { known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 };
-  if (isKi) updateKiStats(stats); else updateTextStats(stats);
+  if (isKi) { updateKiStats(stats); saveKiStateToStorage(); } else updateTextStats(stats);
 }
 
 async function toggleKnownFromPopup() {
@@ -1000,6 +1172,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnKiProcess").addEventListener("click", doKiProcess);
   $("#btnKiEdit").addEventListener("click", backToKiEdit);
   $("#btnKiBlurToggle").addEventListener("click", toggleKiBlur);
+  $("#btnKiAddAllUnknown").addEventListener("click", addAllUnknownFromKi);
+  $("#btnKiPlayAll").addEventListener("click", toggleKiPlayAll);
   // Einzelne verschwommene Zelle anklicken deckt NUR sie auf (capture-Phase,
   // damit ein Klick auf ein Vokabel-Token darin zuerst nur aufdeckt statt
   // gleichzeitig auch das Hinzufügen-Popup zu öffnen).
@@ -1035,4 +1209,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadSettings().catch(() => {});
   loadHistory();
+  restoreKiStateFromStorage();
 });

@@ -243,6 +243,19 @@
             <button id="btnKiBlurToggle" class="btn small" title="Deutsch/Vokabeln/Bemerkung ein-/ausblenden">🙈 Verschwommen</button>
             <button id="btnComposeClear3" class="btn small">Tabelle leeren</button>
           </div>
+          <div class="text-result-head">
+            <button id="btnKiAddAllUnknown" class="btn small">+ Alle unbekannten hinzufügen</button>
+            <button id="btnKiPlayAll" class="btn small">▶ Alle vorlesen</button>
+            <label class="field inline" style="gap:6px">
+              <span class="label" style="margin:0">Tempo</span>
+              <select id="kiSpeed" class="select" style="width:auto">
+                <option value="0.75">0,75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.25">1,25×</option>
+                <option value="1.5">1,5×</option>
+              </select>
+            </label>
+          </div>
           <div class="ki-table" id="kiTableWrap">
             <div class="ki-row ki-head">
               <div class="ki-cell">Japanisch</div>
@@ -253,7 +266,7 @@
             </div>
             <div id="kiTable"></div>
           </div>
-          <p class="hint">Deutsch/Vokabeln/Bemerkung sind zunächst verschwommen – einzelne Zelle anklicken zum Aufdecken, oder oben „🙈 Verschwommen" umschalten. Vokabel anklicken (wenn aufgedeckt): über WaniKani hinzufügen (falls vorhanden) oder KI-Definition als Karte anlegen.</p>
+          <p class="hint">Deutsch/Vokabeln/Bemerkung sind zunächst verschwommen – einzelne Zelle anklicken zum Aufdecken, oder oben „🙈 Verschwommen" umschalten. Vokabel anklicken (wenn aufgedeckt): über WaniKani hinzufügen (falls vorhanden) oder KI-Definition als Karte anlegen. „+ Alle unbekannten hinzufügen" übernimmt alle noch unbekannten Vokabeln des Textes auf einmal. Bei einem fehlgeschlagenen Satz nur diesen per „🔄 Erneut versuchen" neu anfragen, statt den ganzen Text.</p>
         </div>
       </div>
 
