@@ -220,19 +220,19 @@ def test_api_text_annotate_ready_true_when_dictionary_card_already_created(tmp_p
     assert word2["known"] is True
 
 
-def test_api_text_annotate_use_gemini_without_key_returns_error(tmp_path, monkeypatch):
+def test_api_text_annotate_ai_without_key_returns_error(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
     monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
     (tmp_path / "jobs").mkdir()
     client = webapp.app.test_client()
 
-    r = client.post("/api/text-annotate", json={"text": "大きい山です。", "sample": True, "use_gemini": True})
+    r = client.post("/api/text-annotate-ai", json={"text": "大きい山です。", "sample": True})
     assert r.status_code == 400
     assert "Gemini" in r.get_json()["error"]
 
 
-def test_api_text_annotate_use_gemini_passes_settings_key_and_model(tmp_path, monkeypatch):
+def test_api_text_annotate_ai_passes_settings_key_and_model(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
     monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
@@ -242,21 +242,21 @@ def test_api_text_annotate_use_gemini_passes_settings_key_and_model(tmp_path, mo
 
     seen = {}
 
-    def fake_annotate_text(text, *, use_cache=True, sample=False, gemini_key=None, gemini_model=None):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False):
         seen["gemini_key"] = gemini_key
         seen["gemini_model"] = gemini_model
-        return [[]]
+        return []
 
     import kanji_cards as kc
-    monkeypatch.setattr(kc, "annotate_text", fake_annotate_text)
+    monkeypatch.setattr(kc, "annotate_text_ai", fake_annotate_text_ai)
 
-    r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
+    r = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
     assert r.status_code == 200
     assert seen["gemini_key"] == "mykey"
     assert seen["gemini_model"] == "gemini-pro-latest"
 
 
-def test_api_text_annotate_trusts_any_stored_gemini_model_name(tmp_path, monkeypatch):
+def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(tmp_path, monkeypatch):
     # Modelle werden dynamisch bei Google abgefragt (nicht mehr hart codiert) ->
     # jeder gespeicherte "gemini-*"-Name wird 1:1 durchgereicht, auch wenn er
     # nicht in der kleinen AVAILABLE_MODELS-Fallback-Liste steht.
@@ -269,41 +269,58 @@ def test_api_text_annotate_trusts_any_stored_gemini_model_name(tmp_path, monkeyp
 
     seen = {}
 
-    def fake_annotate_text(text, *, use_cache=True, sample=False, gemini_key=None, gemini_model=None):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False):
         seen["gemini_model"] = gemini_model
-        return [[]]
+        return []
 
     import kanji_cards as kc
-    monkeypatch.setattr(kc, "annotate_text", fake_annotate_text)
+    monkeypatch.setattr(kc, "annotate_text_ai", fake_annotate_text_ai)
 
-    r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
+    r = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
     assert r.status_code == 200
     assert seen["gemini_model"] == "gemini-3-pro-preview"
 
 
-def test_api_text_annotate_gemini_grammar_only_word_excluded_from_stats(tmp_path, monkeypatch):
+def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
     monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
     (tmp_path / "jobs").mkdir()
+    (tmp_path / "kanacards").mkdir()
     client = webapp.app.test_client()
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    def fake_annotate_text(text, *, use_cache=True, sample=False, gemini_key=None, gemini_model=None):
-        return [[
-            {"type": "word", "source": "gemini", "text": "が", "lemma": "が", "sentence": "x",
-             "id": None, "kind": "Grammatik", "meaning": "Partikel", "level": None},
-        ]]
-
     import kanji_cards as kc
-    monkeypatch.setattr(kc, "annotate_text", fake_annotate_text)
 
-    r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False):
+        return [{
+            "sentence": "x", "translation_de": "Übersetzung", "grammar_notes": "Notiz", "error": None,
+            "segments": [
+                {"type": "word", "source": "ai", "text": "急に", "lemma": "急に", "sentence": "x",
+                 "id": kc.ai_kana_card_id("急に"), "kind": "KI", "meaning": "plötzlich",
+                 "reading": "きゅうに", "level": None},
+            ],
+        }]
+
+    monkeypatch.setattr(kc, "annotate_text_ai", fake_annotate_text_ai)
+
+    r = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
     data = r.get_json()
-    seg = data["lines"][0][0]
-    assert seg["status"] == "info"
-    assert seg["known"] is False
-    assert data["stats"]["total"] == 0  # zählt nicht mit (keine Vokabel, nur Grammatik-Info)
+    row = data["rows"][0]
+    assert row["translation_de"] == "Übersetzung"
+    assert row["grammar_notes"] == "Notiz"
+    seg = row["segments"][0]
+    assert seg["status"] == "unknown"
+    assert seg["ready"] is False
+    assert data["stats"]["total"] == 1
+
+    # Karte manuell anlegen -> beim nächsten Aufruf "ready"
+    client.post("/api/kanacards", json={"word": "急に", "source": "ai", "meaning": "plötzlich", "reading": "きゅうに"})
+    r2 = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
+    seg2 = r2.get_json()["rows"][0]["segments"][0]
+    assert seg2["ready"] is True
+    assert seg2["status"] == "known"
 
 
 def test_api_settings_get_set_gemini_key_and_model(tmp_path, monkeypatch):

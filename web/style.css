@@ -325,17 +325,38 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .word-token { cursor: pointer; border-radius: 4px; padding: 0 1px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 .word-token.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-token.known { color: var(--ok); text-decoration-color: var(--ok); }
-.word-token.info { color: var(--accent); text-decoration-color: var(--accent); }
 .word-token:hover { background: rgba(109,59,245,.1); }
 .word-token.known:hover { background: rgba(22,163,74,.1); }
 .word-token.unknown:hover { background: rgba(0,180,216,.1); }
-.word-token.info:hover { background: rgba(109,59,245,.1); }
 .word-legend { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 .word-legend.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-legend.known { color: var(--ok); text-decoration-color: var(--ok); }
-.word-legend.info { color: var(--accent); text-decoration-color: var(--accent); }
-.sentence-info-btn { border: 0; background: none; cursor: pointer; color: var(--accent); font-size: 13px; padding: 0 2px; vertical-align: super; }
-.sentence-info-btn:hover { text-decoration: underline; }
+
+/* KI-Modus: Tabelle Japanisch / Bekannt / Deutsch / Vokabeln / Bemerkung */
+.ki-table { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); overflow: hidden; }
+.ki-row { display: grid; grid-template-columns: 1.8fr .7fr 1.3fr 1.3fr 1.3fr; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.ki-row:last-child { border-bottom: 0; }
+.ki-row.ki-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--muted); background: var(--bg-elev); }
+.ki-col-pct { text-align: center; }
+.ki-cell { font-size: 14px; line-height: 1.7; }
+.ki-cell.ki-sentence { font-size: 16px; }
+.ki-cell.ki-error { color: var(--accent-2); font-style: italic; }
+.ki-cell.ki-components { font-size: 13px; }
+.ki-cell.ki-pct { text-align: center; }
+.ki-pct-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  background: hsla(var(--pct-hue), 70%, 45%, .18); color: hsl(var(--pct-hue), 75%, 32%);
+}
+@media (prefers-color-scheme: dark) {
+  .ki-pct-badge { background: hsla(var(--pct-hue), 70%, 55%, .22); color: hsl(var(--pct-hue), 85%, 74%); }
+}
+.ki-cell.ki-blur { filter: blur(4px); cursor: pointer; transition: filter .15s; }
+.ki-cell.ki-blur:hover { filter: blur(2px); }
+@media (max-width: 720px) {
+  .ki-row { grid-template-columns: 1fr; }
+  .ki-row.ki-head { display: none; }
+  .ki-cell:not(:first-child)::before { content: attr(data-label) ": "; font-weight: 600; color: var(--muted); }
+}
 
 /* Wort-Popup */
 .word-popup {

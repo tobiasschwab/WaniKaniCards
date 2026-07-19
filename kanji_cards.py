@@ -180,10 +180,12 @@ class KanaCard:
 
     word: str = ""                          # Hiragana/Katakana-Schreibweise (Vorderseite)
     kanji_hint: str | None = None           # Kanji-Schreibweise laut JMdict, nur als Hinweis
-    meaning: str = ""                       # Kern-Bedeutung (JMdict, Deutsch) – kurz, für den Titel
+    reading: str | None = None              # Lesung (nur KI-Quelle: word ist dann die Grundform mit Kanji)
+    meaning: str = ""                       # Kern-Bedeutung (JMdict bzw. Gemini, Deutsch) – kurz, für den Titel
     meaning_extra: str | None = None        # weitere Glossen/Nutzungshinweise, klein als Zusatz
     sentence_ja: str | None = None          # Satz aus dem Text-Modus, in dem das Wort vorkam
     sentence_translation: str | None = None  # DeepL-Übersetzung des Satzes (optional)
+    source: str = "dictionary"              # "dictionary" (JMdict) oder "ai" (Gemini-eigene Definition)
     tags: list[str] = field(default_factory=list)
     # ID der Karte in kanacards/ (Hash des Worts) – für stabile Anki-IDs.
     card_id: str | None = None
@@ -796,6 +798,13 @@ def kana_card_id(word: str) -> str:
     return "kana_" + hashlib.sha1(word.encode("utf-8")).hexdigest()[:16]
 
 
+def ai_kana_card_id(word: str) -> str:
+    """Stabile ID für ein per KI-Modus gefundenes Wort ohne WaniKani-/JMdict-
+    Treffer – eigener ID-Namensraum (Präfix `aikana_`), damit eine spätere
+    echte Dictionary-Karte für dasselbe Wort nicht kollidiert."""
+    return "aikana_" + hashlib.sha1(("ai:" + word).encode("utf-8")).hexdigest()[:16]
+
+
 def build_kana_card(
     word: str,
     sentence: str | None = None,
@@ -828,16 +837,48 @@ def build_kana_card(
     return card
 
 
+def build_ai_kana_card(
+    word: str,
+    *,
+    meaning: str,
+    reading: str | None = None,
+    sentence: str | None = None,
+    deepl_key: str | None = None,
+    translate_fn: "callable | None" = None,
+) -> KanaCard:
+    """Karte für ein im KI-Modus gefundenes Wort ohne WaniKani-/JMdict-Treffer,
+    dessen Bedeutung stattdessen von Gemini selbst stammt (siehe
+    `annotate_text_ai()`). Anders als `build_kana_card()` gibt es hier keinen
+    "nicht gefunden"-Fall: der Nutzer klickt diese Karte bewusst manuell an,
+    es wird nie automatisch für alle KI-erkannten Wörter eine Karte erzeugt.
+    """
+    card = KanaCard(
+        word=word,
+        reading=(reading or "").strip() or None,
+        meaning=meaning.strip(),
+        source="ai",
+        sentence_ja=sentence,
+        tags=["KI"],
+        card_id=ai_kana_card_id(word),
+    )
+    if sentence and deepl_key:
+        fn = translate_fn or dictionary.translate_sentence
+        card.sentence_translation = fn(sentence, deepl_key)
+    return card
+
+
 def build_kana_card_from_dict(d: dict[str, Any]) -> KanaCard:
     """Bereits erstellte/gespeicherte KanaCard (kanacards/) wieder aufbauen."""
     tags = [str(t).strip() for t in (d.get("tags") or []) if str(t).strip()] or ["Dictionary"]
     return KanaCard(
         word=str(d.get("word") or ""),
         kanji_hint=d.get("kanji_hint"),
+        reading=d.get("reading"),
         meaning=str(d.get("meaning") or ""),
         meaning_extra=d.get("meaning_extra"),
         sentence_ja=d.get("sentence_ja"),
         sentence_translation=d.get("sentence_translation"),
+        source=str(d.get("source") or "dictionary"),
         tags=tags,
         card_id=str(d["id"]) if d.get("id") else None,
     )
@@ -1368,8 +1409,8 @@ def _is_kana_only(text: str) -> bool:
 
 
 def _reconcile_gemini_tokens(
-    gtoks: list[tuple[str, str, str]], original_text: str
-) -> list[tuple[str, str, str]] | None:
+    gtoks: list[tuple[str, ...]], original_text: str
+) -> list[tuple[str, ...]] | None:
     """Prüfen, ob Gemini-Tokens zum Original-Satz passen – bei Bedarf um
     fehlende Satzzeichen am Ende ergänzen, statt strikt auf Zeichengleichheit
     zu bestehen.
@@ -1383,14 +1424,20 @@ def _reconcile_gemini_tokens(
     tionsloses Token angehängt (rendert als normaler Text). Fehlt mehr als
     das – oder käme etwas anderes durcheinander – gilt die Rekonstruktion als
     gescheitert (`None`), der Aufrufer fällt dann auf Janome zurück.
+
+    Tupel-Form ist generisch (erstes Element ist immer `surface`) – der
+    Text-Modus nutzt 3er-Tupel (surface, lemma, function), der KI-Modus
+    5er-Tupel (surface, lemma, reading, function, meaning); das angehängte
+    Lückenfüller-Tupel bekommt entsprechend viele leere Zusatzfelder.
     """
-    reconstructed = "".join(s for s, _, _ in gtoks)
+    reconstructed = "".join(t[0] for t in gtoks)
     if reconstructed == original_text:
         return gtoks
-    if original_text.startswith(reconstructed):
+    if gtoks and original_text.startswith(reconstructed):
         gap = original_text[len(reconstructed):]
         if gap and not re.search(r"\w", gap, flags=re.UNICODE):
-            return [*gtoks, (gap, gap, "")]
+            width = len(gtoks[0])
+            return [*gtoks, (gap, gap) + ("",) * max(width - 2, 0)]
     return None
 
 
@@ -1399,11 +1446,12 @@ def annotate_text(
     *,
     use_cache: bool = True,
     sample: bool = False,
-    gemini_key: str | None = None,
-    gemini_model: str = gemini_client.DEFAULT_MODEL,
 ) -> list[list[dict[str, Any]]]:
     """Text zeilenweise in Anzeige-Segmente zerlegen (für die schreibgeschützte
-    Textansicht im Text-Modus).
+    Textansicht im „Aus Text"-Modus): reine Janome-Lemmatisierung + WaniKani-
+    Abgleich, optional mit JMdict-Fallback für kanafreie Wörter. Für eine
+    KI-gestützte Analyse (Satz-Tabelle, Übersetzung, Grammatik) siehe
+    `annotate_text_ai()`.
 
     Jede Zeile wird zu einer Liste von Segmenten:
     - `{"type": "text", "text": …}` – kein Treffer (Partikel, Satzzeichen,
@@ -1420,125 +1468,38 @@ def annotate_text(
       Wörter also nie (typisch für vereinfachte Lesetexte, die bewusst
       Hiragana statt Kanji verwenden). Fallback über JMdict (siehe
       `dictionary.py`), damit auch diese Wörter lernbar werden.
-    - `{"type": "word", "source": "gemini", "id": None, "kind": "Grammatik",
-      "meaning": grammatikalische Funktion, …}` – nur wenn `gemini_key`
-      gesetzt ist: Wörter/Partikel, die weder WaniKani noch JMdict kennen
-      (typischerweise Partikel oder Grammatikformen), aber die Gemini
-      kontextuell erklären kann. Rein informativ (`id` ist `None`), keine
-      Karte erzeugbar – zählt auch nicht in die Bekannt/Unbekannt-Statistik.
-    - `{"type": "sentence-info", "text": "", "sentence", "grammar_notes",
-      "translation_de"}` – einmal pro von Gemini erfolgreich analysiertem
-      Satz, trägt keinen sichtbaren Text (Frontend zeigt stattdessen ein
-      "ⓘ"-Symbol mit Grammatik-Erklärung + deutscher Übersetzung).
 
     Reihung der Segmente pro Zeile ist so, dass `"".join(s["text"] für alle
     Segmente)` wieder exakt die Original-Zeile ergibt.
-
-    **Gemini-Fallback auf Janome:** Ist `gemini_key` gesetzt, wird jeder Satz
-    zunächst über `gemini_client.analyze_sentence()` analysiert. Das Ergebnis
-    wird nur übernommen, wenn Gemini antwortet UND seine Tokens exakt densel-
-    ben Text ergeben wie die Janome-Tokens, die sie ersetzen (Wort-für-Wort-
-    Rekonstruktion geprüft) – sonst (kein Key, Netzwerkfehler, Quota, kaputte
-    Antwort, abweichende Rekonstruktion) bleibt für genau diesen Satz die
-    Janome-Tokenisierung unverändert bestehen. Kein harter Abbruch für den
-    gesamten Text, nur weil ein einzelner Satz/Request scheitert.
     """
     tokenizer = _get_tokenizer()
     lines = text.split("\n")
 
-    # Erste Runde: pro Zeile Janome-Tokens zu Satz-Gruppen bündeln (noch ohne
-    # Gemini – das passiert erst danach, gebündelt und parallel, siehe unten).
-    line_groups: list[list[dict[str, Any]]] = []
-
+    # Pro Zeile: Janome-Tokens den Sätzen zuordnen (für die Satzübersetzung/
+    # das "eigener Beispielsatz"-Override beim Karte-Erstellen im Popup).
+    line_entries: list[list[tuple[str, str, str]]] = []
+    all_lemmas: dict[str, None] = {}
     for line in lines:
         sentences = _split_sentences(line)
         toks = list(tokenizer.tokenize(line)) if line.strip() else []
 
-        groups: list[dict[str, Any]] = []
+        entries: list[tuple[str, str, str]] = []
         cur_sentence = sentences[0] if sentences else line
-        cur_entries: list[tuple[str, str]] = []
         sent_idx = 0
         consumed = 0
         for tok in toks:
             surface = tok.surface
             lemma = (tok.base_form or surface or "").strip()
-            cur_entries.append((surface, lemma))
+            entries.append((surface, lemma, cur_sentence))
             if sentences:
                 consumed += len(surface)
                 if consumed >= len(sentences[sent_idx]) and sent_idx < len(sentences) - 1:
-                    groups.append({"sentence": cur_sentence, "entries": cur_entries})
                     sent_idx += 1
                     consumed = 0
                     cur_sentence = sentences[sent_idx]
-                    cur_entries = []
-        if cur_entries:
-            groups.append({"sentence": cur_sentence, "entries": cur_entries})
-        line_groups.append(groups)
-
-    # Alle eindeutigen Sätze in einem Rutsch (möglichst ein einziger Batch-
-    # Request statt einem Request pro Satz) an Gemini schicken – bei einem
-    # Text mit z. B. 19 Sätzen sonst 19 Einzel-Requests, die sofort in eine
-    # HTTP-429-Kaskade laufen (siehe Session-Notizen). Jeder eindeutige Satz
-    # wird nur einmal angefragt, unabhängig davon, wie oft er im Text vorkommt.
-    gemini_cache: dict[str, dict[str, Any] | None] = {}
-    if gemini_key:
-        unique_sentences = list(dict.fromkeys(
-            g["sentence"] for groups in line_groups for g in groups if g["sentence"].strip()
-        ))
-        if unique_sentences:
-            logger.info(
-                "Gemini-Analyse: %d eindeutige(r) Satz/Sätze über %s", len(unique_sentences), gemini_model,
-            )
-            try:
-                gemini_cache = gemini_client.analyze_sentences(
-                    unique_sentences, gemini_key, model=gemini_model, use_cache=use_cache,
-                )
-            except Exception:  # nie hart abbrechen – alle Sätze fallen auf Janome zurück
-                logger.exception("Gemini-Analyse fehlgeschlagen, Fallback auf Janome für den ganzen Text.")
-                gemini_cache = {}
-
-    # Zweite Runde: Gemini-Ergebnisse (falls vorhanden) in die Satz-Gruppen
-    # übernehmen – nur wenn die Tokens exakt zum Original-Text rekonstruieren
-    # (Fallback-Garantie), dabei alle vorkommenden Grundformen (Janome-Lemma
-    # bzw. Gemini-`dictionary_form`) für eine gebündelte WK-Anfrage sammeln.
-    all_lemmas: dict[str, None] = {}
-    for groups in line_groups:
-        for g in groups:
-            original_text = "".join(s for s, _ in g["entries"])
-            g["source"] = "janome"
-            g["grammar_notes"] = None
-            g["translation_de"] = None
-
-            result = gemini_cache.get(g["sentence"])
-            if result:
-                gtoks = [
-                    (
-                        t.get("surface") or "",
-                        (t.get("dictionary_form") or t.get("surface") or "").strip(),
-                        t.get("function") or "",
-                    )
-                    for t in result.get("tokens", [])
-                    if t.get("surface")
-                ]
-                reconciled = _reconcile_gemini_tokens(gtoks, original_text)
-                if reconciled is not None:
-                    g["entries"] = [(s, l) for s, l, _ in reconciled]
-                    g["functions"] = [f for _, _, f in reconciled]
-                    g["source"] = "gemini"
-                    g["grammar_notes"] = result.get("grammar_notes") or None
-                    g["translation_de"] = result.get("translation_de") or None
-                else:
-                    logger.info(
-                        "Gemini-Tokens rekonstruieren den Satz nicht exakt, Fallback auf Janome: %r",
-                        g["sentence"][:40],
-                    )
-
-            if "functions" not in g:
-                g["functions"] = [None] * len(g["entries"])
-
-            for _surface, lemma in g["entries"]:
-                if lemma and lemma != "*":
-                    all_lemmas.setdefault(lemma, None)
+            if lemma and lemma != "*":
+                all_lemmas.setdefault(lemma, None)
+        line_entries.append(entries)
 
     # Grundformen gebündelt gegen WaniKani abgleichen (slugs-Filter, wie bei
     # den anderen Modi) – auch Nicht-Treffer sind völlig normal (Partikel etc.).
@@ -1565,96 +1526,246 @@ def annotate_text(
         best_by_lemma[chars] = subs[0]
 
     lines_out: list[list[dict[str, Any]]] = []
-    for groups in line_groups:
+    for entries in line_entries:
         segments: list[dict[str, Any]] = []
         buf = ""
-        for g in groups:
-            sentence = g["sentence"]
-            for (surface, lemma), function in zip(g["entries"], g["functions"]):
-                match = best_by_lemma.get(lemma)
-                if match:
-                    if buf:
-                        segments.append({"type": "text", "text": buf})
-                        buf = ""
-                    desc = _subject_descriptor(match)
-                    segments.append(
-                        {
-                            "type": "word",
-                            "source": "wanikani",
-                            "text": surface,
-                            "lemma": lemma,
-                            "sentence": sentence,
-                            "id": desc["id"],
-                            "object": desc["object"],
-                            "kind": desc["kind"],
-                            "meaning": desc["meaning"],
-                            "level": desc["level"],
-                        }
-                    )
-                    continue
-                if _is_kana_only(surface):
-                    entry = dictionary.lookup_reading(lemma)
-                    if entry and entry.get("meaning"):
-                        if buf:
-                            segments.append({"type": "text", "text": buf})
-                            buf = ""
-                        segments.append(
-                            {
-                                "type": "word",
-                                "source": "dictionary",
-                                "text": surface,
-                                "lemma": lemma,
-                                "sentence": sentence,
-                                "id": kana_card_id(lemma),
-                                "kind": "Dict",
-                                "meaning": entry["meaning"],
-                                "meaning_extra": entry.get("meaning_extra"),
-                                "kanji_hint": entry.get("kanji"),
-                                "level": None,
-                            }
-                        )
-                        continue
-                if function and re.search(r"\w", surface, flags=re.UNICODE):
-                    # Weder WaniKani noch JMdict kennen das Wort/Partikel,
-                    # aber Gemini erklärt seine grammatikalische Funktion im
-                    # Kontext -> informativ anzeigen (keine Karte möglich).
-                    # Reine Satzzeichen (｡、！？ …) werden ausgeklammert – dafür
-                    # braucht es keine Grammatik-Erklärungs-Blase.
+        for surface, lemma, sentence in entries:
+            match = best_by_lemma.get(lemma)
+            if match:
+                if buf:
+                    segments.append({"type": "text", "text": buf})
+                    buf = ""
+                desc = _subject_descriptor(match)
+                segments.append(
+                    {
+                        "type": "word",
+                        "source": "wanikani",
+                        "text": surface,
+                        "lemma": lemma,
+                        "sentence": sentence,
+                        "id": desc["id"],
+                        "object": desc["object"],
+                        "kind": desc["kind"],
+                        "meaning": desc["meaning"],
+                        "level": desc["level"],
+                    }
+                )
+                continue
+            if _is_kana_only(surface):
+                entry = dictionary.lookup_reading(lemma)
+                if entry and entry.get("meaning"):
                     if buf:
                         segments.append({"type": "text", "text": buf})
                         buf = ""
                     segments.append(
                         {
                             "type": "word",
-                            "source": "gemini",
+                            "source": "dictionary",
                             "text": surface,
                             "lemma": lemma,
                             "sentence": sentence,
-                            "id": None,
-                            "kind": "Grammatik",
-                            "meaning": function,
+                            "id": kana_card_id(lemma),
+                            "kind": "Dict",
+                            "meaning": entry["meaning"],
+                            "meaning_extra": entry.get("meaning_extra"),
+                            "kanji_hint": entry.get("kanji"),
                             "level": None,
                         }
                     )
                     continue
-                buf += surface
-            if g["source"] == "gemini" and (g["grammar_notes"] or g["translation_de"]):
+            buf += surface
+        if buf:
+            segments.append({"type": "text", "text": buf})
+        lines_out.append(segments)
+    return lines_out
+
+
+def annotate_text_ai(
+    text: str,
+    *,
+    gemini_key: str,
+    gemini_model: str = gemini_client.DEFAULT_MODEL,
+    use_cache: bool = True,
+    sample: bool = False,
+) -> list[dict[str, Any]]:
+    """Text per Gemini satzweise analysieren – eigener „KI"-Modus (siehe
+    `annotate_text()` für den Gemini-freien „Aus Text"-Modus).
+
+    Anders als `annotate_text()` gibt es hier **keinen** Fallback auf Janome:
+    Das ist ein bewusst separater Modus, der genau die von Gemini geliefer-
+    ten Wortgrenzen/Grundformen/Lesungen/Bedeutungen zeigt. Schlägt Gemini für
+    einen Satz fehl (Netzwerk/Quota/kaputte Antwort) oder rekonstruieren seine
+    Tokens den Satz nicht (siehe `_reconcile_gemini_tokens`), bekommt genau
+    dieser Satz ein `"error"` statt Segmenten – kein harter Abbruch für den
+    restlichen Text.
+
+    Rückgabe: eine Liste von Zeilen `{"sentence", "translation_de",
+    "grammar_notes", "error", "segments"}`:
+    - `segments`: wie bei `annotate_text()`, plus `source: "ai"` für Wörter,
+      die weder WaniKani noch JMdict kennen, aber die Gemini selbst mit
+      Grundform/Lesung/Bedeutung liefert (`id` ist dabei eine stabile,
+      clientseitig nutzbare ID für „KI-Definition hinzufügen", KEINE echte
+      Karte – die entsteht erst, wenn der Nutzer manuell klickt).
+    """
+    sentences = [s for line in text.split("\n") for s in _split_sentences(line)]
+    unique_sentences = list(dict.fromkeys(s for s in sentences if s.strip()))
+
+    results: dict[str, dict[str, Any] | None] = {}
+    if unique_sentences:
+        logger.info(
+            "KI-Analyse: %d eindeutige(r) Satz/Sätze über %s", len(unique_sentences), gemini_model,
+        )
+        try:
+            results = gemini_client.analyze_sentences(
+                unique_sentences, gemini_key, model=gemini_model, use_cache=use_cache,
+            )
+        except Exception:  # nie hart abbrechen – jeder Satz bekommt stattdessen einen Fehler
+            logger.exception("KI-Analyse fehlgeschlagen.")
+            results = {}
+
+    # Alle Grundformen aus erfolgreich analysierten Sätzen gebündelt gegen
+    # WaniKani abgleichen (wie annotate_text) – dieselbe Chunk-Suche.
+    parsed_by_sentence: dict[str, list[tuple[str, str, str, str, str]] | None] = {}
+    all_lemmas: dict[str, None] = {}
+    for sentence in unique_sentences:
+        result = results.get(sentence)
+        if not result:
+            parsed_by_sentence[sentence] = None
+            continue
+        gtoks = [
+            (
+                t.get("surface") or "",
+                (t.get("dictionary_form") or t.get("surface") or "").strip(),
+                (t.get("reading") or "").strip(),
+                t.get("function") or "",
+                (t.get("meaning") or "").strip(),
+            )
+            for t in result.get("tokens", [])
+            if t.get("surface")
+        ]
+        reconciled = _reconcile_gemini_tokens(gtoks, sentence)
+        parsed_by_sentence[sentence] = reconciled
+        if reconciled is None:
+            logger.info("KI-Tokens rekonstruieren den Satz nicht exakt: %r", sentence[:40])
+            continue
+        for _surface, lemma, *_rest in reconciled:
+            if lemma and lemma != "*":
+                all_lemmas.setdefault(lemma, None)
+
+    hits_by_chars: dict[str, list[dict[str, Any]]] = {}
+    if all_lemmas:
+        if sample:
+            for s in _sample_registry().values():
+                chars = strip_markup(s.get("data", {}).get("characters"))
+                if chars in all_lemmas:
+                    hits_by_chars.setdefault(chars, []).append(s)
+        else:
+            client = _make_client(use_cache=use_cache)
+            lemma_list = list(all_lemmas)
+            for i in range(0, len(lemma_list), _TEXT_LOOKUP_CHUNK):
+                chunk = lemma_list[i : i + _TEXT_LOOKUP_CHUNK]
+                for s in client.search_subjects(",".join(chunk)):
+                    chars = strip_markup(s.get("data", {}).get("characters"))
+                    if chars:
+                        hits_by_chars.setdefault(chars, []).append(s)
+
+    best_by_lemma: dict[str, dict[str, Any]] = {}
+    for chars, subs in hits_by_chars.items():
+        subs.sort(key=lambda s: _ANNOTATE_KIND_PRIORITY.get(s.get("object"), 9))
+        best_by_lemma[chars] = subs[0]
+
+    rows: list[dict[str, Any]] = []
+    for sentence in sentences:
+        result = results.get(sentence)
+        reconciled = parsed_by_sentence.get(sentence)
+        row: dict[str, Any] = {
+            "sentence": sentence,
+            "translation_de": (result or {}).get("translation_de") or None,
+            "grammar_notes": (result or {}).get("grammar_notes") or None,
+            "error": None,
+            "segments": [],
+        }
+        if not result:
+            row["error"] = "KI-Analyse für diesen Satz fehlgeschlagen (Netzwerk/Quota)."
+            rows.append(row)
+            continue
+        if reconciled is None:
+            row["error"] = "KI-Wortgrenzen passen nicht exakt zum Original-Satz."
+            rows.append(row)
+            continue
+
+        segments: list[dict[str, Any]] = []
+        buf = ""
+        for surface, lemma, reading, function, meaning_ai in reconciled:
+            match = best_by_lemma.get(lemma)
+            if match:
+                if buf:
+                    segments.append({"type": "text", "text": buf})
+                    buf = ""
+                desc = _subject_descriptor(match)
+                segments.append(
+                    {
+                        "type": "word",
+                        "source": "wanikani",
+                        "text": surface,
+                        "lemma": lemma,
+                        "sentence": sentence,
+                        "id": desc["id"],
+                        "object": desc["object"],
+                        "kind": desc["kind"],
+                        "meaning": desc["meaning"],
+                        "level": desc["level"],
+                    }
+                )
+                continue
+            if _is_kana_only(surface):
+                entry = dictionary.lookup_reading(lemma)
+                if entry and entry.get("meaning"):
+                    if buf:
+                        segments.append({"type": "text", "text": buf})
+                        buf = ""
+                    segments.append(
+                        {
+                            "type": "word",
+                            "source": "dictionary",
+                            "text": surface,
+                            "lemma": lemma,
+                            "sentence": sentence,
+                            "id": kana_card_id(lemma),
+                            "kind": "Dict",
+                            "meaning": entry["meaning"],
+                            "meaning_extra": entry.get("meaning_extra"),
+                            "kanji_hint": entry.get("kanji"),
+                            "level": None,
+                        }
+                    )
+                    continue
+            if meaning_ai and re.search(r"\w", surface, flags=re.UNICODE):
                 if buf:
                     segments.append({"type": "text", "text": buf})
                     buf = ""
                 segments.append(
                     {
-                        "type": "sentence-info",
-                        "text": "",
+                        "type": "word",
+                        "source": "ai",
+                        "text": surface,
+                        "lemma": lemma,
                         "sentence": sentence,
-                        "grammar_notes": g["grammar_notes"],
-                        "translation_de": g["translation_de"],
+                        "id": ai_kana_card_id(lemma),
+                        "kind": "KI",
+                        "meaning": meaning_ai,
+                        "reading": reading or None,
+                        "function": function or None,
+                        "level": None,
                     }
                 )
+                continue
+            buf += surface
         if buf:
             segments.append({"type": "text", "text": buf})
-        lines_out.append(segments)
-    return lines_out
+        row["segments"] = segments
+        rows.append(row)
+    return rows
 
 
 def _normalize_sentence_overrides(

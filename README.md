@@ -55,9 +55,9 @@ Jede **Vorderseite** trägt oben rechts schlichte **Tags** (Typ + WaniKani-Level
 z. B. `KANJI` / `LV 1`); die Rückseite zeigt – sofern ein Token gesetzt ist –
 dezent unten rechts den **WaniKani-Benutzernamen**.
 
-## Vier Wege zu den Karten (Web)
+## Fünf Wege zu den Karten (Web)
 
-Die Moduswahl ist in zwei Gruppen sortiert: **„Karten erstellen"** (die vier
+Die Moduswahl ist in zwei Gruppen sortiert: **„Karten erstellen"** (die fünf
 Wege unten) und **„Wortschatz"** (die [Wortliste](#wortliste) – dort geht es
 ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
 
@@ -109,30 +109,47 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    |---|---|
    | Grün „bekannt" | manuell als bekannt markiert **oder** Karte/Export existiert bereits |
    | Blau „unbekannt" | weder markiert noch Karte/Export vorhanden |
-   | Violett „Grammatik-Info" | nur mit Gemini-Analyse (s. u.): Partikel/Grammatikform ohne WaniKani-/Dictionary-Treffer, aber von Gemini erklärt – rein informativ, keine Karte erzeugbar |
 
-   Details (Quelle WaniKani/Wörterbuch/Gemini, ob manuell markiert oder weil
-   eine Karte existiert) zeigt das Popup beim Anklicken des Worts.
+   Details (Quelle WaniKani/Wörterbuch, ob manuell markiert oder weil eine
+   Karte existiert) zeigt das Popup beim Anklicken des Worts.
 
    Für Dictionary-Wörter erzeugt das Popup statt „Zur Tabelle" den Button
    **„Dictionary-Karte erstellen"** – ein neuer, WaniKani-unabhängiger
    Kartentyp (siehe [Dictionary-Karten](#dictionary-karten)).
 
-   **Optional: Analyse per Gemini.** Der Button **„✨ Mit Gemini analysieren"**
-   (statt „Verarbeiten") schickt alle eindeutigen Sätze des Textes **in einem
-   Batch-Request** an Googles [Gemini-API](https://ai.google.dev/) (Key +
-   Modell in den Einstellungen hinterlegen – die Modell-Liste lässt sich dort
-   per 🔄 live von Google abrufen) und liefert bessere Wortgrenzen, die
-   grammatikalische Funktion jedes Worts/Partikels sowie – per **ⓘ**-Symbol
-   am Satzende – eine kurze Grammatik-Erklärung und eine natürliche deutsche
-   Übersetzung des ganzen Satzes. Kein automatischer Ersatz für
-   „Verarbeiten": ein expliziter Klick, da jeder Aufruf Kosten verursacht und
-   Satztexte an Google sendet. Schlägt Gemini für einen Satz fehl (Netzwerk-
-   fehler, Quota, Satz nicht in der Antwort wiedererkannt) oder passen seine
-   Wortgrenzen nicht exakt zum Original, bleibt für genau diesen Satz die
-   normale Janome-Analyse bestehen – nie ein harter Abbruch für den ganzen
-   Text.
-4. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
+   Dieser Modus nutzt **kein** Gemini – reine Janome+WaniKani-Analyse, ohne
+   API-Key, ohne Kosten. Für eine KI-gestützte Analyse mit Satzübersetzung
+   und Grammatik-Erklärung siehe den nächsten Punkt.
+4. **KI:** derselbe mehrzeilige Text, aber satzweise per
+   [Gemini-API](https://ai.google.dev/) analysiert (Key + Modell in den
+   Einstellungen hinterlegen – die Modell-Liste lässt sich dort per 🔄 live
+   von Google abrufen) statt nur lemmatisiert. Ergebnis ist eine Tabelle mit
+   einer Zeile pro Satz:
+
+   | Spalte | Inhalt |
+   |---|---|
+   | Japanisch | der Satz im Original, unverändert |
+   | Bekannt | Prozentsatz bekannter Vokabeln des Satzes, als Badge grün (100 %) bis rot (0 %) eingefärbt |
+   | Deutsch | natürliche deutsche Übersetzung des Satzes |
+   | Vokabeln | die Vokabeln des Satzes in der **Grundform** (Wörterbuchform), einzeln anklickbar |
+   | Bemerkung | kurze Grammatik-Erklärung (Besonderheiten, Redewendungen o. Ä.) |
+
+   Deutsch/Vokabeln/Bemerkung sind zum Selbsttest zunächst **verschwommen** –
+   einzelne Zelle anklicken deckt nur sie auf, „🙈 Verschwommen"/„👁 Sichtbar"
+   oben schaltet alle auf einmal um. Eine aufgedeckte Vokabel anklicken öffnet
+   dasselbe Wort-Popup wie im „Aus Text"-Modus, aus dem Beispiel im
+   Aufgabentext: 家 (in WaniKani vorhanden) oder 入りました → Grundform 入る
+   (ebenfalls in WaniKani) lassen sich direkt **„Über WaniKani hinzufügen"**.
+   Kennt weder WaniKani noch das JMdict-Wörterbuch die Grundform, bietet das
+   Popup stattdessen **„KI-Karte erstellen"** an – die kurze deutsche
+   Bedeutung stammt dann direkt von Gemini statt aus dem Wörterbuch (siehe
+   [Dictionary-Karten](#dictionary-karten), gleiche Karten-Infrastruktur, nur
+   mit `Quelle: KI (Gemini)` statt `Quelle: JMdict`). Es wird **nie
+   automatisch** für alle Wörter eine Karte erzeugt – nur ein bewusster Klick
+   legt eine an. Scheitert die Analyse für einen einzelnen Satz (Netzwerk,
+   Quota, Wortgrenzen passen nicht exakt zum Original), bekommt nur dieser
+   Satz eine Fehlermeldung statt den ganzen Text abzubrechen.
+5. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
    starten mit einem **Layout-Vorschlag** (Vorderseite: groß & zentriert;
@@ -549,34 +566,47 @@ levelig­en `kc.render_deck()`/`ae.export_deck()`-Funktionen unterstützen
 beliebig gemischte Card-Objektlisten per `isinstance`-Dispatch, das war schon
 vorher so angelegt.
 
-Jedes Wort im Text-Modus bekommt zwei rohe Signale vom Backend
-(`/api/text-annotate`): `manually_known` (aus `data/known.json`) und `ready`
-(WaniKani bereits exportiert bzw. Dictionary-Karte bereits erstellt) – daraus
-berechnet sowohl der Server (`status`: `known`/`unknown`, für die Erstanzeige)
-als auch das Frontend lokal (`applySegChange()` in `web/app.js`) denselben
-Status, ohne bei jedem Umschalten („bekannt markieren"/entfernen, Dictionary-
-Karte erstellen) einen kompletten Server-Roundtrip über `/api/text-annotate`
-zu brauchen. Wörter ohne WaniKani-/Dictionary-Treffer, die nur über Gemini
-erklärt werden (`source: "gemini"`), haben `id: null`, bekommen `status:
-"info"` und fließen nicht in die Bekannt/Unbekannt-Statistik ein.
+Jedes Wort in beiden Text-Modi bekommt zwei rohe Signale vom Backend
+(`/api/text-annotate` bzw. `/api/text-annotate-ai`): `manually_known` (aus
+`data/known.json`) und `ready` (WaniKani bereits exportiert bzw. Dictionary-/
+KI-Karte bereits erstellt) – daraus berechnet sowohl der Server (`status`:
+`known`/`unknown`, für die Erstanzeige) als auch das Frontend lokal
+(`applySegChange()` in `web/app.js`) denselben Status, ohne bei jedem
+Umschalten einen kompletten Server-Roundtrip zu brauchen.
 
-**Gemini-Analyse** (`gemini_client.py`, optional, unabhängig von WaniKani/
-Dictionary): ein REST-Call pro Satz gegen `generativelanguage.googleapis.com`
-(kein SDK, reines `requests` wie bei DeepL/GitHub) mit `responseSchema` für
-garantiert valides JSON (Tokens mit `dictionary_form` + grammatikalischer
-Funktion, `grammar_notes`, `translation_de`) statt Markdown-Tabellen-Parsing.
-Ergebnisse werden pro Satz unter `.cache/gemini/` gecacht (Schlüssel: Modell +
-Satztext). `annotate_text()` ersetzt eine Janome-Satzgruppe nur durch Gemini,
-wenn dessen Tokens zum Original-Text rekonstruieren – dabei bewusst **nicht**
-strikt zeichengleich: Gemini lässt das abschließende Satzzeichen (｡ 。 ! ?)
-trotz expliziter Prompt-Anweisung regelmäßig weg, eine rein strikte Prüfung
-hätte praktisch jeden normalen (auf 。 endenden) Satz verworfen und den
-Gemini-Pfad faktisch nie aktiviert. `_reconcile_gemini_tokens()` ergänzt
-einen fehlenden reinen Satzzeichen-Rest am Ende als eigenes Token; fehlt
-mehr als das (Wörter, Quota, Netzwerkfehler, kaputte Antwort), bleibt die
-Janome-Tokenisierung für genau diesen Satz unverändert (nie ein harter
-Abbruch für den gesamten Text). `dictionary_form` ersetzt dabei Janomes
-`base_form` als Schlüssel für den WaniKani-/JMdict-Abgleich.
+**Zwei getrennte Text-Endpunkte statt einem gemeinsamen mit Gemini-Schalter:**
+`kc.annotate_text()` ist reine Janome+WaniKani/JMdict-Lemmatisierung, ganz
+ohne Gemini (Modus „Aus Text"). `kc.annotate_text_ai()` ist ein eigenständiger
+KI-Modus: er zerlegt den Text in Sätze, lässt **jeden** Satz per Gemini
+analysieren (siehe unten) und liefert pro Satz eine Zeile `{"sentence",
+"translation_de", "grammar_notes", "error", "segments"}` – Grundlage für die
+Satz-Tabelle im Frontend (Spalten Japanisch/Bekannt/Deutsch/Vokabeln/
+Bemerkung). Anders als im alten, inzwischen entfernten kombinierten Modus gibt
+es hier **keinen** Fallback auf Janome: Scheitert Gemini für einen Satz
+(Netzwerk/Quota) oder passen die gelieferten Tokens nicht exakt zum
+Original-Satz, bekommt nur diese eine Zeile ein `"error"` statt Segmenten –
+kein harter Abbruch für den restlichen Text. Wörter ohne WaniKani-/JMdict-
+Treffer, für die Gemini selbst Grundform + Lesung + kurze Bedeutung liefert,
+bekommen `source: "ai"` und eine stabile ID (`kc.ai_kana_card_id()`) – eine
+echte Karte entsteht daraus aber erst, wenn der Nutzer im Wort-Popup bewusst
+auf „KI-Karte erstellen" klickt (siehe [Dictionary-Karten](#dictionary-karten)
+– `KanaCard` bekam dafür die neuen Felder `reading`/`source`, `source: "ai"`
+zeigt auf der Karte „Quelle: KI (Gemini)" statt „Quelle: JMdict (EDRDG)").
+
+**Gemini-Analyse** (`gemini_client.py`): ein REST-Call gegen
+`generativelanguage.googleapis.com` (kein SDK, reines `requests` wie bei
+DeepL/GitHub) mit `responseSchema` für garantiert valides JSON (Tokens mit
+`dictionary_form`, `reading`, grammatikalischer `function`, kurzer `meaning`)
+statt Markdown-Tabellen-Parsing. Ergebnisse werden pro Satz unter
+`.cache/gemini/` gecacht (Schlüssel: Modell + Satztext).
+`_reconcile_gemini_tokens()` prüft, ob Geminis Tokens zum Original-Satz
+rekonstruieren – dabei bewusst **nicht** strikt zeichengleich: Gemini lässt
+das abschließende Satzzeichen (｡ 。 ! ?) trotz expliziter Prompt-Anweisung
+regelmäßig weg, eine rein strikte Prüfung hätte praktisch jeden normalen (auf
+。 endenden) Satz verworfen. Die Funktion ergänzt einen fehlenden reinen
+Satzzeichen-Rest am Ende als eigenes Token und ist generisch für Tupel
+beliebiger Breite (3er-Tupel im alten Aus-Text-Kontext gibt es nicht mehr,
+der KI-Modus nutzt 5er-Tupel `(surface, lemma, reading, function, meaning)`).
 
 **Batch-Verarbeitung statt eines Requests pro Satz**: `analyze_sentences()`
 ist die zentrale Funktion – sie sammelt alle eindeutigen Sätze eines Textes,
@@ -585,14 +615,11 @@ ungecachten Sätze in Blöcken von `_BATCH_CHUNK_SIZE` (40) als **ein**
 Request an Gemini (`{"sentences": [...]}` rein, `{"sentences": [{sentence,
 tokens, grammar_notes, translation_de}, …]}` raus, per `responseSchema`
 erzwungen). `analyze_sentence()` (Singular) ist nur noch ein dünner Wrapper
-darüber. Das ersetzt die frühere Architektur mit einem Request pro Satz
-(mit begrenzter `ThreadPoolExecutor`-Parallelität): bei längeren Texten mit
-vielen Sätzen führte diese zu einer Kaskade paralleler Requests, die das
-Rate-Limit gemeinsam sofort ausschöpften (siehe 429-Handling unten) – ein
-einzelner Batch-Request pro Textverarbeitung vermeidet das strukturell,
-nicht nur durch besseres Backoff. Fehlt eine Übersetzung in Gemini's
-Antwort (Satz nicht wiedererkannt, Antwort unvollständig), fällt genau
-dieser Satz auf Janome zurück statt den ganzen Batch scheitern zu lassen.
+darüber. Das vermeidet bei Texten mit vielen Sätzen die Rate-Limit-Kaskade
+eines Requests pro Satz strukturell (siehe 429-Handling unten), nicht nur
+durch besseres Backoff. Fehlt eine Übersetzung in Gemini's Antwort (Satz
+nicht wiedererkannt, Antwort unvollständig), bekommt nur diese eine Satz-Zeile
+einen Fehler statt den ganzen Batch scheitern zu lassen.
 
 **Modellwahl**: `list_models()` fragt die verfügbaren Modelle live per
 `GET /v1beta/models` ab (gefiltert auf Text-Chat-fähige `gemini-*`-Modelle),
@@ -642,7 +669,8 @@ pytest
 
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 `paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`annotate_text`
-(Text-Modus, inkl. Wörterbuch- und Gemini-Fallback), `dictionary.py`
+(Aus-Text-Modus, inkl. Wörterbuch-Fallback) sowie `annotate_text_ai` (KI-Modus,
+Satz-Tabelle inkl. Fehlerfälle), `dictionary.py`
 (JMdict-Download/-Index, DeepL-Übersetzung), `gemini_client.py`
 (Satzanalyse, Caching, 429-Backoff, Fehlerfälle), `KanaCard`-Bau sowie das
 Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
@@ -660,8 +688,10 @@ von `scriptin/jmdict-simplified`) konnte in der Entwicklungsumgebung aus
 Netzwerk-Policy-Gründen noch nicht live getestet werden; der übrige
 Dictionary-Pfad (Index-Aufbau, Kartenerstellung, Anki-Export) wurde mit
 einem simulierten Index-Eintrag live durchgespielt und funktioniert. Der
-Gemini-Fallback auf Janome wurde live gegen die echte
+Gemini-Fehlerpfad wurde live gegen die echte
 `generativelanguage.googleapis.com`-API verifiziert (mit ungültigem Key:
-Request schlägt fehl, `annotate_text()` liefert unverändert das
-Janome-Ergebnis) – ein echter Gemini-Key lag in dieser Session nicht vor,
-die Analyse-Qualität selbst ist daher nur gegen Mocks getestet.
+Request schlägt fehl, betroffene Satz-Zeile bekommt `error` statt Segmenten).
+In einer späteren Session wurde mit einem echten, vom Nutzer bereitgestellten
+Gemini-Key auch der Erfolgsfall live getestet – dabei wurden zwei reale Bugs
+gefunden und behoben (deprecatete Modellnamen, siehe `DEFAULT_MODEL`; sowie
+die Tokens-Rekonstruktion, siehe `_reconcile_gemini_tokens()`).

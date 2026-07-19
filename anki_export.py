@@ -369,9 +369,10 @@ _KANA_BACK = """
 <hr id="answer">
 <div class="wk-back">
   <div class="wk-refhead"><span class="wk-ref small">{{Word}}</span>{{Meaning}}</div>
+  {{ReadingHtml}}
   {{KanjiHintHtml}}
   {{SentenceHtml}}
-  <div class="wk-doclink">Quelle: JMdict (EDRDG)</div>
+  {{DocLinkHtml}}
 </div>
 """.strip()
 
@@ -439,7 +440,10 @@ def _build_models(genanki: Any) -> dict[str, Any]:
             "Shiori – Dictionary",
             fields=[
                 {"name": n}
-                for n in ("Word", "Meaning", "KanjiHintHtml", "SentenceHtml", "TagsHtml", "MeaningPlain")
+                for n in (
+                    "Word", "Meaning", "KanjiHintHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
+                    "ReadingHtml", "DocLinkHtml",
+                )
             ],
             templates=[{"name": "Dictionary", "qfmt": _KANA_FRONT, "afmt": _KANA_BACK}],
             css=_css_with_accent("kana"),
@@ -554,6 +558,22 @@ def _kanji_hint_html(kanji_hint: str | None) -> str:
     if not kanji_hint:
         return ""
     return f'<div class="wk-pos">auch geschrieben: {_esc(kanji_hint)}</div>'
+
+
+def _reading_hint_html(reading: str | None) -> str:
+    """Lesung als dezenter Hinweis (nur KI-Karten: Word ist dort die
+    Grundform mit Kanji, nicht wie bei Dictionary-Karten die Hiragana-
+    Schreibweise selbst)."""
+    if not reading:
+        return ""
+    return f'<div class="wk-pos">Lesung: {_esc(reading)}</div>'
+
+
+def _kana_doclink_html(source: str) -> str:
+    """Quellenangabe unten auf der Karte – abhängig davon, ob die Bedeutung
+    aus JMdict oder von Gemini (KI-Modus) stammt."""
+    text = "Quelle: KI (Gemini)" if source == "ai" else "Quelle: JMdict (EDRDG)"
+    return f'<div class="wk-doclink">{_esc(text)}</div>'
 
 
 def _vocab_example_html(
@@ -697,6 +717,8 @@ def _kana_note(genanki: Any, model: Any, card: kc.KanaCard) -> Any:
         _sentences_html(card.sentence_ja, card.sentence_translation, None, []),
         _tags_html(card.tags),
         _esc(card.meaning),
+        _reading_hint_html(card.reading),
+        _kana_doclink_html(card.source),
     ]
     guid = genanki.guid_for("wkcards", "kana", card.card_id) if card.card_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)

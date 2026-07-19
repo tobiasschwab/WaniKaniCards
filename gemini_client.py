@@ -75,9 +75,11 @@ _TOKENS_SCHEMA = {
         "properties": {
             "surface": {"type": "STRING"},
             "dictionary_form": {"type": "STRING"},
+            "reading": {"type": "STRING"},
             "function": {"type": "STRING"},
+            "meaning": {"type": "STRING"},
         },
-        "required": ["surface", "dictionary_form", "function"],
+        "required": ["surface", "dictionary_form", "reading", "function", "meaning"],
     },
 }
 
@@ -88,11 +90,14 @@ surface-Felder aller Tokens eines Satzes müssen, aneinandergereiht, exakt
 wieder den kompletten Original-Satz ergeben (Zeichen für Zeichen, nichts
 fehlt). Gib zu jedem Token: surface (Schreibweise wie im Satz),
 dictionary_form (Grundform/Wörterbuchform, z. B. bei Verben die
-Present-Wörterbuchform; bei Satzzeichen einfach dasselbe Zeichen), function
-(kurze grammatikalische Funktion/Bedeutung, auf Deutsch; bei Satzzeichen
-z. B. "Satzzeichen"). Erkläre außerdem kurz die wichtigsten
-Grammatik-Besonderheiten des Satzes (grammar_notes, auf Deutsch) und gib
-eine natürliche, flüssige deutsche Übersetzung an (translation_de)."""
+Present-Wörterbuchform; bei Satzzeichen einfach dasselbe Zeichen), reading
+(Lesung der dictionary_form in Hiragana; bei Satzzeichen leer lassen),
+function (kurze grammatikalische Funktion/Bedeutung, auf Deutsch; bei
+Satzzeichen z. B. "Satzzeichen"), meaning (kurze deutsche Kern-Bedeutung der
+dictionary_form, wie in einem Wörterbuch, z. B. "gehen" oder "Schule"; bei
+reinen Partikeln/Satzzeichen leer lassen). Erkläre außerdem kurz die
+wichtigsten Grammatik-Besonderheiten des Satzes (grammar_notes, auf Deutsch)
+und gib eine natürliche, flüssige deutsche Übersetzung an (translation_de)."""
 
 _BATCH_RESPONSE_SCHEMA = {
     "type": "OBJECT",

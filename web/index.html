@@ -145,6 +145,7 @@
             <button data-v="level" class="active">Level-Stapel</button>
             <button data-v="compose">Suche</button>
             <button data-v="text">Aus Text</button>
+            <button data-v="ki">KI</button>
             <button data-v="custom">Frei erstellen</button>
           </div>
         </div>
@@ -199,12 +200,11 @@
           </label>
           <div class="row gap">
             <button id="btnTextProcess" class="btn primary">Verarbeiten</button>
-            <button id="btnTextGemini" class="btn">✨ Mit Gemini analysieren</button>
             <span id="textStatus" class="muted"></span>
           </div>
           <p class="hint">Text einfügen, erkannte Wörter anklicken.</p>
           <button type="button" class="disclosure-toggle" data-target="textHelp">▾ Wie funktioniert die Analyse?</button>
-          <p id="textHelp" class="hint disclosure-body hidden">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. „Mit Gemini analysieren" nutzt stattdessen die Gemini-API für bessere Wortgrenzen, grammatikalische Erklärungen und Satzübersetzung (Gemini-API-Key in den Einstellungen nötig, sendet die Sätze an Google).</p>
+          <p id="textHelp" class="hint disclosure-body hidden">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. Für eine KI-gestützte Analyse (Satzübersetzung, Grammatik-Erklärung) den Tab „KI" verwenden.</p>
         </div>
 
         <div id="textResultWrap" class="hidden">
@@ -216,14 +216,48 @@
           <div id="textDisplay" class="text-display"></div>
           <p class="hint">
             <span class="word-legend known">bekannt</span> ·
-            <span class="word-legend unknown">unbekannt</span> ·
-            <span class="word-legend info">Grammatik-Info (Gemini)</span>
-            &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren. <strong>ⓘ</strong> am Satzende zeigt Grammatik-Erklärung &amp; Übersetzung.
+            <span class="word-legend unknown">unbekannt</span>
+            &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
           </p>
         </div>
       </div>
 
-      <!-- Wort-Popup (Text-Modus) -->
+      <!-- KI-Modus: Text von Gemini in Sätze zerlegen lassen (Übersetzung + Grammatik + anklickbare Wörter) -->
+      <div id="modeKi" class="mode hidden">
+        <div id="kiInputWrap">
+          <label class="field">
+            <span class="label">Japanischer Text</span>
+            <textarea id="kiInput" class="text" rows="8" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
+          </label>
+          <div class="row gap">
+            <button id="btnKiProcess" class="btn primary">✨ Mit KI analysieren</button>
+            <span id="kiStatus" class="muted"></span>
+          </div>
+          <p class="hint">Zerlegt jeden Satz per Gemini in Übersetzung, Grammatik-Notizen und Bestandteile – braucht einen Gemini-API-Key in den Einstellungen, sendet die Sätze an Google.</p>
+        </div>
+
+        <div id="kiResultWrap" class="hidden">
+          <div class="text-result-head">
+            <button id="btnKiEdit" class="btn small">✎ Text bearbeiten</button>
+            <div id="kiStats" class="text-stats"></div>
+            <button id="btnKiBlurToggle" class="btn small" title="Deutsch/Vokabeln/Bemerkung ein-/ausblenden">🙈 Verschwommen</button>
+            <button id="btnComposeClear3" class="btn small">Tabelle leeren</button>
+          </div>
+          <div class="ki-table" id="kiTableWrap">
+            <div class="ki-row ki-head">
+              <div class="ki-cell">Japanisch</div>
+              <div class="ki-cell ki-col-pct">Bekannt</div>
+              <div class="ki-cell">Deutsch</div>
+              <div class="ki-cell">Vokabeln</div>
+              <div class="ki-cell">Bemerkung</div>
+            </div>
+            <div id="kiTable"></div>
+          </div>
+          <p class="hint">Deutsch/Vokabeln/Bemerkung sind zunächst verschwommen – einzelne Zelle anklicken zum Aufdecken, oder oben „🙈 Verschwommen" umschalten. Vokabel anklicken (wenn aufgedeckt): über WaniKani hinzufügen (falls vorhanden) oder KI-Definition als Karte anlegen.</p>
+        </div>
+      </div>
+
+      <!-- Wort-Popup (Text-/KI-Modus) -->
       <div id="wordPopup" class="word-popup hidden">
         <button id="wordPopupClose" class="word-popup-close" title="Schließen">✕</button>
         <div class="word-popup-char" id="wpChar"></div>
@@ -239,14 +273,6 @@
           <button id="wpAdd" class="btn primary small">+ Zur Tabelle</button>
           <button id="wpKnown" class="btn small">Als bekannt markieren</button>
         </div>
-      </div>
-
-      <!-- Satz-Popup (Text-Modus, Gemini-Grammatik + Übersetzung) -->
-      <div id="sentencePopup" class="word-popup hidden">
-        <button id="sentencePopupClose" class="word-popup-close" title="Schließen">✕</button>
-        <div class="word-popup-meta"><span class="tag-mini gemini">✨ Gemini</span></div>
-        <div class="word-popup-meaning" id="spTranslation"></div>
-        <p id="spGrammar" class="hint" style="margin-top:8px"></p>
       </div>
 
       <!-- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) -->

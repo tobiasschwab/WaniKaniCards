@@ -32,7 +32,11 @@ let sentenceOverrides = {};
 // Text-Modus: die zuletzt annotierten Zeilen (für Popup-Lookups und die
 // Bekannt-Prozent-Anzeige, ohne bei jeder Markierung neu vom Server zu holen).
 let textLines = [];
+// KI-Modus: die zuletzt analysierten Satz-Zeilen (gleicher Zweck wie textLines,
+// aber pro Satz mit Übersetzung/Grammatik statt reiner Zeilen-Liste).
+let kiRows = [];
 let activeWordSeg = null;
+let activeWordMode = "text"; // "text" | "ki" – welche Datenstruktur/welcher Endpunkt gerade betroffen ist
 
 // ---------- Helpers ----------
 function toast(msg, isErr) {
@@ -265,22 +269,19 @@ function clearCompose() {
   renderTable([], "Karten", "subject");
 }
 
-// ---------- Text-Modus ----------
-async function doTextProcess(useGemini) {
+// ---------- Text-Modus (reine Janome+WaniKani-Analyse, kein Gemini) ----------
+async function doTextProcess() {
   const text = $("#textInput").value;
   if (!text.trim()) return;
-  $("#textStatus").textContent = useGemini ? "Analysiere mit Gemini… (kann bei langen Texten 1–2 Minuten dauern)" : "Analysiere…";
+  $("#textStatus").textContent = "Analysiere…";
   let r;
   try {
-    // Gemini-Anfragen laufen pro Satz gegen eine externe API – ohne
-    // Zeitlimit könnte ein Netzwerkproblem die Oberfläche unbegrenzt in
-    // "Analysiere…" hängen lassen, ohne dass sichtbar wird, woran es liegt.
-    const opts = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample(), use_gemini: !!useGemini }) };
-    if (useGemini) opts.signal = AbortSignal.timeout(150000);
-    r = await api("/api/text-annotate", opts);
+    r = await api("/api/text-annotate", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample() }),
+    });
   } catch (e) {
     $("#textStatus").textContent = "";
-    toast(e.name === "TimeoutError" ? "Zeitüberschreitung – Gemini hat zu lange gebraucht (Text kürzen oder erneut versuchen)." : e.message, true);
+    toast(e.message, true);
     return;
   }
   $("#textStatus").textContent = "";
@@ -299,7 +300,7 @@ function backToTextEdit() {
 
 function updateTextStats(stats) {
   if (!stats || !stats.total) { $("#textStats").innerHTML = '<span class="muted">Keine WaniKani-Wörter im Text erkannt.</span>'; return; }
-  $("#textStats").innerHTML = `<span class="pct">${String(stats.percent).replace(".", ",")} %</span> bekannt (${stats.known} von ${stats.total} erkannten Wörtern)`;
+  $("#textStats").innerHTML = `<span class="pct">${String(stats.percent).replace(".", ",")} %</span> bekannt (${stats.known} von ${stats.total} erkannten Wörtern)`;
 }
 
 function renderAnnotatedText(lines) {
@@ -311,21 +312,7 @@ function renderAnnotatedText(lines) {
     if (!line.length) { p.innerHTML = "&nbsp;"; wrap.append(p); continue; }
     for (const seg of line) {
       if (seg.type === "word") {
-        const span = document.createElement("span");
-        span.className = "word-token " + seg.status.replace(/_/g, "-");
-        span.dataset.id = String(seg.id);
-        span.textContent = seg.text;
-        span._seg = seg;
-        span.addEventListener("click", (e) => openWordPopup(e.currentTarget, seg));
-        p.append(span);
-      } else if (seg.type === "sentence-info") {
-        if (seg.grammar_notes || seg.translation_de) {
-          const btn = document.createElement("button");
-          btn.className = "sentence-info-btn"; btn.type = "button"; btn.textContent = "ⓘ";
-          btn.title = "Grammatik & Übersetzung (Gemini)";
-          btn.addEventListener("click", (e) => openSentencePopup(e.currentTarget, seg));
-          p.append(btn);
-        }
+        p.append(makeWordToken(seg, "text"));
       } else {
         p.append(document.createTextNode(seg.text));
       }
@@ -334,35 +321,139 @@ function renderAnnotatedText(lines) {
   }
 }
 
-function openWordPopup(el, seg) {
+// ---------- KI-Modus (Gemini: Satz-Tabelle mit Übersetzung/Grammatik) ----------
+async function doKiProcess() {
+  const text = $("#kiInput").value;
+  if (!text.trim()) return;
+  $("#kiStatus").textContent = "Analysiere mit KI… (kann bei langen Texten 1–2 Minuten dauern)";
+  let r;
+  try {
+    // Gemini-Anfragen laufen gegen eine externe API – ohne Zeitlimit könnte
+    // ein Netzwerkproblem die Oberfläche unbegrenzt in "Analysiere…" hängen
+    // lassen, ohne dass sichtbar wird, woran es liegt.
+    r = await api("/api/text-annotate-ai", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample() }),
+      signal: AbortSignal.timeout(150000),
+    });
+  } catch (e) {
+    $("#kiStatus").textContent = "";
+    toast(e.name === "TimeoutError" ? "Zeitüberschreitung – KI hat zu lange gebraucht (Text kürzen oder erneut versuchen)." : e.message, true);
+    return;
+  }
+  $("#kiStatus").textContent = "";
+  kiRows = r.rows || [];
+  renderKiTable(kiRows);
+  updateKiStats(r.stats);
+  $("#kiInputWrap").classList.add("hidden");
+  $("#kiResultWrap").classList.remove("hidden");
+}
+
+function backToKiEdit() {
+  $("#kiResultWrap").classList.add("hidden");
+  $("#kiInputWrap").classList.remove("hidden");
+  closeWordPopup();
+}
+
+function updateKiStats(stats) {
+  if (!stats || !stats.total) { $("#kiStats").innerHTML = '<span class="muted">Keine WaniKani-/Dictionary-Wörter erkannt.</span>'; return; }
+  $("#kiStats").innerHTML = `<span class="pct">${String(stats.percent).replace(".", ",")} %</span> bekannt (${stats.known} von ${stats.total} erkannten Wörtern)`;
+}
+
+// Verschwommen/Aufgedeckt für Deutsch/Vokabeln/Bemerkung: standardmäßig
+// verschwommen (nicht spoilern), einzelne Zelle anklicken deckt NUR sie auf,
+// der Header-Button schaltet global um (löst dabei die Einzel-Aufdeckungen
+// wieder ein, damit "alle verschwommen" wieder wirklich alle heißt).
+let kiBlurEnabled = true;
+
+function toggleKiBlur() {
+  kiBlurEnabled = !kiBlurEnabled;
+  $("#btnKiBlurToggle").textContent = kiBlurEnabled ? "🙈 Verschwommen" : "👁 Sichtbar";
+  renderKiTable(kiRows);
+}
+
+// Grün (100 %) bis Rot (0 %) im Verlauf – Farbton linear zwischen 0° (Rot)
+// und 120° (Grün) interpoliert.
+function _pctBadgeHtml(known, total) {
+  if (!total) return '<span class="muted">–</span>';
+  const pct = Math.round((known / total) * 100);
+  const hue = Math.round((pct / 100) * 120);
+  return `<span class="ki-pct-badge" style="--pct-hue:${hue}">${pct}%</span>`;
+}
+
+function renderKiTable(rows) {
+  const wrap = $("#kiTable");
+  wrap.innerHTML = "";
+  for (const row of rows) {
+    const tr = document.createElement("div");
+    tr.className = "ki-row";
+    const jpCell = document.createElement("div"); jpCell.className = "ki-cell ki-sentence"; jpCell.textContent = row.sentence;
+    if (row.error) {
+      const errCell = document.createElement("div"); errCell.className = "ki-cell ki-error"; errCell.dataset.label = "Fehler";
+      errCell.textContent = "⚠ " + row.error;
+      tr.append(jpCell, errCell);
+      wrap.append(tr);
+      continue;
+    }
+    const words = row.segments.filter((s) => s.type === "word");
+    const knownCount = words.filter((s) => s.known).length;
+
+    const pctCell = document.createElement("div"); pctCell.className = "ki-cell ki-pct"; pctCell.dataset.label = "Bekannt";
+    pctCell.innerHTML = _pctBadgeHtml(knownCount, words.length);
+
+    const deCell = document.createElement("div");
+    deCell.className = "ki-cell" + (kiBlurEnabled ? " ki-blur" : ""); deCell.dataset.label = "Deutsch";
+    deCell.textContent = row.translation_de || "";
+
+    const vocabCell = document.createElement("div");
+    vocabCell.className = "ki-cell ki-components" + (kiBlurEnabled ? " ki-blur" : ""); vocabCell.dataset.label = "Vokabeln";
+    words.forEach((seg, i) => {
+      if (i > 0) vocabCell.append(document.createTextNode(" · "));
+      vocabCell.append(makeWordToken(seg, "ki", seg.lemma || seg.text));
+    });
+
+    const remarkCell = document.createElement("div");
+    remarkCell.className = "ki-cell" + (kiBlurEnabled ? " ki-blur" : ""); remarkCell.dataset.label = "Bemerkung";
+    remarkCell.textContent = row.grammar_notes || "";
+
+    tr.append(jpCell, pctCell, deCell, vocabCell, remarkCell);
+    wrap.append(tr);
+  }
+}
+
+// ---------- Wort-Popup (gemeinsam für Text- und KI-Modus) ----------
+function makeWordToken(seg, mode, label) {
+  const span = document.createElement("span");
+  span.className = "word-token " + seg.status.replace(/_/g, "-");
+  span.dataset.id = String(seg.id);
+  span.textContent = label || seg.text;
+  span._seg = seg;
+  span.addEventListener("click", (e) => openWordPopup(e.currentTarget, seg, mode));
+  return span;
+}
+
+function openWordPopup(el, seg, mode = "text") {
   activeWordSeg = seg;
+  activeWordMode = mode;
   const pop = $("#wordPopup");
   const isDict = seg.source === "dictionary";
-  const isGrammarOnly = seg.id == null;
+  const isAi = seg.source === "ai";
   $("#wpChar").textContent = seg.text;
-  if (isGrammarOnly) {
-    $("#wpKind").textContent = "✨ Gemini";
-    $("#wpKind").className = "tag-mini gemini";
-    $("#wpSource").textContent = "";
-  } else {
-    $("#wpKind").textContent = seg.kind;
-    $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : seg.object);
-    $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : "Quelle: WaniKani";
-  }
-  $("#wpLevel").textContent = isDict ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "") : (seg.level ? `Lv ${seg.level}` : "");
+  $("#wpKind").textContent = isAi ? "✨ " + seg.kind : seg.kind;
+  $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : isAi ? "gemini" : seg.object);
+  $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : isAi ? "Quelle: KI (Gemini)" : "Quelle: WaniKani";
+  $("#wpLevel").textContent = isDict
+    ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "")
+    : isAi ? (seg.reading ? `Lesung: ${seg.reading}` : "") : (seg.level ? `Lv ${seg.level}` : "");
   $("#wpMeaning").textContent = seg.meaning || "";
   $("#wpMeaningExtra").textContent = seg.meaning_extra || "";
   $("#wpMeaningExtra").classList.toggle("hidden", !seg.meaning_extra);
   let note = "";
-  if (isGrammarOnly) note = "Kein Karteikarten-Wort – reine Grammatik-Erklärung.";
-  else if (seg.manually_known) note = "✓ manuell als bekannt markiert";
-  else if (seg.ready) note = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
+  if (seg.manually_known) note = "✓ manuell als bekannt markiert";
+  else if (seg.ready) note = (isDict || isAi) ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
   $("#wpExportedNote").textContent = note;
   $("#wpExportedNote").classList.toggle("hidden", !note);
-  $("#wpExportedNote").classList.toggle("subtle", isGrammarOnly);
-  $("#wpActions").classList.toggle("hidden", isGrammarOnly);
-  $("#wpAdd").textContent = isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
-  $("#wpAdd").disabled = isDict && seg.ready;
+  $("#wpAdd").textContent = isAi ? "+ KI-Karte erstellen" : isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
+  $("#wpAdd").disabled = (isDict || isAi) && seg.ready;
   $("#wpKnown").textContent = seg.manually_known ? "Bekannt-Markierung entfernen" : "Als bekannt markieren";
 
   const rect = el.getBoundingClientRect();
@@ -375,24 +466,11 @@ function openWordPopup(el, seg) {
 }
 function closeWordPopup() { $("#wordPopup").classList.add("hidden"); activeWordSeg = null; }
 
-function openSentencePopup(el, seg) {
-  const pop = $("#sentencePopup");
-  $("#spTranslation").textContent = seg.translation_de || "";
-  $("#spGrammar").textContent = seg.grammar_notes || "";
-  const rect = el.getBoundingClientRect();
-  pop.classList.remove("hidden");
-  const popW = pop.offsetWidth || 240;
-  let left = rect.left;
-  if (left + popW > window.innerWidth - 10) left = window.innerWidth - popW - 10;
-  pop.style.left = `${Math.max(10, left)}px`;
-  pop.style.top = `${rect.bottom + 8}px`;
-}
-function closeSentencePopup() { $("#sentencePopup").classList.add("hidden"); }
-
 function wpAddClicked() {
   const seg = activeWordSeg;
-  if (!seg || seg.id == null) return;
-  if (seg.source === "dictionary") createKanaCardFromPopup();
+  if (!seg) return;
+  if (seg.source === "ai") createAiKanaCardFromPopup();
+  else if (seg.source === "dictionary") createKanaCardFromPopup();
   else addWordFromPopup();
 }
 
@@ -425,36 +503,60 @@ async function createKanaCardFromPopup() {
   closeWordPopup();
 }
 
+async function createAiKanaCardFromPopup() {
+  const seg = activeWordSeg;
+  if (!seg || seg.ready) return;
+  let card;
+  try {
+    card = await api("/api/kanacards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        word: seg.lemma || seg.text, source: "ai", meaning: seg.meaning, reading: seg.reading, sentence: seg.sentence,
+      }),
+    });
+  } catch (e) { toast(e.message, true); return; }
+  setSegReady(seg, true);
+  appendComposition([card], seg.text);
+  toast(`KI-Karte für ${seg.text} erstellt und zur Tabelle hinzugefügt`);
+  closeWordPopup();
+}
+
 // Nach Toggle/Erstellung: Status eines Worts (über alle Vorkommen im Text
 // hinweg, per id) lokal aktualisieren, DOM-Klassen + Statistik neu ziehen –
-// ohne kompletten Server-Roundtrip über /api/text-annotate.
+// ohne kompletten Server-Roundtrip über /api/text-annotate(-ai). Funktioniert
+// für beide Modi: Text-Modus hat "Zeilen aus Segmenten", KI-Modus hat
+// "Satz-Zeilen mit .segments" – je nach activeWordMode wird die passende
+// Struktur durchlaufen.
 function setSegReady(seg, ready) { applySegChange(seg, { ready }); }
 function setSegManuallyKnown(seg, manuallyKnown) { applySegChange(seg, { manually_known: manuallyKnown }); }
 
 function applySegChange(seg, patch) {
+  const isKi = activeWordMode === "ki";
+  const allSegments = isKi
+    ? kiRows.flatMap((row) => row.segments)
+    : textLines.flatMap((line) => line);
   let known = 0, total = 0;
-  for (const line of textLines) {
-    for (const s of line) {
-      if (s.type !== "word") continue;
-      total++;
-      if (s.id === seg.id && s.source === seg.source) {
-        Object.assign(s, patch);
-        s.status = (s.manually_known || s.ready) ? "known" : "unknown";
-        s.known = s.manually_known || s.ready;
-      }
-      if (s.known) known++;
+  for (const s of allSegments) {
+    if (s.type !== "word") continue;
+    total++;
+    if (s.id === seg.id && s.source === seg.source) {
+      Object.assign(s, patch);
+      s.status = (s.manually_known || s.ready) ? "known" : "unknown";
+      s.known = s.manually_known || s.ready;
     }
+    if (s.known) known++;
   }
   document.querySelectorAll(`.word-token[data-id="${seg.id}"]`).forEach((span) => {
     if (span._seg.source !== seg.source) return;
     span.className = "word-token " + span._seg.status.replace(/_/g, "-");
   });
-  updateTextStats({ known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 });
+  const stats = { known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 };
+  if (isKi) updateKiStats(stats); else updateTextStats(stats);
 }
 
 async function toggleKnownFromPopup() {
   const seg = activeWordSeg;
-  if (!seg || seg.id == null) return;
+  if (!seg) return;
   const makeKnown = !seg.manually_known;
   try {
     await api(`/api/known/${seg.id}`, { method: makeKnown ? "POST" : "DELETE" });
@@ -463,7 +565,6 @@ async function toggleKnownFromPopup() {
   toast(makeKnown ? `${seg.text} als bekannt markiert` : `${seg.text} nicht mehr als bekannt markiert`);
   closeWordPopup();
 }
-
 // ---------- Wortliste: alle bekannten Wörter (WaniKani + Dictionary + manuell) ----------
 let wortlisteEntries = [];
 
@@ -750,6 +851,7 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#modeLevel").classList.toggle("hidden", v !== "level");
     $("#modeCompose").classList.toggle("hidden", v !== "compose");
     $("#modeText").classList.toggle("hidden", v !== "text");
+    $("#modeKi").classList.toggle("hidden", v !== "ki");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
     $("#modeWortliste").classList.toggle("hidden", v !== "wortliste");
     document.querySelectorAll(".tab-group").forEach((g) => {
@@ -842,18 +944,25 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
   $("#btnComposeClear").addEventListener("click", clearCompose);
   $("#btnComposeClear2").addEventListener("click", clearCompose);
-  $("#btnTextProcess").addEventListener("click", () => doTextProcess(false));
-  $("#btnTextGemini").addEventListener("click", () => doTextProcess(true));
+  $("#btnComposeClear3").addEventListener("click", clearCompose);
+  $("#btnTextProcess").addEventListener("click", doTextProcess);
   $("#btnTextEdit").addEventListener("click", backToTextEdit);
+  $("#btnKiProcess").addEventListener("click", doKiProcess);
+  $("#btnKiEdit").addEventListener("click", backToKiEdit);
+  $("#btnKiBlurToggle").addEventListener("click", toggleKiBlur);
+  // Einzelne verschwommene Zelle anklicken deckt NUR sie auf (capture-Phase,
+  // damit ein Klick auf ein Vokabel-Token darin zuerst nur aufdeckt statt
+  // gleichzeitig auch das Hinzufügen-Popup zu öffnen).
+  $("#kiTable").addEventListener("click", (e) => {
+    const cell = e.target.closest(".ki-blur");
+    if (cell) { cell.classList.remove("ki-blur"); e.stopPropagation(); }
+  }, true);
   $("#wpAdd").addEventListener("click", wpAddClicked);
   $("#wpKnown").addEventListener("click", toggleKnownFromPopup);
   $("#wordPopupClose").addEventListener("click", closeWordPopup);
-  $("#sentencePopupClose").addEventListener("click", closeSentencePopup);
   document.addEventListener("click", (e) => {
     const pop = $("#wordPopup");
     if (!pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.classList.contains("word-token")) closeWordPopup();
-    const spop = $("#sentencePopup");
-    if (!spop.classList.contains("hidden") && !spop.contains(e.target) && !e.target.classList.contains("sentence-info-btn")) closeSentencePopup();
   });
 
   // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)

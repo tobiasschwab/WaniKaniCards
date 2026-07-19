@@ -205,6 +205,27 @@ def test_kana_note_without_kanji_hint_omits_it():
     assert note.fields[2] == ""
 
 
+def test_kana_note_dictionary_source_shows_jmdict_doclink_and_no_reading():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(word="しあい", meaning="Spiel", source="dictionary", card_id="kana_shiai")
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert note.fields[6] == ""  # ReadingHtml: nur für KI-Karten relevant
+    assert "JMdict (EDRDG)" in note.fields[7]
+
+
+def test_kana_note_ai_source_shows_reading_and_ki_doclink():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(
+        word="入る", reading="はいる", meaning="hineingehen", source="ai", tags=["KI"], card_id="aikana_hairu",
+    )
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert "はいる" in note.fields[6]
+    assert "KI (Gemini)" in note.fields[7]
+    assert "JMdict" not in note.fields[7]
+
+
 def test_note_for_dispatches_kana_card():
     genanki = ae._require_genanki()
     models = ae._build_models(genanki)

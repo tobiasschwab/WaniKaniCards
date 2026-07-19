@@ -314,11 +314,13 @@ def list_kana() -> list[dict[str, Any]]:
 
 
 def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
+    is_ai = card.get("source") == "ai"
     return {
         "id": card["id"],
-        "object": "dictionary",
-        "kind": "Dict",
+        "object": "ai" if is_ai else "dictionary",
+        "kind": "KI" if is_ai else "Dict",
         "characters": card.get("word", ""),
+        "reading": card.get("reading"),
         "meaning": card.get("meaning", ""),
         "meaning_extra": card.get("meaning_extra"),
         "level": None,
@@ -539,6 +541,9 @@ def api_resolve() -> Any:
 def api_text_annotate() -> Any:
     """Text lemmatisieren und zeilenweise annotieren (kein Auto-Hinzufügen).
 
+    Reine Janome-Lemmatisierung + WaniKani-/JMdict-Abgleich, kein Gemini
+    (dafür siehe `/api/text-annotate-ai`, der eigenständige „KI"-Modus).
+
     Jedes erkannte Wort bekommt zwei rohe Signale (fürs clientseitige
     Umschalten von „bekannt" ohne Server-Roundtrip):
     - `manually_known` (bool) – manuell als bekannt markiert (`/api/known`).
@@ -552,46 +557,16 @@ def api_text_annotate() -> Any:
                  Wort-Popup).
     - `known`  – `manually_known or ready`, treibt die „Prozent bekannt"-Statistik
                  (Vorkommen-basiert, nicht nur eindeutige Wörter).
-
-    `use_gemini` (bool): Sätze zusätzlich per Gemini analysieren (bessere
-    Wortgrenzen, grammatikalische Funktion, Grammatik-Erklärung + deutsche
-    Übersetzung pro Satz) – braucht einen in den Einstellungen hinterlegten
-    Gemini-Key, sonst Fehler. Wörter ohne WaniKani-/Dictionary-Treffer, die
-    Gemini aber grammatikalisch erklären kann (`source: "gemini"`), haben
-    `id: null` und fließen NICHT in `known`/`total` ein (keine Vokabel zum
-    Lernen, nur eine Grammatik-Info).
     """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", ""))
     sample = bool(body.get("sample"))
-    use_gemini = bool(body.get("use_gemini"))
-    gemini_key = None
-    gemini_model = kc.gemini_client.DEFAULT_MODEL
-    if use_gemini:
-        s = load_settings()
-        gemini_key = s.get("gemini_key") or None
-        stored_model = s.get("gemini_model")
-        if isinstance(stored_model, str) and stored_model.strip().startswith("gemini-"):
-            gemini_model = stored_model.strip()
-        elif stored_model:
-            # Kein gültiger Gemini-Modellname (z. B. leere/kaputte Einstellung) ->
-            # auf den aktuellen Default ausweichen statt an Google zu senden.
-            logger.warning(
-                "Gespeichertes Gemini-Modell %r ist ungültig, verwende Default %r.",
-                stored_model, gemini_model,
-            )
-        if not gemini_key:
-            return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
-    logger.info(
-        "text-annotate: %d Zeichen, use_gemini=%s, sample=%s …", len(text), use_gemini, sample,
-    )
+    logger.info("text-annotate: %d Zeichen, sample=%s …", len(text), sample)
     t0 = time.monotonic()
     try:
         if not sample:
             _apply_token_env()
-        lines = kc.annotate_text(
-            text, sample=sample, gemini_key=gemini_key, gemini_model=gemini_model
-        )
+        lines = kc.annotate_text(text, sample=sample)
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
     logger.info("text-annotate: fertig in %.1fs (%d Zeilen)", time.monotonic() - t0, len(lines))
@@ -604,12 +579,6 @@ def api_text_annotate() -> Any:
     for line in lines:
         for seg in line:
             if seg.get("type") != "word":
-                continue
-            if seg.get("id") is None:
-                seg["manually_known"] = False
-                seg["ready"] = False
-                seg["status"] = "info"
-                seg["known"] = False
                 continue
             is_dict = seg.get("source") == "dictionary"
             sid: int | str = str(seg["id"]) if is_dict else int(seg["id"])
@@ -626,6 +595,71 @@ def api_text_annotate() -> Any:
     return jsonify(
         {
             "lines": lines,
+            "stats": {"known": known_count, "total": total, "percent": percent},
+        }
+    )
+
+
+@app.post("/api/text-annotate-ai")
+def api_text_annotate_ai() -> Any:
+    """Text per Gemini satzweise analysieren (eigener „KI"-Modus, siehe
+    `kc.annotate_text_ai()`): pro Satz Original, deutsche Übersetzung,
+    Grammatik-Notizen und anklickbare Wort-Segmente – ohne Fallback auf
+    Janome, ein Satz bekommt bei einem Fehler stattdessen `error` gesetzt.
+
+    Braucht einen in den Einstellungen hinterlegten Gemini-Key. Jedes
+    Wort-Segment bekommt zusätzlich `manually_known`/`ready`/`status`/`known`
+    wie bei `/api/text-annotate` – `source: "ai"`-Wörter zählen dabei genau
+    wie `source: "dictionary"` über `kanacards/` (dieselbe Karten-
+    Infrastruktur, nur mit KI- statt JMdict-Bedeutung; eine Karte entsteht
+    aber erst, wenn der Nutzer sie manuell über `/api/kanacards` anlegt).
+    """
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text", ""))
+    sample = bool(body.get("sample"))
+    s = load_settings()
+    gemini_key = s.get("gemini_key") or None
+    if not gemini_key:
+        return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
+    stored_model = s.get("gemini_model")
+    gemini_model = kc.gemini_client.DEFAULT_MODEL
+    if isinstance(stored_model, str) and stored_model.strip().startswith("gemini-"):
+        gemini_model = stored_model.strip()
+
+    logger.info("text-annotate-ai: %d Zeichen, sample=%s, Modell=%s …", len(text), sample, gemini_model)
+    t0 = time.monotonic()
+    try:
+        if not sample:
+            _apply_token_env()
+        rows = kc.annotate_text_ai(text, gemini_key=gemini_key, gemini_model=gemini_model, sample=sample)
+    except kc.WaniKaniError as exc:
+        return jsonify({"error": str(exc)}), 502
+    logger.info("text-annotate-ai: fertig in %.1fs (%d Sätze)", time.monotonic() - t0, len(rows))
+
+    exported = _already_exported_ids()
+    known_manual = load_known()
+    created_kana = {c["id"] for c in list_kana()}
+    total = 0
+    known_count = 0
+    for row in rows:
+        for seg in row["segments"]:
+            if seg.get("type") != "word":
+                continue
+            is_wk = seg.get("source") == "wanikani"
+            sid: int | str = int(seg["id"]) if is_wk else str(seg["id"])
+            is_manual = sid in known_manual
+            is_ready = sid in (exported if is_wk else created_kana)
+            seg["manually_known"] = is_manual
+            seg["ready"] = is_ready
+            seg["status"] = "known" if (is_manual or is_ready) else "unknown"
+            seg["known"] = is_manual or is_ready
+            total += 1
+            if seg["known"]:
+                known_count += 1
+    percent = round(known_count / total * 100, 1) if total else 0.0
+    return jsonify(
+        {
+            "rows": rows,
             "stats": {"known": known_count, "total": total, "percent": percent},
         }
     )
@@ -874,27 +908,48 @@ def api_kanacards() -> Any:
 
 @app.post("/api/kanacards")
 def api_create_kanacard() -> Any:
-    """Wort (aus dem Text-Modus, ohne WaniKani-Treffer) als Dictionary-Karte
-    anlegen. Bedeutung kommt aus JMdict; Satzübersetzung optional per DeepL,
-    wenn ein Key hinterlegt ist (sonst bleibt die Karte trotzdem gültig)."""
+    """Wort (aus dem Text-Modus, ohne WaniKani-Treffer) als Dictionary- oder
+    KI-Karte anlegen.
+
+    Default (`source` fehlt/`"dictionary"`): Bedeutung kommt aus JMdict, per
+    `word` nachgeschlagen (`kc.build_kana_card`).
+
+    `source: "ai"` (aus dem KI-Modus, siehe `annotate_text_ai()`): Bedeutung
+    kommt direkt von Gemini (`meaning`/`reading` im Request), kein JMdict-
+    Lookup – der Nutzer hat das Wort bewusst im KI-Modus angeklickt, es wird
+    nie automatisch für alle KI-erkannten Wörter eine Karte erzeugt.
+
+    Satzübersetzung in beiden Fällen optional per DeepL, wenn ein Key
+    hinterlegt ist (sonst bleibt die Karte trotzdem gültig)."""
     body = request.get_json(silent=True) or {}
     word = str(body.get("word", "")).strip()
     sentence_raw = body.get("sentence")
     sentence = sentence_raw.strip() if isinstance(sentence_raw, str) and sentence_raw.strip() else None
+    source = str(body.get("source") or "dictionary").strip()
     if not word:
         return jsonify({"error": "Kein Wort angegeben."}), 400
     deepl_key = load_settings().get("deepl_key") or None
-    card_obj = kc.build_kana_card(word, sentence, deepl_key=deepl_key)
-    if card_obj is None:
-        return jsonify({"error": f"„{word}“ wurde im Wörterbuch nicht gefunden."}), 404
+    if source == "ai":
+        meaning = str(body.get("meaning") or "").strip()
+        if not meaning:
+            return jsonify({"error": "Keine KI-Bedeutung angegeben."}), 400
+        card_obj = kc.build_ai_kana_card(
+            word, meaning=meaning, reading=body.get("reading"), sentence=sentence, deepl_key=deepl_key,
+        )
+    else:
+        card_obj = kc.build_kana_card(word, sentence, deepl_key=deepl_key)
+        if card_obj is None:
+            return jsonify({"error": f"„{word}“ wurde im Wörterbuch nicht gefunden."}), 404
     record = {
         "id": card_obj.card_id,
         "word": card_obj.word,
         "kanji_hint": card_obj.kanji_hint,
+        "reading": card_obj.reading,
         "meaning": card_obj.meaning,
         "meaning_extra": card_obj.meaning_extra,
         "sentence_ja": card_obj.sentence_ja,
         "sentence_translation": card_obj.sentence_translation,
+        "source": card_obj.source,
         "tags": card_obj.tags,
         "updated_at": _now(),
     }
