@@ -275,7 +275,15 @@ def test_kanji_kun_template_gated_on_kunyomi_primary():
 
 
 def test_vocab_front_template_has_type_in_meaning_plain():
-    assert "{{type:MeaningPlain}}" in ae._VOCAB_FRONT
+    assert "{{type:MeaningPlain}}" in ae._VOCAB_FRONT_MEANING
+
+
+def test_vocab_reading_template_gated_on_readings_primary_and_binds_wanakana():
+    assert "{{#ReadingsPrimary}}" in ae._VOCAB_FRONT_READING
+    assert "{{type:ReadingsPrimary}}" in ae._VOCAB_FRONT_READING
+    assert '<script src="_wanakana.min.js">' in ae._VOCAB_FRONT_READING
+    assert "wanakana.bind(answerDiv)" in ae._VOCAB_FRONT_READING
+    assert "wanakana" not in ae._VOCAB_FRONT_MEANING
 
 
 def test_custom_front_template_has_no_type_in():
@@ -299,6 +307,31 @@ def test_vocab_note_meaning_plain_matches_primary_meaning():
     note = ae._vocab_note(genanki, models["vocab"], card)
     field_names = [f["name"] for f in models["vocab"].fields]
     assert note.fields[field_names.index("MeaningPlain")] == "Big"
+
+
+def test_vocab_note_readings_primary_matches_first_reading():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.VocabCard(vocab="大きい", readings=["おおきい", "でかい"], meanings=["Big"], subject_id=1)
+    note = ae._vocab_note(genanki, models["vocab"], card)
+    field_names = [f["name"] for f in models["vocab"].fields]
+    assert note.fields[field_names.index("ReadingsPrimary")] == "おおきい"
+
+
+def test_vocab_note_readings_primary_empty_without_readings():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.VocabCard(vocab="大きい", readings=[], meanings=["Big"], subject_id=1)
+    note = ae._vocab_note(genanki, models["vocab"], card)
+    field_names = [f["name"] for f in models["vocab"].fields]
+    assert note.fields[field_names.index("ReadingsPrimary")] == ""
+
+
+def test_vocab_model_has_two_templates_meaning_and_reading():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    names = [t["name"] for t in models["vocab"].templates]
+    assert names == ["Bedeutung", "Lesung"]
 
 
 # --------------------------------------------------------------------------- #
@@ -423,7 +456,7 @@ def test_onyomi_kunyomi_templates_bind_wanakana_to_typeans():
     assert '<script src="_wanakana.min.js">' in ae._KANJI_FRONT_KUN
     assert 'wanakana.bind(answerDiv)' in ae._KANJI_FRONT_KUN
     assert "wanakana" not in ae._KANJI_FRONT_MEANING
-    assert "wanakana" not in ae._VOCAB_FRONT
+    assert "wanakana" not in ae._VOCAB_FRONT_MEANING
     assert "wanakana" not in ae._RADICAL_FRONT
 
 

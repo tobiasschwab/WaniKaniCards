@@ -466,11 +466,11 @@ Deck-IDs aus dem Namen abgeleitet, wie bei den Notizen) statt neue
 anzulegen.
 
 **Japanische Eingabe ohne Tastatur-Wechsel:** Die Eintippen-Felder für
-On'yomi/Kun'yomi (Kanji-Karten) nutzen [WanaKana](https://github.com/WaniKani/WanaKana)
-(`vendor/wanakana.min.js`, im `.apkg` eingebettet) – Romaji wird automatisch
-in Hiragana umgewandelt, Großschreibung (Shift) ergibt Katakana. Kein Wechsel
-zwischen deutscher/japanischer Tastatur nötig, um auf einer deutschen Tastatur
-Kana einzutippen.
+On'yomi/Kun'yomi (Kanji-Karten) und die Lesung (Vokabel-Karten) nutzen
+[WanaKana](https://github.com/WaniKani/WanaKana) (`vendor/wanakana.min.js`,
+im `.apkg` eingebettet) – Romaji wird automatisch in Hiragana umgewandelt,
+Großschreibung (Shift) ergibt Katakana. Kein Wechsel zwischen deutscher/
+japanischer Tastatur nötig, um auf einer deutschen Tastatur Kana einzutippen.
 
 | | Vorderseite | Rückseite |
 |---|---|---|
@@ -495,6 +495,13 @@ automatisch keine leere Karte dafür.
 | „On'yomi"-Karte | „Kun'yomi"-Karte |
 |---|---|
 | ![On'yomi eingeben](previews/anki_kanji_onyomi_front.png) | ![Kun'yomi eingeben](previews/anki_kanji_kunyomi_front.png) |
+
+**Vokabel: Bedeutung und Lesung getrennt abfragen.** Analog zu Kanji wird
+ein Vokabel-Subject zu **zwei Anki-Karten**: „Bedeutung" (wie bisher) und
+„Lesung" (neu, mit WanaKana-Eingabe, s. o.) – beide teilen sich dieselbe
+Rückseite. Hat eine Vokabel ausnahmsweise keine gespeicherte Lesung, erzeugt
+Anki dafür automatisch keine leere „Lesung"-Karte (gleiches
+`{{#Feld}}…{{/Feld}}`-Gating wie bei On'yomi/Kun'yomi).
 
 Die WaniKani-Subject-ID (bzw. bei freien Karten deren gespeicherte ID) wird als
 stabile Anki-Notiz-ID verwendet: ein erneuter Export nach Lernfortschritt

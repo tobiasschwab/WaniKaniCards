@@ -318,13 +318,30 @@ _KANJI_BACK = """
 </div>
 """.strip()
 
-_VOCAB_FRONT = """
+_VOCAB_FRONT_MEANING = """
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage"><div class="wk-big" style="font-size:{{VocabFontSize}}px;">{{Vocab}}</div></div>
 <div class="wk-typein">
   <div class="wk-typein-label">Bedeutung eingeben</div>
   {{type:MeaningPlain}}
 </div>
+""".strip()
+
+# Eigene Karte für die Lesung (statt nur Bedeutung) – mit WanaKana-Bindung
+# wie bei den Kanji-Lesungs-Karten, damit die Lesung per Romaji-Tippen ohne
+# IME-Umschalten eingegeben werden kann. {{#ReadingsPrimary}}…{{/ReadingsPrimary}}
+# überspringt die Karte automatisch, falls eine Vokabel ausnahmsweise keine
+# Lesung hat (kein manuelles Filtern nötig, wie bei On'yomi/Kun'yomi).
+_VOCAB_FRONT_READING = """
+{{#ReadingsPrimary}}
+<div class="wk-tags">{{TagsHtml}}</div>
+<div class="wk-stage"><div class="wk-big" style="font-size:{{VocabFontSize}}px;">{{Vocab}}</div></div>
+<div class="wk-typein">
+  <div class="wk-typein-label">Lesung eingeben</div>
+  {{type:ReadingsPrimary}}
+</div>
+""" + _WANAKANA_BIND_SCRIPT + """
+{{/ReadingsPrimary}}
 """.strip()
 
 _VOCAB_BACK = """
@@ -420,10 +437,13 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 for n in (
                     "Vocab", "VocabFontSize", "MeaningsHtml", "Readings",
                     "PartsOfSpeech", "MnemonicsHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
-                    "AudioHtml", "DocLinkHtml",
+                    "AudioHtml", "DocLinkHtml", "ReadingsPrimary",
                 )
             ],
-            templates=[{"name": "Vokabel", "qfmt": _VOCAB_FRONT, "afmt": _VOCAB_BACK}],
+            templates=[
+                {"name": "Bedeutung", "qfmt": _VOCAB_FRONT_MEANING, "afmt": _VOCAB_BACK},
+                {"name": "Lesung", "qfmt": _VOCAB_FRONT_READING, "afmt": _VOCAB_BACK},
+            ],
             css=_css_with_accent("vocab"),
             sort_field_index=0,
         ),
@@ -698,6 +718,7 @@ def _vocab_note(genanki: Any, model: Any, card: kc.VocabCard) -> Any:
         _first_plain(card.meanings),
         _audio_html(card.audio_url),
         _doclink_html(card.document_url),
+        _esc(card.readings[0]) if card.readings else "",
     ]
     guid = genanki.guid_for("wkcards", "vocab", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)
