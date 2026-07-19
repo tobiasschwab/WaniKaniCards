@@ -40,6 +40,19 @@
         <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
       </div>
       <div id="tokenStatus" class="status" style="margin-top:8px"></div>
+
+      <label class="field" style="margin-top:16px">
+        <span class="label">DeepL API-Key <em>(optional, für Satzübersetzung bei Dictionary-Karten)</em></span>
+        <div class="token-row">
+          <input id="deeplInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 6316a6c7-…:fx">
+          <button id="deeplShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+        </div>
+        <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
+      </label>
+      <div class="row gap">
+        <button id="deeplSave" class="btn primary">Speichern</button>
+      </div>
+      <div id="deeplStatus" class="status" style="margin-top:8px"></div>
     </section>
 
     <!-- Quelle wählen -->
@@ -108,12 +121,9 @@
           </div>
           <div id="textDisplay" class="text-display"></div>
           <p class="hint">
-            <span class="word-legend known-manual">bekannt markiert</span> ·
-            <span class="word-legend known-wanikani">bekannt · WaniKani</span> ·
-            <span class="word-legend known-dictionary">bekannt · Wörterbuch</span> ·
-            <span class="word-legend unknown-wanikani">unbekannt · WaniKani</span> ·
-            <span class="word-legend unknown-dictionary">unbekannt · Wörterbuch</span>
-            &nbsp;– Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
+            <span class="word-legend known">bekannt</span> ·
+            <span class="word-legend unknown">unbekannt</span>
+            &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
           </p>
         </div>
       </div>
@@ -124,6 +134,7 @@
         <div class="word-popup-char" id="wpChar"></div>
         <div class="word-popup-meta">
           <span class="tag-mini" id="wpKind"></span>
+          <span id="wpSource" class="muted"></span>
           <span id="wpLevel" class="muted"></span>
         </div>
         <div class="word-popup-meaning" id="wpMeaning"></div>

@@ -5,8 +5,9 @@ WaniKani indiziert Vokabeln über ihre Kanji-Schreibweise (der `slug`). Ein
 Wort, das im Text nur in Hiragana vorkommt (z. B. „しあい" statt „試合" – wie
 in vereinfachten Lesetexten, etwa NHK Easy News), matcht dort nie – ist aber
 trotzdem ein ganz normales, lernwertes Wort. Für genau diesen Fall wird hier
-JMdict (offenes JA-EN-Wörterbuch, https://www.edrdg.org/) über die
-Lesung statt die Kanji-Schreibweise nachgeschlagen.
+JMdict (offenes JA-DE-Wörterbuch, https://www.edrdg.org/, deutsche Glosse aus
+dem German Edition-Release von jmdict-simplified) über die Lesung statt die
+Kanji-Schreibweise nachgeschlagen.
 
 Kein `jamdict`-Paket: der offizielle JMdict-Wrapper lässt sich wegen eines
 veralteten `setup.py`-Build-Prozesses (`puchikarui`/`chirptext`) in vielen
@@ -27,11 +28,12 @@ import requests
 
 CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache"))
 JMDICT_DIR = CACHE_DIR / "jmdict"
-JMDICT_INDEX_FILE = CACHE_DIR / "jmdict_index.json"
+JMDICT_INDEX_FILE = CACHE_DIR / "jmdict_index_de.json"
 
 _RELEASES_API = "https://api.github.com/repos/scriptin/jmdict-simplified/releases/latest"
-_ASSET_PREFIX = "jmdict-eng-"
+_ASSET_PREFIX = "jmdict-ger-"
 _ASSET_SUFFIX = ".json.zip"
+_GLOSS_LANG = "ger"
 
 
 class DictionaryError(Exception):
@@ -39,9 +41,10 @@ class DictionaryError(Exception):
 
 
 def _find_asset(session: requests.Session) -> tuple[str, str]:
-    """Neuestes `jmdict-eng-*.json.zip`-Release-Asset über die GitHub-API finden.
+    """Neuestes `jmdict-ger-*.json.zip`-Release-Asset (deutsche Edition) über
+    die GitHub-API finden.
 
-    Der Dateiname trägt Version+Zeitstempel (`jmdict-eng-3.6.1+20260101.json.zip`)
+    Der Dateiname trägt Version+Zeitstempel (`jmdict-ger-3.6.1+20260101.json.zip`)
     und ändert sich mit jedem Release – deshalb dynamisch über die
     releases/latest-API auflösen statt eine feste URL zu hinterlegen.
     """
@@ -62,11 +65,11 @@ def _find_asset(session: requests.Session) -> tuple[str, str]:
             url = asset.get("browser_download_url")
             if url:
                 return name, url
-    raise DictionaryError("Kein passendes JMdict-eng-Release-Asset gefunden.")
+    raise DictionaryError("Kein passendes JMdict-ger-Release-Asset gefunden.")
 
 
 def download_jmdict(*, session: requests.Session | None = None) -> Path:
-    """JMdict (Englisch, ohne Beispielsätze) als JSON herunterladen und entpacken.
+    """JMdict (Deutsch, ohne Beispielsätze) als JSON herunterladen und entpacken.
 
     Läuft nur einmal – das Zip (~15–20 MB) und die entpackte JSON bleiben unter
     `.cache/jmdict/` liegen, ein erneuter Aufruf lädt nichts neu herunter.
@@ -105,7 +108,7 @@ MAX_GLOSSES = 4
 def build_reading_index(json_path: Path) -> dict[str, dict[str, Any]]:
     """Rohe JMdict-JSON in einen kompakten Lesungs-Index umwandeln.
 
-    `{"しあい": {"kanji": "試合", "meaning": "match; game; contest"}, …}`
+    `{"しあい": {"kanji": "試合", "meaning": "Spiel; Wettkampf"}, …}`
     Nur die *erste* Sense (Wortbedeutung) wird übernommen – reicht für eine
     Karteikarte; bei mehreren Wörtern mit derselben Lesung gewinnt das erste
     (JMdict listet gebräuchliche Wörter zuerst).
@@ -122,7 +125,7 @@ def build_reading_index(json_path: Path) -> dict[str, dict[str, Any]]:
             sense_glosses = [
                 g.get("text")
                 for g in sense.get("gloss", [])
-                if g.get("lang") == "eng" and g.get("text")
+                if g.get("lang") == _GLOSS_LANG and g.get("text")
             ]
             if sense_glosses:
                 glosses = sense_glosses

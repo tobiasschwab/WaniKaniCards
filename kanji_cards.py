@@ -171,7 +171,7 @@ class KanaCard:
 
     word: str = ""                          # Hiragana/Katakana-Schreibweise (Vorderseite)
     kanji_hint: str | None = None           # Kanji-Schreibweise laut JMdict, nur als Hinweis
-    meaning: str = ""                       # Bedeutung (JMdict, Englisch)
+    meaning: str = ""                       # Bedeutung (JMdict, Deutsch)
     sentence_ja: str | None = None          # Satz aus dem Text-Modus, in dem das Wort vorkam
     sentence_translation: str | None = None  # DeepL-Übersetzung des Satzes (optional)
     tags: list[str] = field(default_factory=list)

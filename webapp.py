@@ -507,8 +507,11 @@ def api_text_annotate() -> Any:
     - `ready`          (bool) – Karte dafür existiert bereits
                                  (WaniKani exportiert bzw. Dictionary-Karte erstellt).
     Daraus abgeleitet (bereits serverseitig berechnet, zur Bequemlichkeit):
-    - `status` – einer von `known_manual` / `known_wanikani` / `known_dictionary`
-                 / `unknown_wanikani` / `unknown_dictionary`.
+    - `status` – nur noch `known` / `unknown` (treibt die Farbcodierung im
+                 Text-Modus: grün/blau, unabhängig von Quelle oder Grund –
+                 Details wie „manuell markiert" vs. „Karte erstellt" bzw.
+                 die Quelle (`source`: `wanikani`/`dictionary`) zeigt das
+                 Wort-Popup).
     - `known`  – `manually_known or ready`, treibt die „Prozent bekannt"-Statistik
                  (Vorkommen-basiert, nicht nur eindeutige Wörter).
     """
@@ -535,11 +538,9 @@ def api_text_annotate() -> Any:
             sid: int | str = str(seg["id"]) if is_dict else int(seg["id"])
             is_manual = sid in known_manual
             is_ready = sid in (created_kana if is_dict else exported)
-            kind = "dictionary" if is_dict else "wanikani"
-            status = "known_manual" if is_manual else (f"known_{kind}" if is_ready else f"unknown_{kind}")
             seg["manually_known"] = is_manual
             seg["ready"] = is_ready
-            seg["status"] = status
+            seg["status"] = "known" if (is_manual or is_ready) else "unknown"
             seg["known"] = is_manual or is_ready
             total += 1
             if seg["known"]:
