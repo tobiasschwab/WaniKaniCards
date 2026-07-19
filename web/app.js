@@ -85,13 +85,21 @@ function segSet(id, v) {
 }
 
 // ---------- Settings ----------
+function _setConnPill(el, connected, connectedLabel) {
+  el.textContent = connected ? (connectedLabel || "Verbunden") : "Nicht verbunden";
+  el.className = "pill " + (connected ? "pill-ok" : "pill-off");
+}
 async function loadSettings() {
   const s = await api("/api/settings");
   const pill = $("#tokenPill");
-  if (s.token_set) { pill.textContent = "Token gesetzt"; pill.className = "pill pill-ok"; $("#tokenInput").placeholder = s.token_hint || ""; }
-  else { pill.textContent = "Kein Token"; pill.className = "pill pill-warn"; }
-  if (s.deepl_key_set) { $("#deeplInput").placeholder = s.deepl_key_hint || ""; }
-  if (s.gemini_key_set) { $("#geminiInput").placeholder = s.gemini_key_hint || ""; }
+  pill.textContent = s.token_set ? "WaniKani verbunden" : "WaniKani nicht verbunden";
+  pill.className = "pill " + (s.token_set ? "pill-ok" : "pill-warn");
+  if (s.token_set) $("#tokenInput").placeholder = s.token_hint || "";
+  _setConnPill($("#tokenRowPill"), s.token_set);
+  if (s.deepl_key_set) $("#deeplInput").placeholder = s.deepl_key_hint || "";
+  _setConnPill($("#deeplRowPill"), s.deepl_key_set);
+  if (s.gemini_key_set) $("#geminiInput").placeholder = s.gemini_key_hint || "";
+  _setConnPill($("#geminiRowPill"), s.gemini_key_set);
   if (s.gemini_model) { $("#geminiModel").value = s.gemini_model; }
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
@@ -297,18 +305,24 @@ function openWordPopup(el, seg) {
   const isDict = seg.source === "dictionary";
   const isGrammarOnly = seg.id == null;
   $("#wpChar").textContent = seg.text;
-  $("#wpKind").textContent = seg.kind;
-  $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : (isGrammarOnly ? "dictionary" : seg.object));
-  $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : (isGrammarOnly ? "Quelle: Gemini (Grammatik)" : "Quelle: WaniKani");
+  if (isGrammarOnly) {
+    $("#wpKind").textContent = "✨ Gemini";
+    $("#wpKind").className = "tag-mini gemini";
+    $("#wpSource").textContent = "";
+  } else {
+    $("#wpKind").textContent = seg.kind;
+    $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : seg.object);
+    $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : "Quelle: WaniKani";
+  }
   $("#wpLevel").textContent = isDict ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "") : (seg.level ? `Lv ${seg.level}` : "");
   $("#wpMeaning").textContent = seg.meaning || "";
   let note = "";
-  if (!isGrammarOnly) {
-    if (seg.manually_known) note = "✓ manuell als bekannt markiert";
-    else if (seg.ready) note = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
-  }
+  if (isGrammarOnly) note = "Kein Karteikarten-Wort – reine Grammatik-Erklärung.";
+  else if (seg.manually_known) note = "✓ manuell als bekannt markiert";
+  else if (seg.ready) note = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
   $("#wpExportedNote").textContent = note;
   $("#wpExportedNote").classList.toggle("hidden", !note);
+  $("#wpExportedNote").classList.toggle("subtle", isGrammarOnly);
   $("#wpActions").classList.toggle("hidden", isGrammarOnly);
   $("#wpAdd").textContent = isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
   $("#wpAdd").disabled = isDict && seg.ready;
@@ -689,8 +703,33 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#modeText").classList.toggle("hidden", v !== "text");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
     $("#modeWortliste").classList.toggle("hidden", v !== "wortliste");
+    document.querySelectorAll(".tab-group").forEach((g) => {
+      g.classList.toggle("sel", !!g.querySelector(`button[data-v="${v}"]`));
+    });
     if (v === "custom") loadCustoms();
     if (v === "wortliste") loadWortliste();
+  });
+
+  // Ausklapp-Elemente (Text-Modus-Erklärung, erweiterte Druckoptionen): ein
+  // Klick auf den Toggle blendet das dazugehörige data-target-Element ein/aus.
+  document.querySelectorAll(".disclosure-toggle").forEach((btn) => {
+    const body = document.getElementById(btn.dataset.target);
+    btn.addEventListener("click", () => {
+      const open = body.classList.toggle("hidden") === false;
+      btn.textContent = (open ? "▴ " : "▾ ") + btn.textContent.slice(2);
+    });
+  });
+
+  // Einstellungen: pro Integration (WaniKani/DeepL/Gemini) eine Zeile, die
+  // erst beim Anklicken das Key-Feld aufklappt (statt drei Formularen, die
+  // immer alle offen sind).
+  document.querySelectorAll(".settings-row-head").forEach((head) => {
+    const row = head.closest(".settings-row");
+    const body = row.querySelector(".settings-row-body");
+    head.addEventListener("click", () => {
+      const nowOpen = body.classList.toggle("hidden") === false;
+      row.classList.toggle("open", nowOpen);
+    });
   });
 
   $("#settingsToggle").addEventListener("click", () => $("#settingsOverlay").classList.remove("hidden"));

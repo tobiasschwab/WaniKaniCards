@@ -1,4 +1,4 @@
-# WaniKani Card Studio – Web-Frontend + Generator
+# Shiori – Web-Frontend + Generator
 FROM python:3.12-slim
 
 # WeasyPrint braucht die nativen Bibliotheken Pango/Cairo/GDK-PixBuf.

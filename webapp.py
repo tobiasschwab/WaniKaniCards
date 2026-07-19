@@ -369,7 +369,7 @@ def _run_render(job_id: str) -> None:
                 raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
 
             if anki:
-                deck_name = job.get("title") or "WaniKani Card Studio"
+                deck_name = job.get("title") or "Shiori"
                 _, n = ae.export_deck(deck, out_path, deck_name=deck_name)
             else:
                 username = load_settings().get("username", "")

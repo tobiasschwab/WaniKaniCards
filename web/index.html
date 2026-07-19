@@ -3,23 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WaniKani Card Studio</title>
+  <title>Shiori</title>
   <link rel="stylesheet" href="/style.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🈷️%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E6%A0%9E%3C/text%3E%3C/svg%3E">
 </head>
 <body>
   <div class="app">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark">字</div>
+        <div class="brand-mark">栞</div>
         <div>
-          <h1>WaniKani <span>Card Studio</span></h1>
-          <p class="tagline">Druckfertige Kanji-, Radical- &amp; Vokabel-Karten als PDF</p>
+          <h1>Shiori</h1>
+          <p class="tagline">Japanisch lesen, merken, üben – mit WaniKani, Wörterbuch &amp; KI-Grammatik</p>
         </div>
       </div>
       <button id="settingsToggle" class="icon-btn" title="Einstellungen">
         <span class="gear">⚙</span>
-        <span id="tokenPill" class="pill pill-warn">Kein Token</span>
+        <span id="tokenPill" class="pill pill-warn">WaniKani nicht verbunden</span>
       </button>
     </header>
 
@@ -31,65 +31,119 @@
           <button id="settingsClose" class="icon-btn" title="Schließen">✕</button>
         </div>
 
-        <label class="field">
-          <span class="label">WaniKani API-Token <em>(read-only genügt)</em></span>
-          <div class="token-row">
-            <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 20b059b1-eeca-…">
-            <button id="tokenShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+        <div class="settings-list">
+          <!-- WaniKani -->
+          <div class="settings-row" data-row="wanikani">
+            <button type="button" class="settings-row-head">
+              <span class="settings-icon" style="background:#2d5580">WK</span>
+              <span class="settings-row-text">
+                <span class="settings-row-title">WaniKani</span>
+                <span class="settings-row-desc">Kartendaten &amp; Lernstand</span>
+              </span>
+              <span id="tokenRowPill" class="pill pill-warn">Nicht verbunden</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="settings-row-body hidden">
+              <label class="field">
+                <span class="label">API-Token <em>(read-only genügt)</em></span>
+                <div class="token-row">
+                  <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 20b059b1-eeca-…">
+                  <button id="tokenShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+                </div>
+                <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert – keine Datenbank.</span>
+              </label>
+              <div class="row gap">
+                <button id="tokenSave" class="btn primary">Speichern</button>
+                <button id="tokenTest" class="btn">Verbindung testen</button>
+                <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
+              </div>
+              <div id="tokenStatus" class="status" style="margin-top:8px"></div>
+            </div>
           </div>
-          <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert – keine Datenbank.</span>
-        </label>
-        <div class="row gap">
-          <button id="tokenSave" class="btn primary">Speichern</button>
-          <button id="tokenTest" class="btn">Verbindung testen</button>
-          <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
-        </div>
-        <div id="tokenStatus" class="status" style="margin-top:8px"></div>
 
-        <label class="field" style="margin-top:16px">
-          <span class="label">DeepL API-Key <em>(optional, für Satzübersetzung bei Dictionary-Karten)</em></span>
-          <div class="token-row">
-            <input id="deeplInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 6316a6c7-…:fx">
-            <button id="deeplShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+          <!-- DeepL -->
+          <div class="settings-row" data-row="deepl">
+            <button type="button" class="settings-row-head">
+              <span class="settings-icon" style="background:#8f5fd6">De</span>
+              <span class="settings-row-text">
+                <span class="settings-row-title">DeepL</span>
+                <span class="settings-row-desc">Satzübersetzung für Dictionary-Karten · optional</span>
+              </span>
+              <span id="deeplRowPill" class="pill pill-off">Nicht verbunden</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="settings-row-body hidden">
+              <label class="field">
+                <span class="label">API-Key</span>
+                <div class="token-row">
+                  <input id="deeplInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 6316a6c7-…:fx">
+                  <button id="deeplShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+                </div>
+                <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
+              </label>
+              <div class="row gap">
+                <button id="deeplSave" class="btn primary">Speichern</button>
+              </div>
+              <div id="deeplStatus" class="status" style="margin-top:8px"></div>
+            </div>
           </div>
-          <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
-        </label>
-        <div class="row gap">
-          <button id="deeplSave" class="btn primary">Speichern</button>
-        </div>
-        <div id="deeplStatus" class="status" style="margin-top:8px"></div>
 
-        <label class="field" style="margin-top:16px">
-          <span class="label">Gemini API-Key <em>(optional, für Satzanalyse/Grammatik im Text-Modus)</em></span>
-          <div class="token-row">
-            <input id="geminiInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. AIzaSy…">
-            <button id="geminiShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+          <!-- Gemini -->
+          <div class="settings-row" data-row="gemini">
+            <button type="button" class="settings-row-head">
+              <span class="settings-icon" style="background:#4f7a5c">✨</span>
+              <span class="settings-row-text">
+                <span class="settings-row-title">Gemini</span>
+                <span class="settings-row-desc">Grammatikanalyse im Text-Modus · optional</span>
+              </span>
+              <span id="geminiRowPill" class="pill pill-off">Nicht verbunden</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="settings-row-body hidden">
+              <label class="field">
+                <span class="label">API-Key</span>
+                <div class="token-row">
+                  <input id="geminiInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. AIzaSy…">
+                  <button id="geminiShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+                </div>
+                <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Satztexte werden dafür an Googles Gemini-API gesendet.</span>
+              </label>
+              <label class="field" style="margin-top:10px">
+                <span class="label">Modell</span>
+                <select id="geminiModel" class="select">
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (schnell/günstig)</option>
+                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (am günstigsten)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (beste Qualität)</option>
+                </select>
+              </label>
+              <div class="row gap">
+                <button id="geminiSave" class="btn primary">Speichern</button>
+              </div>
+              <div id="geminiStatus" class="status" style="margin-top:8px"></div>
+            </div>
           </div>
-          <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Satztexte werden dafür an Googles Gemini-API gesendet.</span>
-        </label>
-        <label class="field" style="margin-top:10px">
-          <span class="label">Gemini-Modell</span>
-          <select id="geminiModel" class="select">
-            <option value="gemini-2.5-flash">gemini-2.5-flash (schnell/günstig)</option>
-            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (am günstigsten)</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro (beste Qualität)</option>
-          </select>
-        </label>
-        <div class="row gap">
-          <button id="geminiSave" class="btn primary">Speichern</button>
         </div>
-        <div id="geminiStatus" class="status" style="margin-top:8px"></div>
       </section>
     </div>
 
     <!-- Quelle wählen -->
     <section class="panel">
-      <div class="tabs" id="modeTabs" data-value="level">
-        <button data-v="level" class="active">Level-Stapel</button>
-        <button data-v="compose">Vokabel / Kanji (rekursiv)</button>
-        <button data-v="text">Aus Text</button>
-        <button data-v="custom">Frei erstellen</button>
-        <button data-v="wortliste">Wortliste</button>
+      <div class="tab-groups" id="modeTabs" data-value="level">
+        <div class="tab-group sel" data-group="create">
+          <span class="tab-group-label">Karten erstellen</span>
+          <div class="tab-group-buttons">
+            <button data-v="level" class="active">Level-Stapel</button>
+            <button data-v="compose">Suche</button>
+            <button data-v="text">Aus Text</button>
+            <button data-v="custom">Frei erstellen</button>
+          </div>
+        </div>
+        <div class="tab-group" data-group="vocab">
+          <span class="tab-group-label">Wortschatz</span>
+          <div class="tab-group-buttons">
+            <button data-v="wortliste">Wortliste</button>
+          </div>
+        </div>
       </div>
 
       <!-- Level-Modus -->
@@ -138,7 +192,9 @@
             <button id="btnTextGemini" class="btn">✨ Mit Gemini analysieren</button>
             <span id="textStatus" class="muted"></span>
           </div>
-          <p class="hint">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. „Mit Gemini analysieren" nutzt stattdessen die Gemini-API für bessere Wortgrenzen, grammatikalische Erklärungen und Satzübersetzung (Gemini-API-Key in den Einstellungen nötig, sendet die Sätze an Google).</p>
+          <p class="hint">Text einfügen, erkannte Wörter anklicken.</p>
+          <button type="button" class="disclosure-toggle" data-target="textHelp">▾ Wie funktioniert die Analyse?</button>
+          <p id="textHelp" class="hint disclosure-body hidden">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. „Mit Gemini analysieren" nutzt stattdessen die Gemini-API für bessere Wortgrenzen, grammatikalische Erklärungen und Satzübersetzung (Gemini-API-Key in den Einstellungen nötig, sendet die Sätze an Google).</p>
         </div>
 
         <div id="textResultWrap" class="hidden">
@@ -177,7 +233,7 @@
       <!-- Satz-Popup (Text-Modus, Gemini-Grammatik + Übersetzung) -->
       <div id="sentencePopup" class="word-popup hidden">
         <button id="sentencePopupClose" class="word-popup-close" title="Schließen">✕</button>
-        <div class="word-popup-meta"><span class="tag-mini dictionary">Gemini</span></div>
+        <div class="word-popup-meta"><span class="tag-mini gemini">✨ Gemini</span></div>
         <div class="word-popup-meaning" id="spTranslation"></div>
         <p id="spGrammar" class="hint" style="margin-top:8px"></p>
       </div>
@@ -298,19 +354,22 @@
                 <button data-v="a4-4up">A4 · 4/Seite</button>
               </div>
             </div>
-            <div class="opt hidden" id="paperOpt">
-              <span class="label">Papier</span>
-              <select id="paper" class="select"><option value="a4">A4</option><option value="letter">Letter</option><option value="a6">A6</option></select>
-            </div>
-            <div class="opt">
-              <span class="label">Duplex</span>
-              <div class="segmented" id="duplex" data-value="long-edge">
-                <button data-v="long-edge" class="active">Lang</button>
-                <button data-v="short-edge">Kurz</button>
+            <button type="button" class="disclosure-toggle" data-target="printAdvanced">▾ Weitere Druckoptionen</button>
+            <div id="printAdvanced" class="disclosure-body hidden">
+              <div class="opt hidden" id="paperOpt">
+                <span class="label">Papier</span>
+                <select id="paper" class="select"><option value="a4">A4</option><option value="letter">Letter</option><option value="a6">A6</option></select>
               </div>
+              <div class="opt">
+                <span class="label">Duplex</span>
+                <div class="segmented" id="duplex" data-value="long-edge">
+                  <button data-v="long-edge" class="active">Lang</button>
+                  <button data-v="short-edge">Kurz</button>
+                </div>
+              </div>
+              <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span>Schnittmarken</label>
+              <label class="switch"><input type="checkbox" id="hole"><span></span>Stanzloch</label>
             </div>
-            <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span>Schnittmarken</label>
-            <label class="switch"><input type="checkbox" id="hole"><span></span>Stanzloch</label>
           </div>
           <p id="ankiHint" class="hint hidden">Erzeugt ein <code>.apkg</code> zum lokalen Import in Anki (Datei → Importieren). Kein Docker/Anki-Netzwerk nötig.</p>
         </div>
@@ -327,7 +386,7 @@
       <p id="historyEmpty" class="muted">Noch keine Exporte.</p>
     </section>
 
-    <footer class="foot">Dateibasiert · keine Datenbank · WaniKani Card Studio</footer>
+    <footer class="foot">Dateibasiert · keine Datenbank · Shiori</footer>
   </div>
 
   <div id="toast" class="toast hidden"></div>

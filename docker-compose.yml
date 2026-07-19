@@ -1,8 +1,8 @@
 services:
-  wkcards:
+  shiori:
     build: .
-    image: wanikani-card-studio
-    container_name: wkcards
+    image: shiori
+    container_name: shiori
     ports:
       - "9020:8000"
     volumes:

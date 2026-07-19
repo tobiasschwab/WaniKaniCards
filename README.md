@@ -5,7 +5,7 @@ doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
 **Kanji** oder die **Radicals** des Levels (`--type`).
 
 > **Web-Frontend & Docker:** Für die grafische Oberfläche (API-Token setzen,
-> Level wählen, Download, Verlauf) siehe [Web-Frontend (Docker)](#web-frontend-docker).
+> Level wählen, Download, Verlauf) siehe [Shiori (Docker)](#web-frontend-shiori-docker).
 
 **Kanji-Karten**
 
@@ -57,10 +57,14 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
 
 ## Vier Wege zu den Karten (Web)
 
+Die Moduswahl ist in zwei Gruppen sortiert: **„Karten erstellen"** (die vier
+Wege unten) und **„Wortschatz"** (die [Wortliste](#wortliste) – dort geht es
+ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
+
 1. **Level-Stapel:** ein Level auflisten – per Checkbox **Radicals**, **Kanji**
    und/oder **Vokabeln** kombinieren (mehrere gleichzeitig möglich; alle drei
    angehakt exportiert den kompletten Levelinhalt in einem Rutsch).
-2. **Vokabel / Kanji (rekursiv):** eine Vokabel oder ein Kanji suchen und über
+2. **Suche (Vokabel/Kanji, rekursiv):** eine Vokabel oder ein Kanji suchen und über
    die **Komposition absteigen** – die enthaltenen Kanji und Radicals werden
    rekursiv mit aufgelöst (Vokabel → Kanji → Radicals). Mehrere Vokabeln
    nacheinander suchen und anklicken **hängt** deren Kompositionen an dieselbe
@@ -229,11 +233,6 @@ sich an dieselbe Tabelle an (hier 一人 + 大きい, 8 Karten kombiniert):
 bekannt markieren":
 
 ![Web-Frontend: Wort-Popup im Text-Modus](previews/webui_text_popup.png)
-
-Die „Vorschau" nach dem Erzeugen – nur noch ein Download-Button, kein
-eingebettetes PDF/Anki-Icon mehr:
-
-![Web-Frontend: vereinfachte Vorschau](previews/webui_preview_simplified.png)
 
 **Radicals** und **A6 (eine Karte/Seite)**:
 
@@ -441,17 +440,21 @@ stabile Anki-Notiz-ID verwendet: ein erneuter Export nach Lernfortschritt
 Noto-JP-Schriften sind im `.apkg` eingebettet, Kanji werden also auch ohne
 lokal installierte japanische Schrift sauber dargestellt.
 
-## Web-Frontend (Docker)
+## Web-Frontend: Shiori (Docker)
 
-Ein modernes Web-Frontend (`webapp.py`, Flask): **API-Token setzen**, Karten
-über **Level-Stapel** oder **rekursive Komposition** auflisten, in einer
-**Tabelle auswählen**, daraus **ein PDF oder Anki-Paket** erzeugen,
-**Vorschau** im Browser und ein **Verlauf**. Es gibt **keine Datenbank** –
-alles wird dateibasiert im Ordner `data/` gespeichert:
+**Shiori** (栞, jap. „Lesezeichen") ist das Web-Frontend (`webapp.py`, Flask)
+zu diesem Projekt – gewachsen von einem reinen WaniKani-PDF-Export zu einem
+Werkzeug, das WaniKani, ein deutsches Wörterbuch (JMdict) und optional
+Gemini-Grammatikanalyse kombiniert: Karten über **Level-Stapel**, **Suche**
+(rekursive Komposition), den **Text-Modus** oder **frei** erstellen, in einer
+**Tabelle auswählen**, daraus **ein PDF oder Anki-Paket** erzeugen, dazu eine
+**Wortliste** über alles, was schon bekannt ist, und ein **Verlauf** mit
+Direkt-Download. Es gibt **keine Datenbank** – alles wird dateibasiert im
+Ordner `data/` gespeichert:
 
 ```
 data/
-├── settings.json          # API-Token, DeepL-Key (+ zuletzt genutzte Optionen)
+├── settings.json          # API-Token, DeepL-/Gemini-Key (+ zuletzt genutzte Optionen)
 ├── known.json             # manuell als „bekannt" markierte IDs (Text-Modus/Wortliste)
 ├── known_meta.json        # Anzeige-Metadaten dazu (Zeichen/Bedeutung/…), für die Wortliste
 ├── customcards/<id>.json  # frei erstellte Karten
@@ -459,7 +462,7 @@ data/
 ├── output/<id>.pdf        # erzeugte PDFs
 ├── output/<id>.apkg       # erzeugte Anki-Pakete
 ├── jobs/<id>.json         # Job-Status/Metadaten
-└── .cache/                # WaniKani-API- und JMdict-Cache
+└── .cache/                # WaniKani-API-, JMdict- und Gemini-Cache
 ```
 
 ![Web-Frontend](previews/webui.png)

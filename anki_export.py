@@ -380,7 +380,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
     return {
         "radical": genanki.Model(
             _MODEL_ID_RADICAL,
-            "WaniKani Card Studio – Radical",
+            "Shiori – Radical",
             fields=[
                 {"name": n}
                 for n in (
@@ -394,7 +394,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
         ),
         "kanji": genanki.Model(
             _MODEL_ID_KANJI,
-            "WaniKani Card Studio – Kanji",
+            "Shiori – Kanji",
             fields=[
                 {"name": n}
                 for n in (
@@ -413,7 +413,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
         ),
         "vocab": genanki.Model(
             _MODEL_ID_VOCAB,
-            "WaniKani Card Studio – Vokabel",
+            "Shiori – Vokabel",
             fields=[
                 {"name": n}
                 for n in (
@@ -428,7 +428,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
         ),
         "custom": genanki.Model(
             _MODEL_ID_CUSTOM,
-            "WaniKani Card Studio – Frei",
+            "Shiori – Frei",
             fields=[{"name": n} for n in ("FrontHtml", "BackHtml", "TagsHtml")],
             templates=[{"name": "Frei", "qfmt": _CUSTOM_FRONT, "afmt": _CUSTOM_BACK}],
             css=_CSS,
@@ -436,7 +436,7 @@ def _build_models(genanki: Any) -> dict[str, Any]:
         ),
         "kana": genanki.Model(
             _MODEL_ID_KANA,
-            "WaniKani Card Studio – Dictionary",
+            "Shiori – Dictionary",
             fields=[
                 {"name": n}
                 for n in ("Word", "Meaning", "KanjiHintHtml", "SentenceHtml", "TagsHtml", "MeaningPlain")
@@ -742,7 +742,7 @@ def export_deck(
     cards: Sequence[Any],
     output: str | Path,
     *,
-    deck_name: str = "WaniKani Card Studio",
+    deck_name: str = "Shiori",
 ) -> tuple[Path, int]:
     """Card-/RadicalCard-/VocabCard-/CustomCard-Objekte als .apkg exportieren.
 
@@ -801,7 +801,7 @@ def export_subjects(
         sample=sample,
         sentence_overrides=sentence_overrides,
     )
-    return export_deck(cards, output, deck_name=deck_name or "WaniKani Card Studio")
+    return export_deck(cards, output, deck_name=deck_name or "Shiori")
 
 
 def export_custom(
@@ -814,4 +814,4 @@ def export_custom(
     cards = [kc.build_custom_card(d) for d in cards_data]
     if not cards:
         raise AnkiExportError("Keine Karten ausgewählt.")
-    return export_deck(cards, output, deck_name=deck_name or "WaniKani Card Studio – Eigene Karten")
+    return export_deck(cards, output, deck_name=deck_name or "Shiori – Eigene Karten")
