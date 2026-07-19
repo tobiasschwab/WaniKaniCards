@@ -69,6 +69,13 @@ body {
 }
 .panel h2 { margin: 0 0 16px; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
 
+/* Einstellungen-Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(10,12,16,.5); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal-overlay.hidden { display: none; }
+.modal-panel { background: var(--bg-elev); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px clamp(18px, 3vw, 28px); width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.modal-head h2 { margin: 0; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+
 .grid { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 20px; align-items: start; }
 @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
 
@@ -254,12 +261,17 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .word-token { cursor: pointer; border-radius: 4px; padding: 0 1px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 .word-token.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-token.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-token.info { color: var(--accent); text-decoration-color: var(--accent); }
 .word-token:hover { background: rgba(109,59,245,.1); }
 .word-token.known:hover { background: rgba(22,163,74,.1); }
 .word-token.unknown:hover { background: rgba(0,180,216,.1); }
+.word-token.info:hover { background: rgba(109,59,245,.1); }
 .word-legend { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 .word-legend.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-legend.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-legend.info { color: var(--accent); text-decoration-color: var(--accent); }
+.sentence-info-btn { border: 0; background: none; cursor: pointer; color: var(--accent); font-size: 13px; padding: 0 2px; vertical-align: super; }
+.sentence-info-btn:hover { text-decoration: underline; }
 
 /* Wort-Popup */
 .word-popup {

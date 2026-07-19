@@ -43,6 +43,7 @@ from kanji_cards import (  # noqa: E402
 )
 
 import dictionary as dic
+import gemini_client
 
 
 # --------------------------------------------------------------------------- #
@@ -808,6 +809,73 @@ def test_annotate_text_wanikani_match_wins_over_dictionary_fallback(monkeypatch)
     lines = annotate_text("大きい山です。", sample=True)
     seg = next(s for s in lines[0] if s["type"] == "word" and s["lemma"] == "大きい")
     assert seg["source"] == "wanikani"
+
+
+# --------------------------------------------------------------------------- #
+# annotate_text: Gemini-Analyse (mit Fallback auf Janome)
+# --------------------------------------------------------------------------- #
+
+def _fake_gemini(tokens, grammar_notes="Notiz", translation_de="Übersetzung"):
+    def _analyze(sentence, api_key, *, model=gemini_client.DEFAULT_MODEL, session=None, use_cache=True):
+        return {"tokens": tokens, "grammar_notes": grammar_notes, "translation_de": translation_de}
+    return _analyze
+
+
+def test_annotate_text_uses_gemini_tokens_when_reconstruction_matches(monkeypatch):
+    tokens = [
+        {"surface": "しあい", "dictionary_form": "しあい", "function": "Subjekt"},
+        {"surface": "が", "dictionary_form": "が", "function": "Partikel (Subjektmarker)"},
+        {"surface": "はじまった", "dictionary_form": "はじまる", "function": "Verb, Vergangenheit"},
+        {"surface": "。", "dictionary_form": "。", "function": "Satzzeichen"},
+    ]
+    monkeypatch.setattr(gemini_client, "analyze_sentence", _fake_gemini(tokens))
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "Spiel; Wettkampf"}})
+
+    lines = annotate_text("しあいがはじまった。", sample=True, gemini_key="dummy")
+    segs = lines[0]
+    assert "".join(s["text"] for s in segs) == "しあいがはじまった。"
+
+    dict_word = next(s for s in segs if s.get("source") == "dictionary")
+    assert dict_word["text"] == "しあい"
+
+    gemini_words = {s["text"]: s for s in segs if s.get("source") == "gemini"}
+    assert gemini_words["が"]["id"] is None
+    assert gemini_words["が"]["meaning"] == "Partikel (Subjektmarker)"
+    assert gemini_words["はじまった"]["meaning"] == "Verb, Vergangenheit"
+    assert "。" not in gemini_words  # reines Satzzeichen wird nicht zur Info-Blase
+
+    info = next(s for s in segs if s["type"] == "sentence-info")
+    assert info["text"] == ""
+    assert info["grammar_notes"] == "Notiz"
+    assert info["translation_de"] == "Übersetzung"
+
+
+def test_annotate_text_falls_back_to_janome_when_gemini_reconstruction_mismatches(monkeypatch):
+    # Gemini liefert Tokens, deren Surface-Formen NICHT zum Original passen
+    # (z. B. halluziniertes Extra-Zeichen) -> Janome-Ergebnis bleibt bestehen.
+    tokens = [{"surface": "komplett anders", "dictionary_form": "x", "function": "y"}]
+    monkeypatch.setattr(gemini_client, "analyze_sentence", _fake_gemini(tokens))
+
+    lines = annotate_text("大きい山です。", sample=True, gemini_key="dummy")
+    segs = lines[0]
+    assert "".join(s["text"] for s in segs) == "大きい山です。"
+    assert not any(s.get("source") == "gemini" for s in segs)
+    seg = next(s for s in segs if s["type"] == "word" and s["lemma"] == "大きい")
+    assert seg["source"] == "wanikani"  # Janome-Pipeline unverändert
+
+
+def test_annotate_text_falls_back_to_janome_when_gemini_returns_none(monkeypatch):
+    monkeypatch.setattr(gemini_client, "analyze_sentence", lambda *a, **k: None)
+    lines = annotate_text("大きい山です。", sample=True, gemini_key="dummy")
+    seg = next(s for s in lines[0] if s["type"] == "word" and s["lemma"] == "大きい")
+    assert seg["source"] == "wanikani"
+
+
+def test_annotate_text_without_gemini_key_never_calls_gemini(monkeypatch):
+    called = []
+    monkeypatch.setattr(gemini_client, "analyze_sentence", lambda *a, **k: called.append(1) or None)
+    annotate_text("大きい山です。", sample=True)
+    assert called == []
 
 
 # --------------------------------------------------------------------------- #

@@ -105,13 +105,26 @@ dezent unten rechts den **WaniKani-Benutzernamen**.
    |---|---|
    | Grün „bekannt" | manuell als bekannt markiert **oder** Karte/Export existiert bereits |
    | Blau „unbekannt" | weder markiert noch Karte/Export vorhanden |
+   | Violett „Grammatik-Info" | nur mit Gemini-Analyse (s. u.): Partikel/Grammatikform ohne WaniKani-/Dictionary-Treffer, aber von Gemini erklärt – rein informativ, keine Karte erzeugbar |
 
-   Details (Quelle WaniKani/Wörterbuch, ob manuell markiert oder weil eine
-   Karte existiert) zeigt das Popup beim Anklicken des Worts.
+   Details (Quelle WaniKani/Wörterbuch/Gemini, ob manuell markiert oder weil
+   eine Karte existiert) zeigt das Popup beim Anklicken des Worts.
 
    Für Dictionary-Wörter erzeugt das Popup statt „Zur Tabelle" den Button
    **„Dictionary-Karte erstellen"** – ein neuer, WaniKani-unabhängiger
    Kartentyp (siehe [Dictionary-Karten](#dictionary-karten)).
+
+   **Optional: Analyse per Gemini.** Der Button **„✨ Mit Gemini analysieren"**
+   (statt „Verarbeiten") schickt jeden Satz an Googles
+   [Gemini-API](https://ai.google.dev/) (Key + Modell in den Einstellungen
+   hinterlegen) und liefert bessere Wortgrenzen, die grammatikalische
+   Funktion jedes Worts/Partikels sowie – per **ⓘ**-Symbol am Satzende – eine
+   kurze Grammatik-Erklärung und eine natürliche deutsche Übersetzung des
+   ganzen Satzes. Kein automatischer Ersatz für „Verarbeiten": ein expliziter
+   Klick, da jeder Aufruf Kosten verursacht und Satztexte an Google sendet.
+   Schlägt Gemini für einen Satz fehl (kein Key, Netzwerkfehler, Quota) oder
+   passen seine Wortgrenzen nicht exakt zum Original, bleibt für genau diesen
+   Satz die normale Janome-Analyse bestehen – nie ein harter Abbruch.
 4. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
@@ -505,11 +518,26 @@ vorher so angelegt.
 Jedes Wort im Text-Modus bekommt zwei rohe Signale vom Backend
 (`/api/text-annotate`): `manually_known` (aus `data/known.json`) und `ready`
 (WaniKani bereits exportiert bzw. Dictionary-Karte bereits erstellt) – daraus
-berechnet sowohl der Server (`status`, für die Erstanzeige) als auch das
-Frontend lokal (`applySegChange()` in `web/app.js`) denselben fünfstufigen
+berechnet sowohl der Server (`status`: `known`/`unknown`, für die Erstanzeige)
+als auch das Frontend lokal (`applySegChange()` in `web/app.js`) denselben
 Status, ohne bei jedem Umschalten („bekannt markieren"/entfernen, Dictionary-
 Karte erstellen) einen kompletten Server-Roundtrip über `/api/text-annotate`
-zu brauchen.
+zu brauchen. Wörter ohne WaniKani-/Dictionary-Treffer, die nur über Gemini
+erklärt werden (`source: "gemini"`), haben `id: null`, bekommen `status:
+"info"` und fließen nicht in die Bekannt/Unbekannt-Statistik ein.
+
+**Gemini-Analyse** (`gemini_client.py`, optional, unabhängig von WaniKani/
+Dictionary): ein REST-Call pro Satz gegen `generativelanguage.googleapis.com`
+(kein SDK, reines `requests` wie bei DeepL/GitHub) mit `responseSchema` für
+garantiert valides JSON (Tokens mit `dictionary_form` + grammatikalischer
+Funktion, `grammar_notes`, `translation_de`) statt Markdown-Tabellen-Parsing.
+Ergebnisse werden pro Satz unter `.cache/gemini/` gecacht (Schlüssel: Modell +
+Satztext). `annotate_text()` ersetzt eine Janome-Satzgruppe nur durch Gemini,
+wenn dessen Tokens **exakt** zum Original-Text rekonstruieren – sonst (kein
+Key, Netzwerkfehler, Quota, kaputte/abweichende Antwort) bleibt die
+Janome-Tokenisierung für genau diesen Satz unverändert (nie ein harter
+Abbruch für den gesamten Text). `dictionary_form` ersetzt dabei Janomes
+`base_form` als Schlüssel für den WaniKani-/JMdict-Abgleich.
 
 Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-
 Liste: bereits exportierte/manuell markierte WaniKani-Subjects (Anzeige-Daten
@@ -529,12 +557,13 @@ pytest
 
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 `paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`annotate_text`
-(Text-Modus, inkl. Wörterbuch-Fallback), `dictionary.py` (JMdict-Download/
--Index, DeepL-Übersetzung), `KanaCard`-Bau sowie das Auflösen bereits
-exportierter bzw. manuell als bekannt markierter Subject-/Dictionary-IDs,
-die Wortlisten-Aggregation und die Anki-Notiztypen im Web-Frontend
-(`webapp._already_exported_ids`, `webapp.load_known`/`save_known`,
-`webapp.api_wortliste`, `anki_export._kana_note`).
+(Text-Modus, inkl. Wörterbuch- und Gemini-Fallback), `dictionary.py`
+(JMdict-Download/-Index, DeepL-Übersetzung), `gemini_client.py`
+(Satzanalyse, Caching, 429-Backoff, Fehlerfälle), `KanaCard`-Bau sowie das
+Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
+Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen im
+Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/
+`save_known`, `webapp.api_wortliste`, `anki_export._kana_note`).
 
 Die Test-Suite selbst läuft gemockt (kein Netzwerkzugriff nötig, `pytest`
 ist offline lauffähig). Live gegen echte Endpunkte verifiziert wurden
@@ -545,4 +574,9 @@ selbst (`dictionary.download_jmdict()` gegen die echte GitHub-Releases-API
 von `scriptin/jmdict-simplified`) konnte in der Entwicklungsumgebung aus
 Netzwerk-Policy-Gründen noch nicht live getestet werden; der übrige
 Dictionary-Pfad (Index-Aufbau, Kartenerstellung, Anki-Export) wurde mit
-einem simulierten Index-Eintrag live durchgespielt und funktioniert.
+einem simulierten Index-Eintrag live durchgespielt und funktioniert. Der
+Gemini-Fallback auf Janome wurde live gegen die echte
+`generativelanguage.googleapis.com`-API verifiziert (mit ungültigem Key:
+Request schlägt fehl, `annotate_text()` liefert unverändert das
+Janome-Ergebnis) – ein echter Gemini-Key lag in dieser Session nicht vor,
+die Analyse-Qualität selbst ist daher nur gegen Mocks getestet.

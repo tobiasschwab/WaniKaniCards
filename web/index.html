@@ -23,37 +23,64 @@
       </button>
     </header>
 
-    <!-- Einstellungen -->
-    <section id="settingsPanel" class="panel settings hidden">
-      <h2>Einstellungen</h2>
-      <label class="field">
-        <span class="label">WaniKani API-Token <em>(read-only genügt)</em></span>
-        <div class="token-row">
-          <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 20b059b1-eeca-…">
-          <button id="tokenShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+    <!-- Einstellungen (Modal) -->
+    <div id="settingsOverlay" class="modal-overlay hidden">
+      <section id="settingsPanel" class="modal-panel">
+        <div class="modal-head">
+          <h2>Einstellungen</h2>
+          <button id="settingsClose" class="icon-btn" title="Schließen">✕</button>
         </div>
-        <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert – keine Datenbank.</span>
-      </label>
-      <div class="row gap">
-        <button id="tokenSave" class="btn primary">Speichern</button>
-        <button id="tokenTest" class="btn">Verbindung testen</button>
-        <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
-      </div>
-      <div id="tokenStatus" class="status" style="margin-top:8px"></div>
 
-      <label class="field" style="margin-top:16px">
-        <span class="label">DeepL API-Key <em>(optional, für Satzübersetzung bei Dictionary-Karten)</em></span>
-        <div class="token-row">
-          <input id="deeplInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 6316a6c7-…:fx">
-          <button id="deeplShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+        <label class="field">
+          <span class="label">WaniKani API-Token <em>(read-only genügt)</em></span>
+          <div class="token-row">
+            <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 20b059b1-eeca-…">
+            <button id="tokenShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+          </div>
+          <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert – keine Datenbank.</span>
+        </label>
+        <div class="row gap">
+          <button id="tokenSave" class="btn primary">Speichern</button>
+          <button id="tokenTest" class="btn">Verbindung testen</button>
+          <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
         </div>
-        <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
-      </label>
-      <div class="row gap">
-        <button id="deeplSave" class="btn primary">Speichern</button>
-      </div>
-      <div id="deeplStatus" class="status" style="margin-top:8px"></div>
-    </section>
+        <div id="tokenStatus" class="status" style="margin-top:8px"></div>
+
+        <label class="field" style="margin-top:16px">
+          <span class="label">DeepL API-Key <em>(optional, für Satzübersetzung bei Dictionary-Karten)</em></span>
+          <div class="token-row">
+            <input id="deeplInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 6316a6c7-…:fx">
+            <button id="deeplShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+          </div>
+          <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
+        </label>
+        <div class="row gap">
+          <button id="deeplSave" class="btn primary">Speichern</button>
+        </div>
+        <div id="deeplStatus" class="status" style="margin-top:8px"></div>
+
+        <label class="field" style="margin-top:16px">
+          <span class="label">Gemini API-Key <em>(optional, für Satzanalyse/Grammatik im Text-Modus)</em></span>
+          <div class="token-row">
+            <input id="geminiInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. AIzaSy…">
+            <button id="geminiShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+          </div>
+          <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Satztexte werden dafür an Googles Gemini-API gesendet.</span>
+        </label>
+        <label class="field" style="margin-top:10px">
+          <span class="label">Gemini-Modell</span>
+          <select id="geminiModel" class="select">
+            <option value="gemini-2.5-flash">gemini-2.5-flash (schnell/günstig)</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (am günstigsten)</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro (beste Qualität)</option>
+          </select>
+        </label>
+        <div class="row gap">
+          <button id="geminiSave" class="btn primary">Speichern</button>
+        </div>
+        <div id="geminiStatus" class="status" style="margin-top:8px"></div>
+      </section>
+    </div>
 
     <!-- Quelle wählen -->
     <section class="panel">
@@ -108,9 +135,10 @@
           </label>
           <div class="row gap">
             <button id="btnTextProcess" class="btn primary">Verarbeiten</button>
+            <button id="btnTextGemini" class="btn">✨ Mit Gemini analysieren</button>
             <span id="textStatus" class="muted"></span>
           </div>
-          <p class="hint">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren.</p>
+          <p class="hint">Der Text wird lemmatisiert (Grundformen der Wörter) und gegen WaniKani abgeglichen. Erkannte Wörter werden anschließend anklickbar – dort einzeln zur Tabelle hinzufügen oder als „bekannt" markieren. „Mit Gemini analysieren" nutzt stattdessen die Gemini-API für bessere Wortgrenzen, grammatikalische Erklärungen und Satzübersetzung (Gemini-API-Key in den Einstellungen nötig, sendet die Sätze an Google).</p>
         </div>
 
         <div id="textResultWrap" class="hidden">
@@ -122,8 +150,9 @@
           <div id="textDisplay" class="text-display"></div>
           <p class="hint">
             <span class="word-legend known">bekannt</span> ·
-            <span class="word-legend unknown">unbekannt</span>
-            &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
+            <span class="word-legend unknown">unbekannt</span> ·
+            <span class="word-legend info">Grammatik-Info (Gemini)</span>
+            &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren. <strong>ⓘ</strong> am Satzende zeigt Grammatik-Erklärung &amp; Übersetzung.
           </p>
         </div>
       </div>
@@ -139,10 +168,18 @@
         </div>
         <div class="word-popup-meaning" id="wpMeaning"></div>
         <div id="wpExportedNote" class="word-popup-note hidden">✓ bereits exportiert</div>
-        <div class="row gap" style="margin-top:10px">
+        <div id="wpActions" class="row gap" style="margin-top:10px">
           <button id="wpAdd" class="btn primary small">+ Zur Tabelle</button>
           <button id="wpKnown" class="btn small">Als bekannt markieren</button>
         </div>
+      </div>
+
+      <!-- Satz-Popup (Text-Modus, Gemini-Grammatik + Übersetzung) -->
+      <div id="sentencePopup" class="word-popup hidden">
+        <button id="sentencePopupClose" class="word-popup-close" title="Schließen">✕</button>
+        <div class="word-popup-meta"><span class="tag-mini dictionary">Gemini</span></div>
+        <div class="word-popup-meaning" id="spTranslation"></div>
+        <p id="spGrammar" class="hint" style="margin-top:8px"></p>
       </div>
 
       <!-- Frei-Modus: freier Karten-Editor (zwei Rich-Text-Felder) -->

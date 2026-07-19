@@ -91,6 +91,8 @@ async function loadSettings() {
   if (s.token_set) { pill.textContent = "Token gesetzt"; pill.className = "pill pill-ok"; $("#tokenInput").placeholder = s.token_hint || ""; }
   else { pill.textContent = "Kein Token"; pill.className = "pill pill-warn"; }
   if (s.deepl_key_set) { $("#deeplInput").placeholder = s.deepl_key_hint || ""; }
+  if (s.gemini_key_set) { $("#geminiInput").placeholder = s.gemini_key_hint || ""; }
+  if (s.gemini_model) { $("#geminiModel").value = s.gemini_model; }
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
   if (d.types && d.types.length) chipcheckSet("type", d.types);
@@ -226,13 +228,13 @@ function clearCompose() {
 }
 
 // ---------- Text-Modus ----------
-async function doTextProcess() {
+async function doTextProcess(useGemini) {
   const text = $("#textInput").value;
   if (!text.trim()) return;
-  $("#textStatus").textContent = "Analysiere…";
+  $("#textStatus").textContent = useGemini ? "Analysiere mit Gemini…" : "Analysiere…";
   let r;
   try {
-    r = await api("/api/text-annotate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample() }) });
+    r = await api("/api/text-annotate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample(), use_gemini: !!useGemini }) });
   } catch (e) {
     $("#textStatus").textContent = "";
     toast(e.message, true);
@@ -273,6 +275,14 @@ function renderAnnotatedText(lines) {
         span._seg = seg;
         span.addEventListener("click", (e) => openWordPopup(e.currentTarget, seg));
         p.append(span);
+      } else if (seg.type === "sentence-info") {
+        if (seg.grammar_notes || seg.translation_de) {
+          const btn = document.createElement("button");
+          btn.className = "sentence-info-btn"; btn.type = "button"; btn.textContent = "ⓘ";
+          btn.title = "Grammatik & Übersetzung (Gemini)";
+          btn.addEventListener("click", (e) => openSentencePopup(e.currentTarget, seg));
+          p.append(btn);
+        }
       } else {
         p.append(document.createTextNode(seg.text));
       }
@@ -285,17 +295,21 @@ function openWordPopup(el, seg) {
   activeWordSeg = seg;
   const pop = $("#wordPopup");
   const isDict = seg.source === "dictionary";
+  const isGrammarOnly = seg.id == null;
   $("#wpChar").textContent = seg.text;
   $("#wpKind").textContent = seg.kind;
-  $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : seg.object);
-  $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : "Quelle: WaniKani";
+  $("#wpKind").className = "tag-mini " + (isDict ? "dictionary" : (isGrammarOnly ? "dictionary" : seg.object));
+  $("#wpSource").textContent = isDict ? "Quelle: Wörterbuch" : (isGrammarOnly ? "Quelle: Gemini (Grammatik)" : "Quelle: WaniKani");
   $("#wpLevel").textContent = isDict ? (seg.kanji_hint ? `auch ${seg.kanji_hint}` : "") : (seg.level ? `Lv ${seg.level}` : "");
   $("#wpMeaning").textContent = seg.meaning || "";
   let note = "";
-  if (seg.manually_known) note = "✓ manuell als bekannt markiert";
-  else if (seg.ready) note = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
+  if (!isGrammarOnly) {
+    if (seg.manually_known) note = "✓ manuell als bekannt markiert";
+    else if (seg.ready) note = isDict ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
+  }
   $("#wpExportedNote").textContent = note;
   $("#wpExportedNote").classList.toggle("hidden", !note);
+  $("#wpActions").classList.toggle("hidden", isGrammarOnly);
   $("#wpAdd").textContent = isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
   $("#wpAdd").disabled = isDict && seg.ready;
   $("#wpKnown").textContent = seg.manually_known ? "Bekannt-Markierung entfernen" : "Als bekannt markieren";
@@ -310,9 +324,23 @@ function openWordPopup(el, seg) {
 }
 function closeWordPopup() { $("#wordPopup").classList.add("hidden"); activeWordSeg = null; }
 
+function openSentencePopup(el, seg) {
+  const pop = $("#sentencePopup");
+  $("#spTranslation").textContent = seg.translation_de || "";
+  $("#spGrammar").textContent = seg.grammar_notes || "";
+  const rect = el.getBoundingClientRect();
+  pop.classList.remove("hidden");
+  const popW = pop.offsetWidth || 240;
+  let left = rect.left;
+  if (left + popW > window.innerWidth - 10) left = window.innerWidth - popW - 10;
+  pop.style.left = `${Math.max(10, left)}px`;
+  pop.style.top = `${rect.bottom + 8}px`;
+}
+function closeSentencePopup() { $("#sentencePopup").classList.add("hidden"); }
+
 function wpAddClicked() {
   const seg = activeWordSeg;
-  if (!seg) return;
+  if (!seg || seg.id == null) return;
   if (seg.source === "dictionary") createKanaCardFromPopup();
   else addWordFromPopup();
 }
@@ -375,7 +403,7 @@ function applySegChange(seg, patch) {
 
 async function toggleKnownFromPopup() {
   const seg = activeWordSeg;
-  if (!seg) return;
+  if (!seg || seg.id == null) return;
   const makeKnown = !seg.manually_known;
   try {
     await api(`/api/known/${seg.id}`, { method: makeKnown ? "POST" : "DELETE" });
@@ -665,7 +693,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (v === "wortliste") loadWortliste();
   });
 
-  $("#settingsToggle").addEventListener("click", () => $("#settingsPanel").classList.toggle("hidden"));
+  $("#settingsToggle").addEventListener("click", () => $("#settingsOverlay").classList.remove("hidden"));
+  $("#settingsClose").addEventListener("click", () => $("#settingsOverlay").classList.add("hidden"));
+  $("#settingsOverlay").addEventListener("click", (e) => { if (e.target === $("#settingsOverlay")) $("#settingsOverlay").classList.add("hidden"); });
   $("#tokenShow").addEventListener("click", () => { const i = $("#tokenInput"); i.type = i.type === "password" ? "text" : "password"; });
   $("#tokenSave").addEventListener("click", async () => {
     try { await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: $("#tokenInput").value }) });
@@ -688,6 +718,14 @@ document.addEventListener("DOMContentLoaded", () => {
       $("#deeplInput").value = ""; await loadSettings(); toast("Gespeichert"); st.textContent = "DeepL-Key gespeichert ✓"; st.className = "status ok";
     } catch (e) { st.textContent = e.message; st.className = "status err"; }
   });
+  $("#geminiShow").addEventListener("click", () => { const i = $("#geminiInput"); i.type = i.type === "password" ? "text" : "password"; });
+  $("#geminiSave").addEventListener("click", async () => {
+    const st = $("#geminiStatus");
+    try {
+      await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gemini_key: $("#geminiInput").value, gemini_model: $("#geminiModel").value }) });
+      $("#geminiInput").value = ""; await loadSettings(); toast("Gespeichert"); st.textContent = "Gemini-Einstellungen gespeichert ✓"; st.className = "status ok";
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
+  });
 
   $("#btnLevel").addEventListener("click", async () => {
     const level = parseInt($("#level").value, 10);
@@ -703,16 +741,18 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
   $("#btnComposeClear").addEventListener("click", clearCompose);
   $("#btnComposeClear2").addEventListener("click", clearCompose);
-  $("#btnTextProcess").addEventListener("click", doTextProcess);
+  $("#btnTextProcess").addEventListener("click", () => doTextProcess(false));
+  $("#btnTextGemini").addEventListener("click", () => doTextProcess(true));
   $("#btnTextEdit").addEventListener("click", backToTextEdit);
   $("#wpAdd").addEventListener("click", wpAddClicked);
   $("#wpKnown").addEventListener("click", toggleKnownFromPopup);
   $("#wordPopupClose").addEventListener("click", closeWordPopup);
+  $("#sentencePopupClose").addEventListener("click", closeSentencePopup);
   document.addEventListener("click", (e) => {
     const pop = $("#wordPopup");
-    if (pop.classList.contains("hidden")) return;
-    if (pop.contains(e.target) || e.target.classList.contains("word-token")) return;
-    closeWordPopup();
+    if (!pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.classList.contains("word-token")) closeWordPopup();
+    const spop = $("#sentencePopup");
+    if (!spop.classList.contains("hidden") && !spop.contains(e.target) && !e.target.classList.contains("sentence-info-btn")) closeSentencePopup();
   });
 
   // Frei-Editor: Rich-Text-Toolbars (mousedown, damit die Auswahl erhalten bleibt)

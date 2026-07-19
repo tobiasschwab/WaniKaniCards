@@ -43,6 +43,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "token": "",
     "username": "",
     "deepl_key": "",
+    "gemini_key": "",
+    "gemini_model": kc.gemini_client.DEFAULT_MODEL,
     "defaults": {
         "level": 1,
         "types": ["kanji"],
@@ -417,12 +419,17 @@ def api_get_settings() -> Any:
     s = load_settings()
     token = s.get("token", "")
     deepl_key = s.get("deepl_key", "")
+    gemini_key = s.get("gemini_key", "")
     return jsonify(
         {
             "token_set": bool(token),
             "token_hint": _mask(token),
             "deepl_key_set": bool(deepl_key),
             "deepl_key_hint": _mask(deepl_key),
+            "gemini_key_set": bool(gemini_key),
+            "gemini_key_hint": _mask(gemini_key),
+            "gemini_model": s.get("gemini_model", kc.gemini_client.DEFAULT_MODEL),
+            "gemini_models": list(kc.gemini_client.AVAILABLE_MODELS),
             "defaults": s["defaults"],
         }
     )
@@ -437,6 +444,10 @@ def api_post_settings() -> Any:
         s["username"] = _fetch_username(s["token"])  # für den Kartenaufdruck
     if isinstance(body.get("deepl_key"), str):
         s["deepl_key"] = body["deepl_key"].strip()
+    if isinstance(body.get("gemini_key"), str):
+        s["gemini_key"] = body["gemini_key"].strip()
+    if isinstance(body.get("gemini_model"), str) and body["gemini_model"] in kc.gemini_client.AVAILABLE_MODELS:
+        s["gemini_model"] = body["gemini_model"]
     if isinstance(body.get("defaults"), dict):
         s["defaults"] = {**s["defaults"], **body["defaults"]}
     save_settings(s)
@@ -514,14 +525,33 @@ def api_text_annotate() -> Any:
                  Wort-Popup).
     - `known`  – `manually_known or ready`, treibt die „Prozent bekannt"-Statistik
                  (Vorkommen-basiert, nicht nur eindeutige Wörter).
+
+    `use_gemini` (bool): Sätze zusätzlich per Gemini analysieren (bessere
+    Wortgrenzen, grammatikalische Funktion, Grammatik-Erklärung + deutsche
+    Übersetzung pro Satz) – braucht einen in den Einstellungen hinterlegten
+    Gemini-Key, sonst Fehler. Wörter ohne WaniKani-/Dictionary-Treffer, die
+    Gemini aber grammatikalisch erklären kann (`source: "gemini"`), haben
+    `id: null` und fließen NICHT in `known`/`total` ein (keine Vokabel zum
+    Lernen, nur eine Grammatik-Info).
     """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", ""))
     sample = bool(body.get("sample"))
+    use_gemini = bool(body.get("use_gemini"))
+    gemini_key = None
+    gemini_model = kc.gemini_client.DEFAULT_MODEL
+    if use_gemini:
+        s = load_settings()
+        gemini_key = s.get("gemini_key") or None
+        gemini_model = s.get("gemini_model") or gemini_model
+        if not gemini_key:
+            return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
     try:
         if not sample:
             _apply_token_env()
-        lines = kc.annotate_text(text, sample=sample)
+        lines = kc.annotate_text(
+            text, sample=sample, gemini_key=gemini_key, gemini_model=gemini_model
+        )
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
 
@@ -533,6 +563,12 @@ def api_text_annotate() -> Any:
     for line in lines:
         for seg in line:
             if seg.get("type") != "word":
+                continue
+            if seg.get("id") is None:
+                seg["manually_known"] = False
+                seg["ready"] = False
+                seg["status"] = "info"
+                seg["known"] = False
                 continue
             is_dict = seg.get("source") == "dictionary"
             sid: int | str = str(seg["id"]) if is_dict else int(seg["id"])

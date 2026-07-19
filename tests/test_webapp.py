@@ -220,6 +220,90 @@ def test_api_text_annotate_ready_true_when_dictionary_card_already_created(tmp_p
     assert word2["known"] is True
 
 
+def test_api_text_annotate_use_gemini_without_key_returns_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
+    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    (tmp_path / "jobs").mkdir()
+    client = webapp.app.test_client()
+
+    r = client.post("/api/text-annotate", json={"text": "大きい山です。", "sample": True, "use_gemini": True})
+    assert r.status_code == 400
+    assert "Gemini" in r.get_json()["error"]
+
+
+def test_api_text_annotate_use_gemini_passes_settings_key_and_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
+    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    (tmp_path / "jobs").mkdir()
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_key": "mykey", "gemini_model": "gemini-2.5-pro"})
+
+    seen = {}
+
+    def fake_annotate_text(text, *, use_cache=True, sample=False, gemini_key=None, gemini_model=None):
+        seen["gemini_key"] = gemini_key
+        seen["gemini_model"] = gemini_model
+        return [[]]
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc, "annotate_text", fake_annotate_text)
+
+    r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
+    assert r.status_code == 200
+    assert seen["gemini_key"] == "mykey"
+    assert seen["gemini_model"] == "gemini-2.5-pro"
+
+
+def test_api_text_annotate_gemini_grammar_only_word_excluded_from_stats(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
+    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    (tmp_path / "jobs").mkdir()
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    def fake_annotate_text(text, *, use_cache=True, sample=False, gemini_key=None, gemini_model=None):
+        return [[
+            {"type": "word", "source": "gemini", "text": "が", "lemma": "が", "sentence": "x",
+             "id": None, "kind": "Grammatik", "meaning": "Partikel", "level": None},
+        ]]
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc, "annotate_text", fake_annotate_text)
+
+    r = client.post("/api/text-annotate", json={"text": "x", "sample": True, "use_gemini": True})
+    data = r.get_json()
+    seg = data["lines"][0][0]
+    assert seg["status"] == "info"
+    assert seg["known"] is False
+    assert data["stats"]["total"] == 0  # zählt nicht mit (keine Vokabel, nur Grammatik-Info)
+
+
+def test_api_settings_get_set_gemini_key_and_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+
+    r0 = client.get("/api/settings").get_json()
+    assert r0["gemini_key_set"] is False
+    assert r0["gemini_model"] == "gemini-2.5-flash"
+
+    client.post("/api/settings", json={"gemini_key": "sekret", "gemini_model": "gemini-2.5-pro"})
+    r1 = client.get("/api/settings").get_json()
+    assert r1["gemini_key_set"] is True
+    assert r1["gemini_key_hint"].endswith("kret")
+    assert r1["gemini_model"] == "gemini-2.5-pro"
+
+
+def test_api_settings_post_ignores_unknown_gemini_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_model": "not-a-real-model"})
+    r = client.get("/api/settings").get_json()
+    assert r["gemini_model"] == "gemini-2.5-flash"  # ungültiger Wert wird ignoriert
+
+
 # --------------------------------------------------------------------------- #
 # Dictionary-Karten (kanacards/) – CRUD über /api/kanacards
 # --------------------------------------------------------------------------- #
