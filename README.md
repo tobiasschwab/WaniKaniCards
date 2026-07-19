@@ -149,6 +149,18 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    legt eine an. Scheitert die Analyse für einen einzelnen Satz (Netzwerk,
    Quota, Wortgrenzen passen nicht exakt zum Original), bekommt nur dieser
    Satz eine Fehlermeldung statt den ganzen Text abzubrechen.
+
+   **🔊 Original-Satz vorlesen:** ein Lautsprecher-Symbol neben jedem Satz
+   ruft Gemini's eigene Sprachausgabe auf (`gemini_client.synthesize_speech()`,
+   Modell `gemini-2.5-flash-preview-tts`) – nutzt denselben Gemini-Key wie die
+   Satzanalyse, kein zusätzlicher Google-Cloud-TTS-Zugang nötig. Wird eine
+   Karte aus der Vokabeln-Spalte erstellt (WaniKani oder KI-Karte), landet
+   dieselbe Audiodatei automatisch mit auf der Karte (als eingebettetes
+   `<audio>`-Element, wie das bestehende WaniKani-Audio). Pro Satz wird nur
+   einmal angefragt (client- **und** serverseitig unter `.cache/gemini_tts/`
+   gecacht) – erneutes Abspielen oder ein späteres Karte-Erstellen für
+   denselben Satz braucht keinen zweiten Request. Aktuell auf den KI-Modus
+   begrenzt (nicht in „Aus Text" oder „Frei erstellen").
 5. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder

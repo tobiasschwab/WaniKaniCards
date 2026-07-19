@@ -226,6 +226,18 @@ def test_kana_note_ai_source_shows_reading_and_ki_doclink():
     assert "JMdict" not in note.fields[7]
 
 
+def test_kana_note_embeds_sentence_audio_url():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.KanaCard(
+        word="入る", meaning="hineingehen", source="ai", sentence_ja="高校に入りました。",
+        sentence_audio_url="data:audio/wav;base64,AAAA", card_id="aikana_hairu",
+    )
+    note = ae._kana_note(genanki, models["kana"], card)
+    assert "<audio" in note.fields[3]
+    assert "data:audio/wav;base64,AAAA" in note.fields[3]
+
+
 def test_note_for_dispatches_kana_card():
     genanki = ae._require_genanki()
     models = ae._build_models(genanki)

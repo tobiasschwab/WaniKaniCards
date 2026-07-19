@@ -714,7 +714,7 @@ def _kana_note(genanki: Any, model: Any, card: kc.KanaCard) -> Any:
         _esc(card.word),
         _kana_meaning_html(card.meaning, card.meaning_extra),
         _kanji_hint_html(card.kanji_hint),
-        _sentences_html(card.sentence_ja, card.sentence_translation, None, []),
+        _sentences_html(card.sentence_ja, card.sentence_translation, card.sentence_audio_url, []),
         _tags_html(card.tags),
         _esc(card.meaning),
         _reading_hint_html(card.reading),

@@ -1161,6 +1161,14 @@ def test_build_ai_kana_card_uses_gemini_meaning_directly():
     assert card.card_id == ai_kana_card_id("入る")
 
 
+def test_build_ai_kana_card_carries_sentence_audio_url():
+    card = build_ai_kana_card(
+        "入る", meaning="hineingehen", sentence="高校に入りました。",
+        sentence_audio_url="data:audio/wav;base64,AAAA",
+    )
+    assert card.sentence_audio_url == "data:audio/wav;base64,AAAA"
+
+
 def test_build_ai_kana_card_id_differs_from_dictionary_kana_card_id():
     # Eigener ID-Namensraum, damit eine spätere echte Dictionary-Karte für
     # dasselbe Wort nicht mit der KI-Karte kollidiert.
@@ -1185,6 +1193,18 @@ def test_build_kana_card_from_dict_roundtrip_with_ai_source_and_reading():
         tags=["KI"],
         card_id="aikana_abc123",
     )
+
+
+def test_build_kana_card_from_dict_roundtrip_with_sentence_audio_url():
+    d = {
+        "id": "aikana_abc123",
+        "word": "入る",
+        "meaning": "hineingehen",
+        "source": "ai",
+        "sentence_audio_url": "data:audio/wav;base64,AAAA",
+    }
+    card = build_kana_card_from_dict(d)
+    assert card.sentence_audio_url == "data:audio/wav;base64,AAAA"
 
 
 def test_card_to_dict_serializes_kana_card():

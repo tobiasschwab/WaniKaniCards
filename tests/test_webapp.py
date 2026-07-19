@@ -409,6 +409,62 @@ def test_api_gemini_models_returns_502_on_empty_result(tmp_path, monkeypatch):
     assert r.status_code == 502
 
 
+def test_api_gemini_tts_requires_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    r = client.post("/api/gemini/tts", json={})
+    assert r.status_code == 400
+
+
+def test_api_gemini_tts_requires_stored_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    r = client.post("/api/gemini/tts", json={"text": "大きい山です。"})
+    assert r.status_code == 400
+    assert "Gemini" in r.get_json()["error"]
+
+
+def test_api_gemini_tts_returns_data_uri(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc.gemini_client, "synthesize_speech", lambda text, key, **kw: b"RIFF....WAVEfmt ")
+
+    r = client.post("/api/gemini/tts", json={"text": "大きい山です。"})
+    assert r.status_code == 200
+    assert r.get_json()["audio_data_uri"].startswith("data:audio/wav;base64,")
+
+
+def test_api_gemini_tts_returns_502_on_synthesis_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc.gemini_client, "synthesize_speech", lambda text, key, **kw: None)
+
+    r = client.post("/api/gemini/tts", json={"text": "大きい山です。"})
+    assert r.status_code == 502
+
+
+def test_api_create_kanacard_ai_stores_sentence_audio_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
+    (tmp_path / "kanacards").mkdir()
+    client = webapp.app.test_client()
+
+    r = client.post("/api/kanacards", json={
+        "word": "入る", "source": "ai", "meaning": "hineingehen", "reading": "はいる",
+        "sentence": "高校に入りました。", "sentence_audio_url": "data:audio/wav;base64,AAAA",
+    })
+    assert r.status_code == 200
+    kid = r.get_json()["id"]
+    stored = webapp.read_kana(kid)
+    assert stored["sentence_audio_url"] == "data:audio/wav;base64,AAAA"
+
+
 def test_api_settings_post_ignores_unknown_gemini_model(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
     client = webapp.app.test_client()

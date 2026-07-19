@@ -326,3 +326,55 @@ def test_list_models_returns_none_on_network_error():
 def test_list_models_returns_none_on_http_error():
     session = _FakeSession({"key": _FakeResp(status_code=403)})
     assert gc.list_models("key", session=session) is None
+
+
+# --------------------------------------------------------------------------- #
+# synthesize_speech (Text-to-Speech, KI-Modus: Original-Satz vorlesen)
+# --------------------------------------------------------------------------- #
+
+def _tts_body(pcm: bytes, *, mime="audio/L16;rate=24000") -> dict:
+    import base64
+    b64 = base64.b64encode(pcm).decode("ascii")
+    return {
+        "candidates": [
+            {"content": {"parts": [{"inlineData": {"mimeType": mime, "data": b64}}]}}
+        ]
+    }
+
+
+def test_synthesize_speech_wraps_pcm_into_playable_wav(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_TTS_CACHE_DIR", tmp_path / "gemini_tts")
+    pcm = b"\x01\x02" * 10
+    session = _FakeSession({"key": _FakeResp(json_data=_tts_body(pcm))})
+    wav = gc.synthesize_speech("大きい山です。", "key", session=session, use_cache=False)
+    assert wav is not None
+    assert wav[:4] == b"RIFF"
+    assert wav[8:12] == b"WAVE"
+    assert wav.endswith(pcm)
+
+
+def test_synthesize_speech_returns_none_without_text_or_key():
+    assert gc.synthesize_speech("", "key", session=_FakeSession({})) is None
+    assert gc.synthesize_speech("x", "", session=_FakeSession({})) is None
+
+
+def test_synthesize_speech_returns_none_on_network_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_TTS_CACHE_DIR", tmp_path / "gemini_tts")
+    assert gc.synthesize_speech("テスト", "key", session=_FakeSession(error=True), use_cache=False) is None
+
+
+def test_synthesize_speech_returns_none_on_malformed_response(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_TTS_CACHE_DIR", tmp_path / "gemini_tts")
+    session = _FakeSession({"key": _FakeResp(json_data={"candidates": []})})
+    assert gc.synthesize_speech("テスト", "key", session=session, use_cache=False) is None
+
+
+def test_synthesize_speech_uses_cache_on_second_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_TTS_CACHE_DIR", tmp_path / "gemini_tts")
+    pcm = b"\x03\x04" * 5
+    session = _FakeSession({"key": _FakeResp(json_data=_tts_body(pcm))})
+    first = gc.synthesize_speech("同じ文。", "key", session=session, use_cache=True)
+    assert len(session.calls) == 1
+    second = gc.synthesize_speech("同じ文。", "key", session=session, use_cache=True)
+    assert len(session.calls) == 1  # kein zweiter Request nötig
+    assert first == second

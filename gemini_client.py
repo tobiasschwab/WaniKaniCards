@@ -25,10 +25,13 @@ Janome-Pipeline zurück, nie ein harter Abbruch für den ganzen Text.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import os
+import re
+import struct
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -380,3 +383,99 @@ def list_models(api_key: str, *, session: requests.Session | None = None) -> lis
             continue
         names.append(name)
     return sorted(set(names))
+
+
+# --------------------------------------------------------------------------- #
+# Text-to-Speech (KI-Modus: Original-Satz vorlesen)
+# --------------------------------------------------------------------------- #
+
+# Gemini-eigenes Audio-Ausgabemodell statt einer separaten Google-Cloud-
+# Text-to-Speech-API: nutzt denselben Gemini-Key, den es für die Satzanalyse
+# schon braucht, statt einen zweiten API-Zugang extra aktivieren zu müssen.
+# Aktuell ein Preview-Modell bei Google (kann sich ändern/deprecaten wie die
+# Chat-Modelle auch).
+TTS_MODEL = "gemini-2.5-flash-preview-tts"
+# Stimme ist sprachunabhängig (Gemini erkennt Japanisch automatisch am Text) -
+# "Kore" ist eine der von Google dokumentierten Standardstimmen.
+TTS_VOICE = "Kore"
+
+_TTS_CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini_tts"
+
+_RATE_RE = re.compile(r"rate=(\d+)")
+
+
+def _tts_cache_path(text: str, model: str, voice: str) -> Path:
+    key = hashlib.sha1(f"{model}\n{voice}\n{text}".encode("utf-8")).hexdigest()
+    return _TTS_CACHE_DIR / f"{key}.wav"
+
+
+def _pcm_to_wav(pcm: bytes, *, sample_rate: int, channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Gemini liefert rohe PCM-Samples (kein Container) – Browser/Anki können
+    das nicht direkt abspielen, deshalb hier in einen minimalen WAV-Container
+    (RIFF-Header) verpackt."""
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    header = (
+        b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, channels, sample_rate, byte_rate, block_align, bits_per_sample)
+        + b"data" + struct.pack("<I", len(pcm))
+    )
+    return header + pcm
+
+
+def synthesize_speech(
+    text: str,
+    api_key: str,
+    *,
+    model: str = TTS_MODEL,
+    voice: str = TTS_VOICE,
+    session: requests.Session | None = None,
+    use_cache: bool = True,
+) -> bytes | None:
+    """Text (i. d. R. ein japanischer Satz) per Gemini vorlesen lassen –
+    gibt fertige WAV-Bytes zurück oder `None` bei fehlendem Text/Key,
+    Netzwerkfehler, Quota oder kaputter Antwort (nie eine Exception, fail-soft
+    wie der Rest dieses Moduls)."""
+    text = text.strip()
+    if not text or not api_key:
+        return None
+
+    cache_file = _tts_cache_path(text, model, voice) if use_cache else None
+    if cache_file and cache_file.is_file():
+        try:
+            return cache_file.read_bytes()
+        except OSError:
+            pass
+
+    session = session or requests.Session()
+    body = {
+        "contents": [{"parts": [{"text": text}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
+        },
+    }
+    url = f"{_API_BASE}/models/{model}:generateContent"
+    label = f"TTS für {len(text)} Zeichen ({model})"
+    resp = _post_with_retry(url, api_key, body, session, label)
+    if resp is None:
+        return None
+
+    try:
+        part = resp.json()["candidates"][0]["content"]["parts"][0]
+        inline = part["inlineData"]
+        pcm = base64.b64decode(inline["data"])
+        rate_match = _RATE_RE.search(inline.get("mimeType") or "")
+        sample_rate = int(rate_match.group(1)) if rate_match else 24000
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        logger.warning("Gemini: TTS-Antwort für %s nicht auswertbar (%s): %s", label, type(exc).__name__, exc)
+        return None
+
+    wav = _pcm_to_wav(pcm, sample_rate=sample_rate)
+    if cache_file:
+        try:
+            _TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file.write_bytes(wav)
+        except OSError:
+            pass
+    return wav

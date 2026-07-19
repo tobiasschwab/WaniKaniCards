@@ -380,13 +380,42 @@ function _pctBadgeHtml(known, total) {
   return `<span class="ki-pct-badge" style="--pct-hue:${hue}">${pct}%</span>`;
 }
 
+// Original-Satz per Gemini vorlesen lassen (KI-Modus): einmal pro Satz
+// abgerufen und auf dem row-Objekt gecacht (data-URI), damit weder erneutes
+// Abspielen noch ein späteres Karte-Erstellen denselben Satz zweimal anfragt.
+function fetchRowAudio(row) {
+  if (row._audioPromise) return row._audioPromise;
+  row._audioPromise = api("/api/gemini/tts", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: row.sentence }),
+  }).then((r) => { row._audioDataUri = r.audio_data_uri; return row._audioDataUri; })
+    .catch((e) => { row._audioPromise = null; throw e; });
+  return row._audioPromise;
+}
+
+async function playRowAudio(row, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = "…";
+  try {
+    const uri = await fetchRowAudio(row);
+    await new Audio(uri).play();
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
 function renderKiTable(rows) {
   const wrap = $("#kiTable");
   wrap.innerHTML = "";
   for (const row of rows) {
     const tr = document.createElement("div");
     tr.className = "ki-row";
-    const jpCell = document.createElement("div"); jpCell.className = "ki-cell ki-sentence"; jpCell.textContent = row.sentence;
+    const jpCell = document.createElement("div"); jpCell.className = "ki-cell ki-sentence";
+    const jpText = document.createElement("span"); jpText.textContent = row.sentence;
+    const speakBtn = document.createElement("button");
+    speakBtn.type = "button"; speakBtn.className = "ki-speak-btn"; speakBtn.textContent = "🔊";
+    speakBtn.title = "Satz vorlesen (Gemini)";
+    speakBtn.addEventListener("click", () => playRowAudio(row, speakBtn));
+    jpCell.append(jpText, speakBtn);
     if (row.error) {
       const errCell = document.createElement("div"); errCell.className = "ki-cell ki-error"; errCell.dataset.label = "Fehler";
       errCell.textContent = "⚠ " + row.error;
@@ -395,6 +424,7 @@ function renderKiTable(rows) {
       continue;
     }
     const words = row.segments.filter((s) => s.type === "word");
+    words.forEach((s) => { s._row = row; });
     const knownCount = words.filter((s) => s.known).length;
 
     const pctCell = document.createElement("div"); pctCell.className = "ki-cell ki-pct"; pctCell.dataset.label = "Bekannt";
@@ -494,14 +524,25 @@ async function addWordFromPopup() {
   closeWordPopup();
 }
 
+// Falls das Wort aus einer KI-Modus-Satzzeile stammt (seg._row gesetzt),
+// wird die per Gemini vorgelesene Satz-Audio mit in die Karte übernommen –
+// bereits abgespielte/gecachte Audio wird wiederverwendet, sonst jetzt
+// nachgeladen. Schlägt das fehl (Netzwerk/Quota), wird die Karte trotzdem
+// ohne Audio erstellt statt das Hinzufügen ganz zu blockieren.
+async function _rowAudioForCard(seg) {
+  if (!seg._row) return null;
+  try { return await fetchRowAudio(seg._row); } catch (_) { return null; }
+}
+
 async function createKanaCardFromPopup() {
   const seg = activeWordSeg;
   if (!seg || seg.ready) return;
+  const sentenceAudioUrl = await _rowAudioForCard(seg);
   let card;
   try {
     card = await api("/api/kanacards", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word: seg.lemma || seg.text, sentence: seg.sentence }),
+      body: JSON.stringify({ word: seg.lemma || seg.text, sentence: seg.sentence, sentence_audio_url: sentenceAudioUrl }),
     });
   } catch (e) { toast(e.message, true); return; }
   setSegReady(seg, true);
@@ -513,12 +554,14 @@ async function createKanaCardFromPopup() {
 async function createAiKanaCardFromPopup() {
   const seg = activeWordSeg;
   if (!seg || seg.ready) return;
+  const sentenceAudioUrl = await _rowAudioForCard(seg);
   let card;
   try {
     card = await api("/api/kanacards", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         word: seg.lemma || seg.text, source: "ai", meaning: seg.meaning, reading: seg.reading, sentence: seg.sentence,
+        sentence_audio_url: sentenceAudioUrl,
       }),
     });
   } catch (e) { toast(e.message, true); return; }

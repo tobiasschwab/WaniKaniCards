@@ -339,7 +339,10 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .ki-row.ki-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--muted); background: var(--bg-elev); }
 .ki-col-pct { text-align: center; }
 .ki-cell { font-size: 14px; line-height: 1.7; }
-.ki-cell.ki-sentence { font-size: 16px; }
+.ki-cell.ki-sentence { font-size: 16px; display: flex; align-items: baseline; gap: 8px; }
+.ki-speak-btn { border: 0; background: none; cursor: pointer; font-size: 15px; padding: 0 2px; flex: 0 0 auto; opacity: .7; }
+.ki-speak-btn:hover { opacity: 1; }
+.ki-speak-btn:disabled { opacity: .4; cursor: default; }
 .ki-cell.ki-error { color: var(--accent-2); font-style: italic; }
 .ki-cell.ki-components { font-size: 13px; }
 .ki-cell.ki-pct { text-align: center; }

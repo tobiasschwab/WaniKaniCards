@@ -185,6 +185,7 @@ class KanaCard:
     meaning_extra: str | None = None        # weitere Glossen/Nutzungshinweise, klein als Zusatz
     sentence_ja: str | None = None          # Satz aus dem Text-Modus, in dem das Wort vorkam
     sentence_translation: str | None = None  # DeepL-Übersetzung des Satzes (optional)
+    sentence_audio_url: str | None = None   # per Gemini-TTS vorgelesener Satz (data:audio/wav;base64,…), optional
     source: str = "dictionary"              # "dictionary" (JMdict) oder "ai" (Gemini-eigene Definition)
     tags: list[str] = field(default_factory=list)
     # ID der Karte in kanacards/ (Hash des Worts) – für stabile Anki-IDs.
@@ -843,6 +844,7 @@ def build_ai_kana_card(
     meaning: str,
     reading: str | None = None,
     sentence: str | None = None,
+    sentence_audio_url: str | None = None,
     deepl_key: str | None = None,
     translate_fn: "callable | None" = None,
 ) -> KanaCard:
@@ -851,6 +853,10 @@ def build_ai_kana_card(
     `annotate_text_ai()`). Anders als `build_kana_card()` gibt es hier keinen
     "nicht gefunden"-Fall: der Nutzer klickt diese Karte bewusst manuell an,
     es wird nie automatisch für alle KI-erkannten Wörter eine Karte erzeugt.
+
+    `sentence_audio_url` (optional): per Gemini-TTS vorgelesener Original-Satz
+    (data-URI, siehe `gemini_client.synthesize_speech()`), landet zusammen mit
+    dem Beispielsatz auf der Karte.
     """
     card = KanaCard(
         word=word,
@@ -858,6 +864,7 @@ def build_ai_kana_card(
         meaning=meaning.strip(),
         source="ai",
         sentence_ja=sentence,
+        sentence_audio_url=sentence_audio_url,
         tags=["KI"],
         card_id=ai_kana_card_id(word),
     )
@@ -878,6 +885,7 @@ def build_kana_card_from_dict(d: dict[str, Any]) -> KanaCard:
         meaning_extra=d.get("meaning_extra"),
         sentence_ja=d.get("sentence_ja"),
         sentence_translation=d.get("sentence_translation"),
+        sentence_audio_url=d.get("sentence_audio_url"),
         source=str(d.get("source") or "dictionary"),
         tags=tags,
         card_id=str(d["id"]) if d.get("id") else None,

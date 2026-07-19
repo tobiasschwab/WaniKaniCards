@@ -8,6 +8,7 @@ unter ``WKCARDS_DATA`` (Default: ``./data``).
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -483,6 +484,27 @@ def api_gemini_models() -> Any:
     return jsonify({"models": models, "default": kc.gemini_client.DEFAULT_MODEL})
 
 
+@app.post("/api/gemini/tts")
+def api_gemini_tts() -> Any:
+    """Text (Original-Satz im KI-Modus) per Gemini vorlesen lassen – gibt
+    eine data-URI zurück, die sich sowohl direkt im Browser abspielen als
+    auch beim Erstellen einer KI-Karte einbetten lässt (siehe
+    `gemini_client.synthesize_speech()`, nutzt denselben Gemini-Key wie die
+    Satzanalyse statt einen separaten Google-Cloud-TTS-Zugang zu brauchen)."""
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text", "")).strip()
+    if not text:
+        return jsonify({"error": "Kein Text angegeben."}), 400
+    gemini_key = load_settings().get("gemini_key") or None
+    if not gemini_key:
+        return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
+    wav = kc.gemini_client.synthesize_speech(text, gemini_key)
+    if wav is None:
+        return jsonify({"error": "Sprachausgabe fehlgeschlagen (Netzwerk, Quota oder ungültiger Key)."}), 502
+    audio_data_uri = "data:audio/wav;base64," + base64.b64encode(wav).decode("ascii")
+    return jsonify({"audio_data_uri": audio_data_uri})
+
+
 @app.post("/api/test-token")
 def api_test_token() -> Any:
     token = (request.get_json(silent=True) or {}).get("token") or load_settings().get(
@@ -929,12 +951,14 @@ def api_create_kanacard() -> Any:
     if not word:
         return jsonify({"error": "Kein Wort angegeben."}), 400
     deepl_key = load_settings().get("deepl_key") or None
+    sentence_audio = body.get("sentence_audio_url") or None
     if source == "ai":
         meaning = str(body.get("meaning") or "").strip()
         if not meaning:
             return jsonify({"error": "Keine KI-Bedeutung angegeben."}), 400
         card_obj = kc.build_ai_kana_card(
-            word, meaning=meaning, reading=body.get("reading"), sentence=sentence, deepl_key=deepl_key,
+            word, meaning=meaning, reading=body.get("reading"), sentence=sentence,
+            sentence_audio_url=sentence_audio, deepl_key=deepl_key,
         )
     else:
         card_obj = kc.build_kana_card(word, sentence, deepl_key=deepl_key)
@@ -949,6 +973,7 @@ def api_create_kanacard() -> Any:
         "meaning_extra": card_obj.meaning_extra,
         "sentence_ja": card_obj.sentence_ja,
         "sentence_translation": card_obj.sentence_translation,
+        "sentence_audio_url": card_obj.sentence_audio_url,
         "source": card_obj.source,
         "tags": card_obj.tags,
         "updated_at": _now(),
