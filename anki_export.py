@@ -716,6 +716,24 @@ def _deck_id(name: str) -> int:
     return 1_607_000_000_000 + (zlib.crc32(name.encode("utf-8")) % 1_000_000_000)
 
 
+# Feste Deck-Struktur in Anki (Anki verschachtelt Decks über "::" im Namen):
+# Japanisch
+#   WaniKani
+#     Level <N>    – je eine Karte mit bekanntem WaniKani-Level (Kanji/
+#                    Radical/Vokabel-Karten tragen ihr Level selbst).
+#   sonstige       – alles ohne WaniKani-Level: Frei-/Dictionary-Karten.
+_ROOT_DECK = "Japanisch"
+
+
+def _deck_path_for(card: Any) -> str:
+    """Anki-Deck-Pfad für eine Karte bestimmen (feste Japanisch/WaniKani/
+    Level-N-/sonstige-Struktur, siehe oben)."""
+    level = getattr(card, "level", None)
+    if level is not None:
+        return f"{_ROOT_DECK}::WaniKani::Level {level}"
+    return f"{_ROOT_DECK}::sonstige"
+
+
 # --------------------------------------------------------------------------- #
 # Öffentliche API
 # --------------------------------------------------------------------------- #
@@ -726,17 +744,27 @@ def export_deck(
     *,
     deck_name: str = "WaniKani Card Studio",
 ) -> tuple[Path, int]:
-    """Card-/RadicalCard-/VocabCard-/CustomCard-Objekte als .apkg exportieren."""
+    """Card-/RadicalCard-/VocabCard-/CustomCard-Objekte als .apkg exportieren.
+
+    Landet immer in der festen Deck-Struktur `Japanisch::WaniKani::Level N`
+    (Karten mit bekanntem WaniKani-Level) bzw. `Japanisch::sonstige` (Frei-/
+    Dictionary-Karten ohne Level) – `deck_name` bestimmt dabei NICHT mehr den
+    Deck-Namen (Parameter bleibt aus Kompatibilitätsgründen bestehen, hat
+    aber keine Wirkung mehr).
+    """
     genanki = _require_genanki()
     models = _build_models(genanki)
-    deck = genanki.Deck(_deck_id(deck_name), deck_name)
+    decks: dict[str, Any] = {}
 
     n = 0
     for card in cards:
         note = _note_for(genanki, models, card)
         if note is None:
             continue
-        deck.add_note(note)
+        path = _deck_path_for(card)
+        if path not in decks:
+            decks[path] = genanki.Deck(_deck_id(path), path)
+        decks[path].add_note(note)
         n += 1
     if n == 0:
         raise AnkiExportError("Keine für Anki unterstützten Karten in der Auswahl gefunden.")
@@ -748,7 +776,7 @@ def export_deck(
             dst = tmp_dir / name
             dst.write_bytes(src.read_bytes())
             media_files.append(str(dst))
-        package = genanki.Package(deck, media_files=media_files)
+        package = genanki.Package(list(decks.values()), media_files=media_files)
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
         package.write_to_file(str(output))

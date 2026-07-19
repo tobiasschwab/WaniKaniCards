@@ -96,6 +96,9 @@ class Card:
     # Export, damit ein erneuter Export bestehende Notizen aktualisiert statt
     # sie zu duplizieren.
     subject_id: int | None = None
+    # WaniKani-Level des Subjects – steuert die Anki-Deck-Struktur beim Export
+    # (Japanisch::WaniKani::Level N), siehe anki_export._deck_path_for().
+    level: int | None = None
 
 
 @dataclass
@@ -122,6 +125,7 @@ class RadicalCard:
     subject_id: int | None = None
     # Link zur WaniKani-Seite des Radicals.
     document_url: str | None = None
+    level: int | None = None
 
 
 @dataclass
@@ -142,6 +146,7 @@ class VocabCard:
     document_url: str | None = None
     tags: list[str] = field(default_factory=list)
     subject_id: int | None = None
+    level: int | None = None
 
 
 @dataclass
@@ -602,6 +607,7 @@ def build_card(
         tags=_default_tags("Kanji", data),
         subject_id=_int_or_none(kanji.get("id")),
         document_url=data.get("document_url"),
+        level=_int_or_none(data.get("level")),
     )
 
     vocab = pick_example_vocab(kanji, vocab_map)
@@ -678,6 +684,7 @@ def build_radical_card(
         tags=_default_tags("Radical", data),
         subject_id=_int_or_none(radical.get("id")),
         document_url=data.get("document_url"),
+        level=_int_or_none(data.get("level")),
     )
 
     # Bild: bereits eingebettete data-URI (Sample) oder per Fetcher nachladen.
@@ -749,6 +756,7 @@ def build_vocab_card(
         document_url=data.get("document_url"),
         tags=_default_tags("Vocab", data),
         subject_id=_int_or_none(vocab.get("id")),
+        level=_int_or_none(data.get("level")),
     )
     if sentence_override and sentence_override.get("ja"):
         card.sentence_ja = sentence_override["ja"]

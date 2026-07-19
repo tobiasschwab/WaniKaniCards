@@ -281,6 +281,57 @@ def test_export_deck_writes_valid_apkg(tmp_path):
     assert card_count == len(kanji_cards) * 3 + len(radical_cards)
 
 
+# --------------------------------------------------------------------------- #
+# Deck-Struktur: Japanisch::WaniKani::Level N / Japanisch::sonstige
+# --------------------------------------------------------------------------- #
+
+def _deck_names(apkg_path, tmp_path):
+    import json as _json
+    with zipfile.ZipFile(apkg_path) as z:
+        z.extract("collection.anki2", tmp_path)
+    conn = sqlite3.connect(tmp_path / "collection.anki2")
+    try:
+        decks = _json.loads(conn.execute("select decks from col").fetchone()[0])
+    finally:
+        conn.close()
+    return {d["name"] for d in decks.values()}
+
+
+def test_deck_path_for_wanikani_card_uses_level():
+    assert ae._deck_path_for(Card_(kanji="大", level=5)) == "Japanisch::WaniKani::Level 5"
+
+
+def test_deck_path_for_card_without_level_falls_back_to_sonstige():
+    assert ae._deck_path_for(Card_(kanji="大", level=None)) == "Japanisch::sonstige"
+
+
+def test_deck_path_for_custom_card_is_sonstige():
+    custom = kc.CustomCard(front_html="<div>x</div>", back_html="<div>y</div>")
+    assert ae._deck_path_for(custom) == "Japanisch::sonstige"
+
+
+def test_export_deck_groups_notes_by_wanikani_level(tmp_path):
+    lvl1 = Card_(kanji="一", subject_id=1, level=1)
+    lvl5 = Card_(kanji="五", subject_id=5, level=5)
+    custom = kc.CustomCard(front_html="<div>frei</div>", back_html="<div>x</div>", card_id="c1")
+    out = tmp_path / "deck.apkg"
+    ae.export_deck([lvl1, lvl5, custom], out)
+
+    names = _deck_names(out, tmp_path)
+    assert "Japanisch::WaniKani::Level 1" in names
+    assert "Japanisch::WaniKani::Level 5" in names
+    assert "Japanisch::sonstige" in names
+
+
+def test_export_deck_ignores_deck_name_for_placement(tmp_path):
+    card = Card_(kanji="一", subject_id=1, level=3)
+    out = tmp_path / "deck.apkg"
+    ae.export_deck([card], out, deck_name="Irgendein Titel")
+    names = _deck_names(out, tmp_path)
+    assert "Japanisch::WaniKani::Level 3" in names
+    assert "Irgendein Titel" not in names
+
+
 def test_kanji_note_skips_missing_reading_cards(tmp_path):
     """Ein Kanji ohne Kun'yomi darf keine (leere) Kun'yomi-Karte erzeugen."""
     genanki = ae._require_genanki()

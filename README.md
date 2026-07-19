@@ -382,6 +382,28 @@ Türkis, Kanji = Ocker, Vokabel = Violett, Dictionary = Blau), damit man in
 gemischten Lernsitzungen auf einen Blick sieht, welcher Kartentyp gerade dran
 ist. Freie Karten bleiben ohne Akzent.
 
+**Feste Deck-Struktur in Anki:** Jeder Export landet unabhängig vom
+Job-Titel immer in derselben Ablage, damit sich Karten aus verschiedenen
+Exporten wiederfinden statt in immer neuen, einzeln benannten Decks zu
+zersplittern:
+
+```
+Japanisch
+├── WaniKani
+│   ├── Level 1
+│   ├── Level 2
+│   └── …
+└── sonstige       (Frei- und Dictionary-Karten, kein WaniKani-Level)
+```
+
+Radical-/Kanji-/Vokabel-Karten tragen ihr WaniKani-Level (`Card.level` /
+`RadicalCard.level` / `VocabCard.level`) und landen automatisch in
+`Japanisch::WaniKani::Level N`; alles ohne Level (freie und Dictionary-
+Karten) in `Japanisch::sonstige`. Ein `.apkg` kann mehrere Anki-Decks
+enthalten – wiederholte Exporte aktualisieren dieselben Decks (stabile
+Deck-IDs aus dem Namen abgeleitet, wie bei den Notizen) statt neue
+anzulegen.
+
 **Japanische Eingabe ohne Tastatur-Wechsel:** Die Eintippen-Felder für
 On'yomi/Kun'yomi (Kanji-Karten) nutzen [WanaKana](https://github.com/WaniKani/WanaKana)
 (`vendor/wanakana.min.js`, im `.apkg` eingebettet) – Romaji wird automatisch
