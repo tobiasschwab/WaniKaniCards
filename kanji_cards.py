@@ -21,7 +21,6 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -1476,39 +1475,27 @@ def annotate_text(
             groups.append({"sentence": cur_sentence, "entries": cur_entries})
         line_groups.append(groups)
 
-    # Gemini-Anfragen gebündelt und mit begrenzter Parallelität abschicken
-    # (statt Satz für Satz seriell) – bei langen Texten sonst viele Minuten
-    # Wartezeit, in denen der Worker blockiert und im Frontend nichts als
-    # "Analysiere…" zu sehen ist. Jeder eindeutige Satz wird nur einmal
-    # angefragt, unabhängig davon, wie oft er im Text vorkommt.
+    # Alle eindeutigen Sätze in einem Rutsch (möglichst ein einziger Batch-
+    # Request statt einem Request pro Satz) an Gemini schicken – bei einem
+    # Text mit z. B. 19 Sätzen sonst 19 Einzel-Requests, die sofort in eine
+    # HTTP-429-Kaskade laufen (siehe Session-Notizen). Jeder eindeutige Satz
+    # wird nur einmal angefragt, unabhängig davon, wie oft er im Text vorkommt.
     gemini_cache: dict[str, dict[str, Any] | None] = {}
     if gemini_key:
-        unique_sentences = {
+        unique_sentences = list(dict.fromkeys(
             g["sentence"] for groups in line_groups for g in groups if g["sentence"].strip()
-        }
+        ))
         if unique_sentences:
             logger.info(
                 "Gemini-Analyse: %d eindeutige(r) Satz/Sätze über %s", len(unique_sentences), gemini_model,
             )
-            # Niedrige Parallelität: mehr gleichzeitige Requests verschärfen
-            # nur die Rate-Limit-Kollisionen (v. a. bei gemini-2.5-pro, dessen
-            # Free-Tier-Kontingent sehr eng ist) – 2 gleichzeitig reicht, um
-            # trotzdem schneller zu sein als streng seriell.
-            with ThreadPoolExecutor(max_workers=min(2, len(unique_sentences))) as pool:
-                futures = {
-                    pool.submit(
-                        gemini_client.analyze_sentence,
-                        sentence_text, gemini_key, model=gemini_model, use_cache=use_cache,
-                    ): sentence_text
-                    for sentence_text in unique_sentences
-                }
-                for future in as_completed(futures):
-                    sentence_text = futures[future]
-                    try:
-                        gemini_cache[sentence_text] = future.result()
-                    except Exception:  # nie hart abbrechen – dieser Satz fällt auf Janome zurück
-                        logger.exception("Gemini-Analyse für einen Satz fehlgeschlagen, Fallback auf Janome.")
-                        gemini_cache[sentence_text] = None
+            try:
+                gemini_cache = gemini_client.analyze_sentences(
+                    unique_sentences, gemini_key, model=gemini_model, use_cache=use_cache,
+                )
+            except Exception:  # nie hart abbrechen – alle Sätze fallen auf Janome zurück
+                logger.exception("Gemini-Analyse fehlgeschlagen, Fallback auf Janome für den ganzen Text.")
+                gemini_cache = {}
 
     # Zweite Runde: Gemini-Ergebnisse (falls vorhanden) in die Satz-Gruppen
     # übernehmen – nur wenn die Tokens exakt zum Original-Text rekonstruieren

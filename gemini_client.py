@@ -4,16 +4,23 @@
 Ersetzt Janomes reine Tokenisierung für Sätze, zu denen ein Gemini-API-Key
 hinterlegt ist: bessere Wortgrenzen, grammatikalische Funktion pro Wort/
 Partikel, eine kurze Grammatik-Erklärung und eine natürliche deutsche
-Übersetzung – ein Request pro Satz, JSON-strukturiert über
-`responseSchema` (kein Markdown-Tabellen-Parsing nötig).
+Übersetzung – JSON-strukturiert über `responseSchema` (kein Markdown-
+Tabellen-Parsing nötig).
+
+Alle Sätze eines Texts werden in EINEM Batch-Request analysiert
+(`analyze_sentences()`) statt in einem Request pro Satz – bei einem Text mit
+z. B. 19 Sätzen sonst 19 einzelne Anfragen, die (v. a. bei niedrigem
+Gratis-Kontingent) sofort in eine HTTP-429-Kaskade laufen. Ergebnisse werden
+trotzdem pro Satz gecacht, damit spätere Teil-Änderungen am Text nicht den
+kompletten Text neu anfragen.
 
 Kein neues SDK (`google-genai` o. ä.) – reiner REST-Call über `requests`,
 passend zum Projekt-Grundsatz "schlank halten" (DeepL/GitHub laufen genauso
 über plain `requests`).
 
 Fail-soft wie überall im Projekt: bei fehlendem Text/Key, Netzwerkfehler,
-Quota oder kaputter Antwort gibt `analyze_sentence()` `None` zurück – der
-Aufrufer (`kanji_cards.annotate_text()`) fällt für genau diesen Satz auf die
+Quota oder kaputter Antwort bleiben betroffene Sätze `None` – der Aufrufer
+(`kanji_cards.annotate_text()`) fällt für genau diese Sätze auf die
 Janome-Pipeline zurück, nie ein harter Abbruch für den ganzen Text.
 """
 from __future__ import annotations
@@ -24,7 +31,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import requests
 
@@ -34,64 +41,93 @@ CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini"
 
 # (connect, read) statt einem einzelnen Wert: eine tote/blockierte Verbindung
 # (z. B. DNS/Firewall-Problem im Docker-Netz) darf höchstens 10s zum Verbin-
-# den brauchen, das eigentliche Warten auf die Antwort maximal 25s – sonst
-# hängt ein Satz (und damit ein ganzer gunicorn-Worker) im schlimmsten Fall
+# den brauchen, das eigentliche Warten auf die Antwort maximal 60s (ein
+# Batch mit vielen Sätzen braucht länger als ein Einzelsatz) – sonst hängt
+# ein Request (und damit ein ganzer gunicorn-Worker) im schlimmsten Fall
 # lange fest, ohne dass im Frontend oder Log erkennbar ist, woran es liegt.
-_REQUEST_TIMEOUT = (10, 25)
+_REQUEST_TIMEOUT = (10, 60)
 
-_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-
+_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 # "-latest"-Aliase statt fest codierter Versionsnummern (z. B. "gemini-2.5-
 # flash"): Google deprecatet konkrete Modellversionen regelmäßig für neue
 # Projekte/Keys ("model X is no longer available to new users") – die Alias-
 # Namen zeigen dagegen dauerhaft auf die aktuell aktive Version derselben
-# Preis-/Geschwindigkeitsklasse, ohne dass der Code hinterhergepflegt werden
-# muss. `*-pro-latest` hat auf dem kostenlosen Tier i. d. R. **kein**
-# Kontingent (Quota-Limit 0) und braucht ein Konto mit aktivierter
-# Abrechnung – für Gratis-Nutzung sind `flash`/`flash-lite` die richtige Wahl.
+# Preis-/Geschwindigkeitsklasse. Dient nur noch als Fallback/Default, wenn
+# `list_models()` nicht verfügbar ist (kein Key, Netzwerkfehler) – die
+# Modellauswahl in der UI wird sonst per API abgerufen statt hartcodiert.
 DEFAULT_MODEL = "gemini-flash-latest"
 AVAILABLE_MODELS = ("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest")
 
-_RESPONSE_SCHEMA = {
+# Modellnamen, die zwar `generateContent` unterstützen, aber keine reinen
+# Text-Chat-Modelle sind (Bild-/Audio-/Robotik-/Tool-Varianten, interne
+# Preview-Spielereien) – für die Sprachanalyse hier nicht sinnvoll und würden
+# die Modell-Auswahl nur unübersichtlich machen.
+_MODEL_EXCLUDE_TOKENS = (
+    "image", "tts", "computer-use", "robotics", "customtools", "clip",
+    "nano-banana", "lyria", "antigravity", "deep-research", "omni",
+)
+
+_TOKENS_SCHEMA = {
+    "type": "ARRAY",
+    "items": {
+        "type": "OBJECT",
+        "properties": {
+            "surface": {"type": "STRING"},
+            "dictionary_form": {"type": "STRING"},
+            "function": {"type": "STRING"},
+        },
+        "required": ["surface", "dictionary_form", "function"],
+    },
+}
+
+_TOKEN_INSTRUCTIONS = """Zerlege JEDEN Satz in JEDES einzelne Wort, Partikel und Grammatikelement –
+OHNE etwas auszulassen. Das schließt Satzzeichen (｡ 。 、 ! ? …) am Ende oder
+mitten im Satz ausdrücklich mit ein, jedes als eigenes Token. Die
+surface-Felder aller Tokens eines Satzes müssen, aneinandergereiht, exakt
+wieder den kompletten Original-Satz ergeben (Zeichen für Zeichen, nichts
+fehlt). Gib zu jedem Token: surface (Schreibweise wie im Satz),
+dictionary_form (Grundform/Wörterbuchform, z. B. bei Verben die
+Present-Wörterbuchform; bei Satzzeichen einfach dasselbe Zeichen), function
+(kurze grammatikalische Funktion/Bedeutung, auf Deutsch; bei Satzzeichen
+z. B. "Satzzeichen"). Erkläre außerdem kurz die wichtigsten
+Grammatik-Besonderheiten des Satzes (grammar_notes, auf Deutsch) und gib
+eine natürliche, flüssige deutsche Übersetzung an (translation_de)."""
+
+_BATCH_RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "tokens": {
+        "sentences": {
             "type": "ARRAY",
             "items": {
                 "type": "OBJECT",
                 "properties": {
-                    "surface": {"type": "STRING"},
-                    "dictionary_form": {"type": "STRING"},
-                    "function": {"type": "STRING"},
+                    "sentence": {"type": "STRING"},
+                    "tokens": _TOKENS_SCHEMA,
+                    "grammar_notes": {"type": "STRING"},
+                    "translation_de": {"type": "STRING"},
                 },
-                "required": ["surface", "dictionary_form", "function"],
+                "required": ["sentence", "tokens", "grammar_notes", "translation_de"],
             },
         },
-        "grammar_notes": {"type": "STRING"},
-        "translation_de": {"type": "STRING"},
     },
-    "required": ["tokens", "grammar_notes", "translation_de"],
+    "required": ["sentences"],
 }
 
-_PROMPT_TEMPLATE = """Du bist ein professioneller Japanisch-Lehrer. Analysiere den folgenden japanischen Satz für mich. Gehe strikt Schritt für Schritt vor:
+_BATCH_PROMPT_TEMPLATE = f"""Du bist ein professioneller Japanisch-Lehrer. Analysiere JEDEN der folgenden, durchnummerierten japanischen Sätze einzeln für mich, in genau dieser Reihenfolge. Gehe für jeden Satz strikt Schritt für Schritt vor:
 
-1. Zerlege den Satz in JEDES einzelne Wort, Partikel und Grammatikelement –
-   OHNE etwas auszulassen. Das schließt Satzzeichen (｡ 。 、 ! ? …) am Ende
-   oder mitten im Satz ausdrücklich mit ein, jedes als eigenes Token. Die
-   surface-Felder aller Tokens müssen, aneinandergereiht, exakt wieder den
-   kompletten Original-Satz ergeben (Zeichen für Zeichen, nichts fehlt).
-   Gib zu jedem Token: surface (Schreibweise wie im Satz), dictionary_form
-   (Grundform/Wörterbuchform, z. B. bei Verben die Present-Wörterbuchform;
-   bei Satzzeichen einfach dasselbe Zeichen), function (kurze
-   grammatikalische Funktion/Bedeutung, auf Deutsch; bei Satzzeichen z. B.
-   "Satzzeichen").
-2. Erkläre kurz die wichtigsten Grammatik-Besonderheiten des Satzes
-   (grammar_notes, auf Deutsch).
-3. Gib eine natürliche, flüssige deutsche Übersetzung für den Gesamtsatz an
-   (translation_de).
+{_TOKEN_INSTRUCTIONS}
 
-Satz: {sentence}"""
+Gib "sentences" als Array zurück – für JEDEN unten aufgeführten Satz genau ein Objekt, mit "sentence" (der Original-Satz, exakt wie unten angegeben, unverändert), "tokens", "grammar_notes", "translation_de". Kein Satz darf ausgelassen werden.
+
+Sätze:
+{{sentences}}"""
+
+# Wie viele Sätze maximal in einem einzigen Request landen – ein Sicherheits-
+# Deckel gegen extrem lange Texte, nicht weil Gemini das nicht könnte
+# (Kontextfenster ist riesig), sondern damit eine einzelne Antwort nicht
+# unnötig groß/langsam wird. Der Rest landet in einem weiteren Batch-Request.
+_BATCH_CHUNK_SIZE = 40
 
 
 class GeminiError(Exception):
@@ -103,16 +139,32 @@ def _cache_path(sentence: str, model: str) -> Path:
     return CACHE_DIR / f"{key}.json"
 
 
+def _read_cache(sentence: str, model: str) -> dict[str, Any] | None:
+    cache_file = _cache_path(sentence, model)
+    if not cache_file.is_file():
+        return None
+    try:
+        return json.loads(cache_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_cache(sentence: str, model: str, result: dict[str, Any]) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _cache_path(sentence, model).write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _server_retry_delay(resp: requests.Response) -> float | None:
     """Von Google empfohlene Wartezeit aus einer 429-Antwort lesen (`Retry-After`-
     Header oder `RetryInfo` in der JSON-Fehlerantwort).
 
-    Zuverlässiger als eine geratene Backoff-Zeit: Rate-Limits (v. a. bei
-    `gemini-2.5-pro`, dessen Free-Tier-Kontingent deutlich enger ist als bei
-    `flash`/`flash-lite`) laufen über ein Zeitfenster von oft ~60s – ein reines
-    Backoff bis max. 8s wartet dann bei jedem Versuch zu kurz und schlägt
-    dutzende Male hintereinander mit HTTP 429 fehl, statt einmal lange genug
-    zu warten und danach zu klappen.
+    Zuverlässiger als eine geratene Backoff-Zeit: Rate-Limits laufen über ein
+    Zeitfenster von oft ~60s – ein reines Backoff bis max. 8s wartet dann bei
+    jedem Versuch zu kurz und schlägt dutzende Male hintereinander mit
+    HTTP 429 fehl, statt einmal lange genug zu warten und danach zu klappen.
     """
     retry_after = resp.headers.get("Retry-After")
     if retry_after:
@@ -130,60 +182,23 @@ def _server_retry_delay(resp: requests.Response) -> float | None:
     return None
 
 
-def analyze_sentence(
-    sentence: str,
-    api_key: str,
-    *,
-    model: str = DEFAULT_MODEL,
-    session: requests.Session | None = None,
-    use_cache: bool = True,
-) -> dict[str, Any] | None:
-    """Einen japanischen Satz per Gemini analysieren lassen: Tokens (mit
-    Grundform + grammatikalischer Funktion), Grammatik-Erklärung und eine
-    natürliche deutsche Übersetzung.
-
-    Gibt bei fehlendem Text/Key, Netzwerkfehler, Rate-Limit/Quota oder
-    kaputter/unerwarteter Antwort `None` zurück statt eine Exception zu
-    werfen – der Aufrufer fällt dann für diesen Satz auf Janome zurück.
-    """
-    sentence = sentence.strip()
-    if not sentence or not api_key:
-        return None
-
-    short = sentence if len(sentence) <= 40 else sentence[:40] + "…"
-
-    cache_file = _cache_path(sentence, model) if use_cache else None
-    if cache_file and cache_file.is_file():
-        try:
-            result = json.loads(cache_file.read_text(encoding="utf-8"))
-            logger.info("Gemini: Cache-Treffer für Satz %r (%s)", short, model)
-            return result
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    session = session or requests.Session()
-    url = f"{_API_BASE}/{model}:generateContent"
-    body = {
-        "contents": [{"parts": [{"text": _PROMPT_TEMPLATE.format(sentence=sentence)}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": _RESPONSE_SCHEMA,
-        },
-    }
-
-    logger.info("Gemini: Anfrage für Satz %r (%s) …", short, model)
+def _post_with_retry(
+    url: str, api_key: str, body: dict[str, Any], session: requests.Session, label: str
+) -> requests.Response | None:
+    """POST mit Retry bei 429/5xx (Server-empfohlene Wartezeit bevorzugt,
+    sonst geschätztes Backoff), gedeckelt auf insgesamt ~70s Wartezeit."""
     t0 = time.monotonic()
     backoff = 2.0
     total_waited = 0.0
-    max_total_wait = 70.0  # ein Satz darf insgesamt nicht länger blockieren
+    max_total_wait = 70.0
     resp = None
     for attempt in range(5):
         try:
             resp = session.post(url, params={"key": api_key}, json=body, timeout=_REQUEST_TIMEOUT)
         except requests.RequestException as exc:
             logger.warning(
-                "Gemini: Netzwerkfehler bei Satz %r nach %.1fs (%s): %s",
-                short, time.monotonic() - t0, type(exc).__name__, exc,
+                "Gemini: Netzwerkfehler bei %s nach %.1fs (%s): %s",
+                label, time.monotonic() - t0, type(exc).__name__, exc,
             )
             return None
         if resp.status_code == 429 or resp.status_code >= 500:
@@ -196,8 +211,8 @@ def analyze_sentence(
                 backoff = min(backoff * 2, 20)
             wait = min(wait, max_total_wait - total_waited)
             logger.info(
-                "Gemini: HTTP %s für Satz %r, Versuch %d/5 – warte %.0fs (%s)",
-                resp.status_code, short, attempt + 1, wait, source,
+                "Gemini: HTTP %s für %s, Versuch %d/5 – warte %.0fs (%s)",
+                resp.status_code, label, attempt + 1, wait, source,
             )
             time.sleep(wait)
             total_waited += wait
@@ -206,29 +221,157 @@ def analyze_sentence(
     if resp is None or not resp.ok:
         status = resp.status_code if resp is not None else "?"
         logger.warning(
-            "Gemini: Anfrage für Satz %r endgültig fehlgeschlagen (HTTP %s) nach %.1fs",
-            short, status, time.monotonic() - t0,
+            "Gemini: Anfrage für %s endgültig fehlgeschlagen (HTTP %s) nach %.1fs",
+            label, status, time.monotonic() - t0,
         )
         return None
+    logger.info("Gemini: %s beantwortet in %.1fs", label, time.monotonic() - t0)
+    return resp
+
+
+def analyze_sentence(
+    sentence: str,
+    api_key: str,
+    *,
+    model: str = DEFAULT_MODEL,
+    session: requests.Session | None = None,
+    use_cache: bool = True,
+) -> dict[str, Any] | None:
+    """Einen einzelnen japanischen Satz per Gemini analysieren (ein Request).
+
+    Für mehrere Sätze `analyze_sentences()` verwenden (ein Batch-Request statt
+    vieler Einzel-Requests). Gibt bei fehlendem Text/Key, Netzwerkfehler,
+    Rate-Limit/Quota oder kaputter/unerwarteter Antwort `None` zurück statt
+    eine Exception zu werfen – der Aufrufer fällt dann für diesen Satz auf
+    Janome zurück.
+    """
+    sentence = sentence.strip()
+    if not sentence or not api_key:
+        return None
+    return analyze_sentences([sentence], api_key, model=model, session=session, use_cache=use_cache).get(sentence)
+
+
+def analyze_sentences(
+    sentences: Sequence[str],
+    api_key: str,
+    *,
+    model: str = DEFAULT_MODEL,
+    session: requests.Session | None = None,
+    use_cache: bool = True,
+) -> dict[str, dict[str, Any] | None]:
+    """Mehrere Sätze in möglichst wenigen Gemini-Requests analysieren lassen
+    (ein Batch-Request pro bis zu `_BATCH_CHUNK_SIZE` noch nicht gecachten
+    Sätzen, statt einem Request pro Satz).
+
+    Gibt ein dict `{satz: ergebnis_oder_None}` zurück – für jeden übergebenen,
+    nicht-leeren Satz garantiert ein Eintrag. `None` bei allem, was fehl-
+    schlägt (Aufrufer fällt für genau diesen Satz auf Janome zurück).
+    """
+    unique = list(dict.fromkeys(s.strip() for s in sentences if s and s.strip()))
+    results: dict[str, dict[str, Any] | None] = {}
+    if not unique or not api_key:
+        return dict.fromkeys(unique)
+
+    todo: list[str] = []
+    for s in unique:
+        cached = _read_cache(s, model) if use_cache else None
+        if cached is not None:
+            results[s] = cached
+        else:
+            todo.append(s)
+    if not todo:
+        return results
+
+    session = session or requests.Session()
+    for i in range(0, len(todo), _BATCH_CHUNK_SIZE):
+        chunk = todo[i : i + _BATCH_CHUNK_SIZE]
+        chunk_results = _analyze_batch(chunk, api_key, model=model, session=session)
+        for s in chunk:
+            result = chunk_results.get(s)
+            results[s] = result
+            if result is not None and use_cache:
+                _write_cache(s, model, result)
+    return results
+
+
+def _analyze_batch(
+    sentences: list[str], api_key: str, *, model: str, session: requests.Session
+) -> dict[str, dict[str, Any] | None]:
+    numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, start=1))
+    body = {
+        "contents": [{"parts": [{"text": _BATCH_PROMPT_TEMPLATE.format(sentences=numbered)}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": _BATCH_RESPONSE_SCHEMA,
+        },
+    }
+    url = f"{_API_BASE}/models/{model}:generateContent"
+    label = f"Batch mit {len(sentences)} Satz/Sätzen ({model})"
+    logger.info("Gemini: Anfrage für %s …", label)
+    resp = _post_with_retry(url, api_key, body, session, label)
+    if resp is None:
+        return dict.fromkeys(sentences)
 
     try:
         data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
-        result = json.loads(text)
+        payload = json.loads(text)
+        items = payload["sentences"]
+        if not isinstance(items, list):
+            raise TypeError("'sentences' ist keine Liste")
     except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        logger.warning("Gemini: Antwort für Satz %r nicht auswertbar (%s): %s", short, type(exc).__name__, exc)
+        logger.warning("Gemini: Antwort für %s nicht auswertbar (%s): %s", label, type(exc).__name__, exc)
+        return dict.fromkeys(sentences)
+
+    by_sentence: dict[str, dict[str, Any] | None] = dict.fromkeys(sentences)
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        sentence = item.get("sentence")
+        tokens = item.get("tokens")
+        if sentence in by_sentence and isinstance(tokens, list):
+            by_sentence[sentence] = {
+                "tokens": tokens,
+                "grammar_notes": item.get("grammar_notes") or "",
+                "translation_de": item.get("translation_de") or "",
+            }
+    missing = [s for s, r in by_sentence.items() if r is None]
+    if missing:
+        logger.warning("Gemini: %d von %d Sätzen fehlen in der Antwort für %s", len(missing), len(sentences), label)
+    return by_sentence
+
+
+def list_models(api_key: str, *, session: requests.Session | None = None) -> list[str] | None:
+    """Für Text-Chat geeignete Gemini-Modelle live über die API abrufen
+    (`ListModels`), statt eine feste Liste im Code zu pflegen – Google fügt
+    neue Modelle hinzu und deprecatet alte regelmäßig (siehe DEFAULT_MODEL).
+
+    Gibt `None` zurück bei fehlendem Key/Netzwerkfehler/kaputter Antwort
+    (Aufrufer zeigt dann die hartcodierten AVAILABLE_MODELS als Fallback).
+    """
+    if not api_key:
+        return None
+    session = session or requests.Session()
+    try:
+        resp = session.get(f"{_API_BASE}/models", params={"key": api_key}, timeout=_REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        logger.warning("Gemini: Modell-Liste nicht abrufbar (%s): %s", type(exc).__name__, exc)
+        return None
+    if not resp.ok:
+        logger.warning("Gemini: Modell-Liste-Request fehlgeschlagen (HTTP %s)", resp.status_code)
+        return None
+    try:
+        models = resp.json().get("models", [])
+    except ValueError:
         return None
 
-    if not isinstance(result.get("tokens"), list):
-        logger.warning("Gemini: Antwort für Satz %r ohne 'tokens'-Liste", short)
-        return None
-
-    logger.info("Gemini: Satz %r analysiert in %.1fs (%d Tokens)", short, time.monotonic() - t0, len(result["tokens"]))
-
-    if cache_file:
-        try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            cache_file.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
-        except OSError:
-            pass
-    return result
+    names: list[str] = []
+    for m in models:
+        name = str(m.get("name", "")).removeprefix("models/")
+        methods = m.get("supportedGenerationMethods") or []
+        if not name.startswith("gemini-") or "generateContent" not in methods:
+            continue
+        if any(token in name for token in _MODEL_EXCLUDE_TOKENS):
+            continue
+        names.append(name)
+    return sorted(set(names))

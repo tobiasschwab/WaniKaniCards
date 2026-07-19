@@ -97,6 +97,27 @@ function _setConnDot(el, name, connected) {
   el.className = "conn-dot " + (connected ? "on" : "off");
   el.title = `${name}: ${connected ? "verbunden" : "nicht verbunden"}`;
 }
+function _populateGeminiModelSelect(models) {
+  const sel = $("#geminiModel");
+  const current = sel.value;
+  sel.innerHTML = "";
+  models.forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m; opt.textContent = m;
+    sel.appendChild(opt);
+  });
+  _selectGeminiModel(current);
+}
+function _selectGeminiModel(model) {
+  const sel = $("#geminiModel");
+  if (!model) return;
+  if (![...sel.options].some((o) => o.value === model)) {
+    const opt = document.createElement("option");
+    opt.value = model; opt.textContent = model;
+    sel.appendChild(opt);
+  }
+  sel.value = model;
+}
 async function loadSettings() {
   const s = await api("/api/settings");
   _setConnDot($("#connWanikani"), "WaniKani", s.token_set);
@@ -108,7 +129,8 @@ async function loadSettings() {
   _setConnPill($("#deeplRowPill"), s.deepl_key_set);
   if (s.gemini_key_set) $("#geminiInput").placeholder = s.gemini_key_hint || "";
   _setConnPill($("#geminiRowPill"), s.gemini_key_set);
-  if (s.gemini_model) { $("#geminiModel").value = s.gemini_model; }
+  if (s.gemini_models && s.gemini_models.length) { _populateGeminiModelSelect(s.gemini_models); }
+  if (s.gemini_model) { _selectGeminiModel(s.gemini_model); }
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
   if (d.types && d.types.length) chipcheckSet("type", d.types);
@@ -791,6 +813,19 @@ document.addEventListener("DOMContentLoaded", () => {
       await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gemini_key: $("#geminiInput").value, gemini_model: $("#geminiModel").value }) });
       $("#geminiInput").value = ""; await loadSettings(); toast("Gespeichert"); st.textContent = "Gemini-Einstellungen gespeichert ✓"; st.className = "status ok";
     } catch (e) { st.textContent = e.message; st.className = "status err"; }
+  });
+  $("#geminiRefreshModels").addEventListener("click", async () => {
+    const st = $("#geminiStatus");
+    st.textContent = "Rufe verfügbare Modelle ab…"; st.className = "status";
+    try {
+      const key = $("#geminiInput").value;
+      const body = key ? { key } : {};
+      const r = await api("/api/gemini/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const current = $("#geminiModel").value;
+      _populateGeminiModelSelect(r.models);
+      _selectGeminiModel(current);
+      st.textContent = `${r.models.length} Modelle geladen ✓`; st.className = "status ok";
+    } catch (e) { st.textContent = "Fehlgeschlagen: " + e.message; st.className = "status err"; }
   });
 
   $("#btnLevel").addEventListener("click", async () => {

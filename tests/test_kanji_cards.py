@@ -817,9 +817,12 @@ def test_annotate_text_wanikani_match_wins_over_dictionary_fallback(monkeypatch)
 # --------------------------------------------------------------------------- #
 
 def _fake_gemini(tokens, grammar_notes="Notiz", translation_de="Übersetzung"):
-    def _analyze(sentence, api_key, *, model=gemini_client.DEFAULT_MODEL, session=None, use_cache=True):
-        return {"tokens": tokens, "grammar_notes": grammar_notes, "translation_de": translation_de}
-    return _analyze
+    def _analyze_sentences(sentences, api_key, *, model=gemini_client.DEFAULT_MODEL, session=None, use_cache=True):
+        return {
+            s: {"tokens": tokens, "grammar_notes": grammar_notes, "translation_de": translation_de}
+            for s in sentences
+        }
+    return _analyze_sentences
 
 
 def test_annotate_text_uses_gemini_tokens_when_reconstruction_matches(monkeypatch):
@@ -829,7 +832,7 @@ def test_annotate_text_uses_gemini_tokens_when_reconstruction_matches(monkeypatc
         {"surface": "はじまった", "dictionary_form": "はじまる", "function": "Verb, Vergangenheit"},
         {"surface": "。", "dictionary_form": "。", "function": "Satzzeichen"},
     ]
-    monkeypatch.setattr(gemini_client, "analyze_sentence", _fake_gemini(tokens))
+    monkeypatch.setattr(gemini_client, "analyze_sentences", _fake_gemini(tokens))
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "Spiel; Wettkampf"}})
 
     lines = annotate_text("しあいがはじまった。", sample=True, gemini_key="dummy")
@@ -889,7 +892,7 @@ def test_annotate_text_uses_gemini_when_trailing_punctuation_is_missing(monkeypa
         {"surface": "です", "dictionary_form": "です", "function": "Kopula"},
         # bewusst kein Token für das abschließende "。"
     ]
-    monkeypatch.setattr(gemini_client, "analyze_sentence", _fake_gemini(tokens))
+    monkeypatch.setattr(gemini_client, "analyze_sentences", _fake_gemini(tokens))
     lines = annotate_text("大きい猫です。", sample=True, gemini_key="dummy")
     segs = lines[0]
     assert "".join(s["text"] for s in segs) == "大きい猫です。"
@@ -902,7 +905,7 @@ def test_annotate_text_falls_back_to_janome_when_gemini_reconstruction_mismatche
     # Gemini liefert Tokens, deren Surface-Formen NICHT zum Original passen
     # (z. B. halluziniertes Extra-Zeichen) -> Janome-Ergebnis bleibt bestehen.
     tokens = [{"surface": "komplett anders", "dictionary_form": "x", "function": "y"}]
-    monkeypatch.setattr(gemini_client, "analyze_sentence", _fake_gemini(tokens))
+    monkeypatch.setattr(gemini_client, "analyze_sentences", _fake_gemini(tokens))
 
     lines = annotate_text("大きい山です。", sample=True, gemini_key="dummy")
     segs = lines[0]
@@ -913,7 +916,7 @@ def test_annotate_text_falls_back_to_janome_when_gemini_reconstruction_mismatche
 
 
 def test_annotate_text_falls_back_to_janome_when_gemini_returns_none(monkeypatch):
-    monkeypatch.setattr(gemini_client, "analyze_sentence", lambda *a, **k: None)
+    monkeypatch.setattr(gemini_client, "analyze_sentences", lambda sentences, *a, **k: dict.fromkeys(sentences))
     lines = annotate_text("大きい山です。", sample=True, gemini_key="dummy")
     seg = next(s for s in lines[0] if s["type"] == "word" and s["lemma"] == "大きい")
     assert seg["source"] == "wanikani"
@@ -921,25 +924,31 @@ def test_annotate_text_falls_back_to_janome_when_gemini_returns_none(monkeypatch
 
 def test_annotate_text_without_gemini_key_never_calls_gemini(monkeypatch):
     called = []
-    monkeypatch.setattr(gemini_client, "analyze_sentence", lambda *a, **k: called.append(1) or None)
+
+    def fake_analyze_sentences(sentences, *a, **k):
+        called.append(list(sentences))
+        return dict.fromkeys(sentences)
+
+    monkeypatch.setattr(gemini_client, "analyze_sentences", fake_analyze_sentences)
     annotate_text("大きい山です。", sample=True)
     assert called == []
 
 
-def test_annotate_text_calls_gemini_once_per_unique_sentence(monkeypatch):
+def test_annotate_text_calls_gemini_once_with_all_unique_sentences(monkeypatch):
     # Zwei unterschiedliche Sätze, der erste kommt zweimal vor (Zeilenumbruch
-    # dazwischen) -> trotz paralleler Verarbeitung nur 2 Gemini-Aufrufe, nicht 3.
+    # dazwischen) -> EIN Batch-Aufruf mit beiden eindeutigen Sätzen, nicht
+    # drei Einzel-Aufrufe (das war der eigentliche Rate-Limit-Bug).
     calls = []
 
-    def fake_analyze(sentence, api_key, *, model="gemini-2.5-flash", session=None, use_cache=True):
-        calls.append(sentence)
-        return None  # Fallback auf Janome reicht für diesen Test
+    def fake_analyze_sentences(sentences, api_key, *, model="gemini-flash-latest", session=None, use_cache=True):
+        calls.append(list(sentences))
+        return dict.fromkeys(sentences)
 
-    monkeypatch.setattr(gemini_client, "analyze_sentence", fake_analyze)
+    monkeypatch.setattr(gemini_client, "analyze_sentences", fake_analyze_sentences)
     text = "大きい山です。\n大きい山です。\n小さい人です。"
     annotate_text(text, sample=True, gemini_key="dummy")
-    assert sorted(set(calls)) == ["大きい山です。", "小さい人です。"]
-    assert len(calls) == 2
+    assert len(calls) == 1
+    assert sorted(calls[0]) == ["大きい山です。", "小さい人です。"]
 
 
 # --------------------------------------------------------------------------- #

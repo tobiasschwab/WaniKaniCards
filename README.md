@@ -119,16 +119,19 @@ ums Nachschlagen/Verfolgen, nicht ums Erzeugen neuer Karten).
    Kartentyp (siehe [Dictionary-Karten](#dictionary-karten)).
 
    **Optional: Analyse per Gemini.** Der Button **„✨ Mit Gemini analysieren"**
-   (statt „Verarbeiten") schickt jeden Satz an Googles
-   [Gemini-API](https://ai.google.dev/) (Key + Modell in den Einstellungen
-   hinterlegen) und liefert bessere Wortgrenzen, die grammatikalische
-   Funktion jedes Worts/Partikels sowie – per **ⓘ**-Symbol am Satzende – eine
-   kurze Grammatik-Erklärung und eine natürliche deutsche Übersetzung des
-   ganzen Satzes. Kein automatischer Ersatz für „Verarbeiten": ein expliziter
-   Klick, da jeder Aufruf Kosten verursacht und Satztexte an Google sendet.
-   Schlägt Gemini für einen Satz fehl (kein Key, Netzwerkfehler, Quota) oder
-   passen seine Wortgrenzen nicht exakt zum Original, bleibt für genau diesen
-   Satz die normale Janome-Analyse bestehen – nie ein harter Abbruch.
+   (statt „Verarbeiten") schickt alle eindeutigen Sätze des Textes **in einem
+   Batch-Request** an Googles [Gemini-API](https://ai.google.dev/) (Key +
+   Modell in den Einstellungen hinterlegen – die Modell-Liste lässt sich dort
+   per 🔄 live von Google abrufen) und liefert bessere Wortgrenzen, die
+   grammatikalische Funktion jedes Worts/Partikels sowie – per **ⓘ**-Symbol
+   am Satzende – eine kurze Grammatik-Erklärung und eine natürliche deutsche
+   Übersetzung des ganzen Satzes. Kein automatischer Ersatz für
+   „Verarbeiten": ein expliziter Klick, da jeder Aufruf Kosten verursacht und
+   Satztexte an Google sendet. Schlägt Gemini für einen Satz fehl (Netzwerk-
+   fehler, Quota, Satz nicht in der Antwort wiedererkannt) oder passen seine
+   Wortgrenzen nicht exakt zum Original, bleibt für genau diesen Satz die
+   normale Janome-Analyse bestehen – nie ein harter Abbruch für den ganzen
+   Text.
 4. **Frei erstellen:** eigene Karten in zwei **freien Rich-Text-Feldern**
    (Vorder- und Rückseite) anlegen – Text formatieren (fett/kursiv/unterstrichen,
    Titel, Merk-Box, Liste, große Schrift) und **Bilder** einfügen. Beide Felder
@@ -575,33 +578,50 @@ Janome-Tokenisierung für genau diesen Satz unverändert (nie ein harter
 Abbruch für den gesamten Text). `dictionary_form` ersetzt dabei Janomes
 `base_form` als Schlüssel für den WaniKani-/JMdict-Abgleich.
 
-Modellwahl über `-latest`-Aliase (`gemini-flash-latest`/`-flash-lite-latest`/
-`-pro-latest`) statt fest codierter Versionsnummern (z. B. `gemini-2.5-flash`)
-– Google deprecatet konkrete Versionen regelmäßig für neue Projekte/Keys
-("model X is no longer available to new users"), die Alias-Namen zeigen
-dauerhaft auf die aktuell aktive Version. `pro-latest` hat auf dem
-kostenlosen Tier meist **kein** Kontingent (HTTP 429 "quota exceeded",
-`limit: 0`) und braucht ein Konto mit aktivierter Abrechnung. Ein vor dieser
-Umstellung gespeicherter, jetzt ungültiger Modellname in `settings.json`
-wird beim nächsten Request automatisch durch den aktuellen Default ersetzt
-(mit Log-Hinweis), statt an Google gesendet zu werden und dort zu scheitern.
+**Batch-Verarbeitung statt eines Requests pro Satz**: `analyze_sentences()`
+ist die zentrale Funktion – sie sammelt alle eindeutigen Sätze eines Textes,
+prüft zuerst den Satz-Cache (`.cache/gemini/`) und schickt nur die noch
+ungecachten Sätze in Blöcken von `_BATCH_CHUNK_SIZE` (40) als **ein**
+Request an Gemini (`{"sentences": [...]}` rein, `{"sentences": [{sentence,
+tokens, grammar_notes, translation_de}, …]}` raus, per `responseSchema`
+erzwungen). `analyze_sentence()` (Singular) ist nur noch ein dünner Wrapper
+darüber. Das ersetzt die frühere Architektur mit einem Request pro Satz
+(mit begrenzter `ThreadPoolExecutor`-Parallelität): bei längeren Texten mit
+vielen Sätzen führte diese zu einer Kaskade paralleler Requests, die das
+Rate-Limit gemeinsam sofort ausschöpften (siehe 429-Handling unten) – ein
+einzelner Batch-Request pro Textverarbeitung vermeidet das strukturell,
+nicht nur durch besseres Backoff. Fehlt eine Übersetzung in Gemini's
+Antwort (Satz nicht wiedererkannt, Antwort unvollständig), fällt genau
+dieser Satz auf Janome zurück statt den ganzen Batch scheitern zu lassen.
 
-Eindeutige Sätze werden mit begrenzter Parallelität (`ThreadPoolExecutor`,
-max. 2 gleichzeitig) statt streng seriell angefragt – bei längeren Texten
-sonst viele Minuten Wartezeit in einem einzigen gunicorn-Worker. Bewusst
-niedrig gehalten (nicht höher): mehr Parallelität verschärft nur die
-Rate-Limit-Kollisionen. Jeder Request nutzt ein (Connect-, Read-)
-Timeout von (10s, 25s) statt eines einzelnen 30s-Werts, damit eine tote
-Verbindung (z. B. Netzwerk-Policy im Docker-Deployment) nicht unbegrenzt
-hängt. Bei HTTP 429 wird die von Google selbst empfohlene Wartezeit
-(`Retry-After`-Header bzw. `RetryInfo.retryDelay` in der Fehlerantwort)
-befolgt statt eines geratenen Backoffs – ein Rate-Limit-Fenster läuft oft
-über ~60s, ein Backoff, der nach 8s aufgibt, schlägt in der Zeit einfach
-mehrfach erfolglos fehl, statt einmal lange genug zu warten. Insgesamt darf
-ein einzelner Satz höchstens ~70s auf Rate-Limit-Erholung warten, danach
-fällt er auf Janome zurück statt endlos zu blockieren. Start, Dauer und
-Fehlerursache jeder Gemini-Anfrage werden per `logging` protokolliert (INFO/
-WARNING, sichtbar über `docker logs`) – vorher war ein hängender oder an
+**Modellwahl**: `list_models()` fragt die verfügbaren Modelle live per
+`GET /v1beta/models` ab (gefiltert auf Text-Chat-fähige `gemini-*`-Modelle),
+statt eine feste Liste im Code zu pflegen – Google fügt laufend neue Modelle
+hinzu und deprecatet alte für neue Projekte/Keys ("model X is no longer
+available to new users"). Der Endpunkt `POST /api/gemini/models` liefert
+diese Liste ans Frontend (🔄-Button neben der Modell-Auswahl in den
+Einstellungen); `AVAILABLE_MODELS`/`DEFAULT_MODEL` (`-latest`-Aliase wie
+`gemini-flash-latest`) dienen nur noch als Fallback-Vorauswahl, falls noch
+keine Liste abgerufen wurde oder der Abruf fehlschlägt. `pro`-Modelle haben
+auf dem kostenlosen Tier meist **kein** Kontingent (HTTP 429 "quota
+exceeded", `limit: 0`) und brauchen ein Konto mit aktivierter Abrechnung.
+Jeder in `settings.json` gespeicherte Modellname, der mit `gemini-`
+beginnt, wird vertrauensvoll durchgereicht (auch wenn er nicht in der
+kleinen Fallback-Liste steht) – nur ein wirklich ungültiger Wert fällt auf
+den Default zurück.
+
+Jeder Gemini-Request nutzt ein (Connect-, Read-)Timeout von (10s, 60s)
+statt eines einzelnen 30s-Werts, damit eine tote Verbindung (z. B.
+Netzwerk-Policy im Docker-Deployment) nicht unbegrenzt hängt. Bei HTTP 429
+wird die von Google selbst empfohlene Wartezeit (`Retry-After`-Header bzw.
+`RetryInfo.retryDelay` in der Fehlerantwort) befolgt statt eines geratenen
+Backoffs – ein Rate-Limit-Fenster läuft oft über ~60s, ein Backoff, der
+nach 8s aufgibt, schlägt in der Zeit einfach mehrfach erfolglos fehl, statt
+einmal lange genug zu warten. Insgesamt darf ein einzelner Batch höchstens
+~70s auf Rate-Limit-Erholung warten, danach fällt der gesamte Batch auf
+Janome zurück statt endlos zu blockieren. Start, Dauer und Fehlerursache
+jeder Gemini-Anfrage werden per `logging` protokolliert (INFO/WARNING,
+sichtbar über `docker logs`) – vorher war ein hängender oder an
 Rate-Limits scheiternder Request von außen nicht zu unterscheiden.
 
 Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-

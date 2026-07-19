@@ -456,12 +456,29 @@ def api_post_settings() -> Any:
         s["deepl_key"] = body["deepl_key"].strip()
     if isinstance(body.get("gemini_key"), str):
         s["gemini_key"] = body["gemini_key"].strip()
-    if isinstance(body.get("gemini_model"), str) and body["gemini_model"] in kc.gemini_client.AVAILABLE_MODELS:
-        s["gemini_model"] = body["gemini_model"]
+    if isinstance(body.get("gemini_model"), str) and body["gemini_model"].strip().startswith("gemini-"):
+        s["gemini_model"] = body["gemini_model"].strip()
     if isinstance(body.get("defaults"), dict):
         s["defaults"] = {**s["defaults"], **body["defaults"]}
     save_settings(s)
     return jsonify({"ok": True, "token_set": bool(s.get("token")), "username": s.get("username", "")})
+
+
+@app.post("/api/gemini/models")
+def api_gemini_models() -> Any:
+    """Verfügbare Gemini-Modelle live per API abrufen (ListModels), statt eine
+    hartcodierte Liste zu pflegen – akzeptiert optional einen noch nicht
+    gespeicherten Key aus dem Formular (analog zu /api/test-token), sonst den
+    in den Einstellungen hinterlegten."""
+    key = (request.get_json(silent=True) or {}).get("key") or load_settings().get("gemini_key", "")
+    if not key:
+        return jsonify({"error": "Kein Gemini-API-Key angegeben."}), 400
+    models = kc.gemini_client.list_models(key)
+    if models is None:
+        return jsonify({"error": "Modell-Liste konnte nicht abgerufen werden (ungültiger Key oder Netzwerkfehler)."}), 502
+    if not models:
+        return jsonify({"error": "Keine passenden Modelle gefunden."}), 502
+    return jsonify({"models": models, "default": kc.gemini_client.DEFAULT_MODEL})
 
 
 @app.post("/api/test-token")
@@ -554,15 +571,13 @@ def api_text_annotate() -> Any:
         s = load_settings()
         gemini_key = s.get("gemini_key") or None
         stored_model = s.get("gemini_model")
-        if stored_model in kc.gemini_client.AVAILABLE_MODELS:
-            gemini_model = stored_model
+        if isinstance(stored_model, str) and stored_model.strip().startswith("gemini-"):
+            gemini_model = stored_model.strip()
         elif stored_model:
-            # Vor der "-latest"-Umstellung gespeicherter, inzwischen von
-            # Google deprecateter Modellname (z. B. "gemini-2.5-flash") ->
-            # auf den aktuellen Default ausweichen statt an Google zu senden
-            # und dort mit HTTP 404 "no longer available" zu scheitern.
+            # Kein gültiger Gemini-Modellname (z. B. leere/kaputte Einstellung) ->
+            # auf den aktuellen Default ausweichen statt an Google zu senden.
             logger.warning(
-                "Gespeichertes Gemini-Modell %r ist nicht mehr verfügbar, verwende Default %r.",
+                "Gespeichertes Gemini-Modell %r ist ungültig, verwende Default %r.",
                 stored_model, gemini_model,
             )
         if not gemini_key:
