@@ -294,6 +294,63 @@ def test_analyze_sentence_gives_up_after_max_total_wait(tmp_path, monkeypatch):
     assert result is None  # gibt irgendwann auf statt einen Satz ewig zu blockieren
 
 
+def test_analyze_sentence_retries_once_after_read_timeout_then_succeeds(tmp_path, monkeypatch):
+    # Regressionstest: ein einzelner ReadTimeout (z. B. bei einem langsamen
+    # Batch) darf nicht sofort endgültig aufgeben - ein zweiter Versuch
+    # schlägt bei Gemini oft durch.
+    monkeypatch.setattr(gc, "CACHE_DIR", tmp_path / "gemini")
+    monkeypatch.setattr(gc.time, "sleep", lambda *_a, **_k: None)
+    calls = {"n": 0}
+
+    class _TimesOutOnce:
+        def post(self, url, params=None, json=None, timeout=30):
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise requests.ReadTimeout("timed out")
+            tokens = [{"surface": "x", "dictionary_form": "x", "function": "y"}]
+            return _FakeResp(json_data=_batch_body([("テスト", tokens, "", "")]))
+
+    result = gc.analyze_sentence("テスト", "key", session=_TimesOutOnce(), use_cache=False)
+    assert result is not None
+    assert calls["n"] == 2
+
+
+def test_analyze_sentence_gives_up_after_second_read_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "CACHE_DIR", tmp_path / "gemini")
+    monkeypatch.setattr(gc.time, "sleep", lambda *_a, **_k: None)
+    calls = {"n": 0}
+
+    class _AlwaysTimesOut:
+        def post(self, url, params=None, json=None, timeout=30):
+            calls["n"] += 1
+            raise requests.ReadTimeout("timed out")
+
+    result = gc.analyze_sentence("テスト", "key", session=_AlwaysTimesOut(), use_cache=False)
+    assert result is None
+    assert calls["n"] == 2  # ein Versuch + genau ein Retry, dann endgültig aufgeben
+
+
+def test_batch_read_timeout_scales_with_sentence_count():
+    assert gc._batch_read_timeout(1) == (10, 68.0)
+    assert gc._batch_read_timeout(19) == (10, 212.0)
+    # gedeckelt, damit ein Request nie unbegrenzt lange auf Antwort wartet
+    assert gc._batch_read_timeout(100) == (10, 280.0)
+
+
+def test_analyze_sentences_passes_scaled_timeout_to_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "CACHE_DIR", tmp_path / "gemini")
+    seen_timeouts = []
+
+    class _RecordingSession:
+        def post(self, url, params=None, json=None, timeout=30):
+            seen_timeouts.append(timeout)
+            tokens = [{"surface": "x", "dictionary_form": "x", "function": "y"}]
+            return _FakeResp(json_data=_batch_body([("テスト", tokens, "", "")]))
+
+    gc.analyze_sentences(["テスト"], "key", session=_RecordingSession(), use_cache=False)
+    assert seen_timeouts == [gc._batch_read_timeout(1)]
+
+
 # --------------------------------------------------------------------------- #
 # list_models
 # --------------------------------------------------------------------------- #

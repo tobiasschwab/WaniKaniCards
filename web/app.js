@@ -337,15 +337,18 @@ const KI_STORAGE_KEY = "shiori_ki_state";
 async function doKiProcess() {
   const text = $("#textInput").value;
   if (!text.trim()) return;
-  $("#textStatus").textContent = "Analysiere mit KI… (kann bei langen Texten 1–2 Minuten dauern)";
+  $("#textStatus").textContent = "Analysiere mit KI… (kann bei langen Texten mehrere Minuten dauern)";
   let r;
   try {
     // Gemini-Anfragen laufen gegen eine externe API – ohne Zeitlimit könnte
     // ein Netzwerkproblem die Oberfläche unbegrenzt in "Analysiere…" hängen
-    // lassen, ohne dass sichtbar wird, woran es liegt.
+    // lassen, ohne dass sichtbar wird, woran es liegt. Serverseitig kann ein
+    // einzelner Batch (bis zu 40 Sätze) bis zu ~280s + Retry brauchen, bei
+    // langen Texten mit mehreren Batches entsprechend länger – das clientseitige
+    // Zeitlimit muss großzügiger sein als der einzelne Server-Timeout.
     r = await api("/api/text-annotate-ai", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, sample: isSample() }),
-      signal: AbortSignal.timeout(150000),
+      signal: AbortSignal.timeout(600000),
     });
   } catch (e) {
     $("#textStatus").textContent = "";
@@ -518,7 +521,7 @@ async function retryKiRow(row, idx, btn) {
     const r = await api("/api/text-annotate-ai", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: row.sentence, sample: isSample() }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000),
     });
     const newRow = (r.rows || [])[0];
     if (newRow) {

@@ -679,19 +679,29 @@ beginnt, wird vertrauensvoll durchgereicht (auch wenn er nicht in der
 kleinen Fallback-Liste steht) – nur ein wirklich ungültiger Wert fällt auf
 den Default zurück.
 
-Jeder Gemini-Request nutzt ein (Connect-, Read-)Timeout von (10s, 60s)
-statt eines einzelnen 30s-Werts, damit eine tote Verbindung (z. B.
-Netzwerk-Policy im Docker-Deployment) nicht unbegrenzt hängt. Bei HTTP 429
-wird die von Google selbst empfohlene Wartezeit (`Retry-After`-Header bzw.
-`RetryInfo.retryDelay` in der Fehlerantwort) befolgt statt eines geratenen
-Backoffs – ein Rate-Limit-Fenster läuft oft über ~60s, ein Backoff, der
-nach 8s aufgibt, schlägt in der Zeit einfach mehrfach erfolglos fehl, statt
-einmal lange genug zu warten. Insgesamt darf ein einzelner Batch höchstens
-~70s auf Rate-Limit-Erholung warten, danach fällt der gesamte Batch auf
-Janome zurück statt endlos zu blockieren. Start, Dauer und Fehlerursache
-jeder Gemini-Anfrage werden per `logging` protokolliert (INFO/WARNING,
-sichtbar über `docker logs`) – vorher war ein hängender oder an
-Rate-Limits scheiternder Request von außen nicht zu unterscheiden.
+Jeder Gemini-Request nutzt ein (Connect-, Read-)Timeout statt eines
+einzelnen 30s-Werts, damit eine tote Verbindung (z. B. Netzwerk-Policy im
+Docker-Deployment) nicht unbegrenzt hängt. Für Satz-Batches skaliert der
+Read-Timeout mit der Satzanzahl (`_batch_read_timeout()`: 60s + 8s pro Satz,
+gedeckelt auf 280s) statt eines fixen 60s-Werts – live beobachtet hat schon
+ein einzelner Satz ~46s gebraucht und ein 19er-Batch ist am fixen 60s-Limit
+gescheitert (`ReadTimeout`), ein pauschaler Wert unabhängig von der
+Satzanzahl war schlicht zu knapp. Ein einzelner `ReadTimeout`/Netzwerkfehler
+wird zusätzlich einmal wiederholt (nicht wie 429/5xx bis zu 5×, da hier jeder
+Versuch selbst schon lange dauern kann) – ein zweiter Versuch schlägt bei
+Gemini oft durch. Bei HTTP 429 wird die von Google selbst empfohlene
+Wartezeit (`Retry-After`-Header bzw. `RetryInfo.retryDelay` in der
+Fehlerantwort) befolgt statt eines geratenen Backoffs – ein Rate-Limit-
+Fenster läuft oft über ~60s, ein Backoff, der nach 8s aufgibt, schlägt in
+der Zeit einfach mehrfach erfolglos fehl, statt einmal lange genug zu
+warten. Insgesamt darf ein einzelner Batch höchstens ~70s auf
+Rate-Limit-Erholung warten, danach bekommt genau dieser Satz/Batch einen
+Fehler statt endlos zu blockieren (gunicorn selbst läuft mit
+`--timeout 600`, damit ein langer Batch nicht vom Worker-Timeout
+abgeschossen wird, bevor der Gemini-Timeout überhaupt greift). Start, Dauer
+und Fehlerursache jeder Gemini-Anfrage werden per `logging` protokolliert
+(INFO/WARNING, sichtbar über `docker logs`) – vorher war ein hängender oder
+an Rate-Limits scheiternder Request von außen nicht zu unterscheiden.
 
 Die **Wortliste** (`/api/wortliste`) vereinigt drei Quellen zu einer Anzeige-
 Liste: bereits exportierte/manuell markierte WaniKani-Subjects (Anzeige-Daten

@@ -44,11 +44,19 @@ CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini"
 
 # (connect, read) statt einem einzelnen Wert: eine tote/blockierte Verbindung
 # (z. B. DNS/Firewall-Problem im Docker-Netz) darf höchstens 10s zum Verbin-
-# den brauchen, das eigentliche Warten auf die Antwort maximal 60s (ein
-# Batch mit vielen Sätzen braucht länger als ein Einzelsatz) – sonst hängt
-# ein Request (und damit ein ganzer gunicorn-Worker) im schlimmsten Fall
-# lange fest, ohne dass im Frontend oder Log erkennbar ist, woran es liegt.
+# den brauchen. Für Einzel-Requests (TTS, ListModels) reicht ein Read-Timeout
+# von 60s – für Satz-Batches siehe `_batch_read_timeout()`: live beobachtet
+# hat schon EIN Satz ~46s gebraucht und ein 19er-Batch nach 60s abgebrochen,
+# ein fixer Wert unabhängig von der Satzanzahl war schlicht zu knapp bemessen.
 _REQUEST_TIMEOUT = (10, 60)
+
+
+def _batch_read_timeout(n_sentences: int) -> tuple[float, float]:
+    """Read-Timeout für einen Satz-Batch, linear mit der Satzanzahl skaliert
+    (Google generiert pro Satz strukturiertes JSON, das braucht spürbar
+    länger als ein einzelner kurzer Prompt) – gedeckelt, damit ein einzelner
+    Request nie unbegrenzt einen gunicorn-Worker blockiert."""
+    return (10, min(280.0, 60.0 + 8.0 * n_sentences))
 
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -191,26 +199,59 @@ def _server_retry_delay(resp: requests.Response) -> float | None:
 
 
 def _post_with_retry(
-    url: str, api_key: str, body: dict[str, Any], session: requests.Session, label: str
+    url: str,
+    api_key: str,
+    body: dict[str, Any],
+    session: requests.Session,
+    label: str,
+    *,
+    timeout: tuple[float, float] = _REQUEST_TIMEOUT,
+    max_attempts: int = 5,
 ) -> requests.Response | None:
     """POST mit Retry bei 429/5xx (Server-empfohlene Wartezeit bevorzugt,
-    sonst geschätztes Backoff), gedeckelt auf insgesamt ~70s Wartezeit."""
+    sonst geschätztes Backoff) UND bei Netzwerkfehlern/Timeouts (geschätztes
+    Backoff) – ein einzelner ReadTimeout ist bei Gemini kein Dauerzustand,
+    ein zweiter Versuch schlägt oft durch. Gedeckelt auf insgesamt ~70s
+    Wartezeit zwischen den Versuchen (nicht zu verwechseln mit `timeout`,
+    der Wartezeit PRO Versuch auf die Antwort selbst)."""
+    # Netzwerkfehler/Timeouts nur einmal wiederholt (nicht die vollen 5
+    # Versuche): jeder Versuch kann hier bis zu `timeout[1]` (bei großen
+    # Batches mehrere Minuten) dauern, statt wie ein 429/5xx sofort mit
+    # einer HTTP-Antwort zurückzukommen – ein gunicorn-Worker soll dadurch
+    # nicht mehrfach die volle Wartezeit blockieren.
+    max_network_retries = 1
+    network_retries = 0
     t0 = time.monotonic()
     backoff = 2.0
     total_waited = 0.0
     max_total_wait = 70.0
     resp = None
-    for attempt in range(5):
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        last_exc = None
         try:
-            resp = session.post(url, params={"key": api_key}, json=body, timeout=_REQUEST_TIMEOUT)
+            resp = session.post(url, params={"key": api_key}, json=body, timeout=timeout)
         except requests.RequestException as exc:
+            last_exc = exc
             logger.warning(
-                "Gemini: Netzwerkfehler bei %s nach %.1fs (%s): %s",
+                "Gemini: Netzwerkfehler/Timeout bei %s nach %.1fs (%s): %s",
                 label, time.monotonic() - t0, type(exc).__name__, exc,
             )
-            return None
+            if network_retries >= max_network_retries:
+                break
+            network_retries += 1
+            wait = min(backoff, max_total_wait - total_waited) if total_waited < max_total_wait else 0.0
+            backoff = min(backoff * 2, 20)
+            logger.info(
+                "Gemini: Erneuter Versuch für %s nach Netzwerkfehler (%d/%d) – warte %.0fs",
+                label, network_retries, max_network_retries, wait,
+            )
+            if wait:
+                time.sleep(wait)
+                total_waited += wait
+            continue
         if resp.status_code == 429 or resp.status_code >= 500:
-            if total_waited >= max_total_wait or attempt == 4:
+            if total_waited >= max_total_wait or attempt == max_attempts - 1:
                 break
             wait = _server_retry_delay(resp) if resp.status_code == 429 else None
             source = "vom Server empfohlen"
@@ -219,14 +260,14 @@ def _post_with_retry(
                 backoff = min(backoff * 2, 20)
             wait = min(wait, max_total_wait - total_waited)
             logger.info(
-                "Gemini: HTTP %s für %s, Versuch %d/5 – warte %.0fs (%s)",
-                resp.status_code, label, attempt + 1, wait, source,
+                "Gemini: HTTP %s für %s, Versuch %d/%d – warte %.0fs (%s)",
+                resp.status_code, label, attempt + 1, max_attempts, wait, source,
             )
             time.sleep(wait)
             total_waited += wait
             continue
         break
-    if resp is None or not resp.ok:
+    if last_exc is not None or resp is None or not resp.ok:
         status = resp.status_code if resp is not None else "?"
         logger.warning(
             "Gemini: Anfrage für %s endgültig fehlgeschlagen (HTTP %s) nach %.1fs",
@@ -316,7 +357,7 @@ def _analyze_batch(
     url = f"{_API_BASE}/models/{model}:generateContent"
     label = f"Batch mit {len(sentences)} Satz/Sätzen ({model})"
     logger.info("Gemini: Anfrage für %s …", label)
-    resp = _post_with_retry(url, api_key, body, session, label)
+    resp = _post_with_retry(url, api_key, body, session, label, timeout=_batch_read_timeout(len(sentences)))
     if resp is None:
         return dict.fromkeys(sentences)
 
