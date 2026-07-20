@@ -576,8 +576,9 @@ Gemini-Grammatikanalyse kombiniert: Karten über **Level-Stapel**, **Suche**
 (rekursive Komposition), den **Text-Modus** oder **frei** erstellen, in einer
 **Tabelle auswählen**, daraus **ein PDF oder Anki-Paket** erzeugen, dazu eine
 **Wortliste** über alles, was schon bekannt ist, und ein **Verlauf** mit
-Direkt-Download. Es gibt **keine Datenbank** – alles wird dateibasiert im
-Ordner `data/` gespeichert:
+Direkt-Download. Aktuell (Phase 1 des Multi-User-Umbaus, siehe unten) laufen
+Accounts/Login über eine Datenbank, die eigentlichen Nutzdaten aber noch
+dateibasiert im Ordner `data/`:
 
 ```
 data/
@@ -617,6 +618,90 @@ gunicorn -b 0.0.0.0:8000 -w 2 --timeout 600 webapp:app
 Der Token wird über die Oberfläche gesetzt und landet in `data/settings.json`
 (nicht im Repo – `data/` ist in `.gitignore`). Alternativ funktioniert weiter
 `WANIKANI_API_TOKEN` als Umgebungsvariable fürs CLI.
+
+## Multi-User-Architektur (Umbau in Arbeit)
+
+Shiori wird schrittweise von einer Single-Tenant-Installation (ein Betreiber,
+ein globaler `data/`-Ordner) zu einer öffentlichen Multi-User-SaaS umgebaut.
+Getroffene Design-Entscheidungen: **öffentliches Self-Signup**, **E-Mail/
+Passwort** als Login (nicht der WaniKani-Token selbst), **PostgreSQL** statt
+einer NoSQL-Datenbank (siehe Abwägung unten) und **BYOK** – jeder Nutzer
+hinterlegt seine eigenen DeepL-/Gemini-Keys, keine geteilten Kontingente.
+
+**PostgreSQL statt NoSQL – die Abwägung:** Die heutigen JSON-Dateien
+(Settings, Custom-/Kana-Cards, Job-Params) sehen auf den ersten Blick nach
+einer Dokument-Datenbank aus. Postgres' `JSON`-Spaltentyp bietet aber genau
+dieselbe Flexibilität für diese Felder, **ohne** die relationalen Stärken zu
+verlieren, die eine Multi-User-SaaS mit Konten/Quotas/Cross-Table-Auswertungen
+("welche meiner Wörter sind schon exportiert") braucht: native Joins, ACID-
+Transaktionen (z. B. "Job anlegen + Quota-Zähler erhöhen" atomar), riesiges
+BI-/Tooling-Ökosystem. Eine Dokument-DB (z. B. MongoDB) lohnt sich vor allem
+bei sehr hohem Schreibdurchsatz mit horizontalem Dokument-Sharding – für ein
+Flashcard-Tool in realistischer Nutzergrößenordnung nicht der limitierende
+Faktor. Zwei unterschiedliche Datenbank-Paradigmen zu betreiben (Postgres
+UND Mongo) wäre zusätzlicher Betriebsaufwand ohne einen Vorteil, den JSONB-
+Spalten nicht auch böten.
+
+**Aktueller Stand – Phase 1 (Fundament: Auth & Datenmodell), umgesetzt:**
+
+- `models.py`: SQLAlchemy-Schema (`User`, `UserSettings`, `KnownWord`,
+  `CustomCard`, `KanaCard`, `Job`) – die künftigen Postgres-Pendants zu den
+  heutigen JSON-Dateien/Verzeichnissen. Bewusst `db.JSON` (portabler
+  SQLAlchemy-Typ) statt `postgresql.JSONB`, damit dasselbe Schema unverändert
+  gegen SQLite (Tests, lokale Entwicklung) UND Postgres (Produktion) läuft.
+- `extensions.py`: gemeinsame `db`/`login_manager`-Instanzen (eigenes Modul,
+  damit `models.py` `db` importieren kann, ohne einen Zirkelimport mit
+  `webapp.py` zu erzeugen).
+- `auth.py`: `POST /api/auth/signup`, `/login`, `/logout`, `GET /api/auth/me`
+  – E-Mail/Passwort-Auth über `Flask-Login`-Sessions, Passwort-Hashing über
+  `werkzeug.security` (kein zusätzlicher Auth-Dienst nötig).
+- `crypto.py`: Fernet-Verschlüsselung für ruhende Secrets (WaniKani-Token,
+  DeepL-/Gemini-Key) – im bisherigen Single-Tenant-Betrieb lagen diese im
+  Klartext (akzeptabel, nur der Betreiber selbst betroffen); bei einer
+  öffentlichen Instanz mit fremden Nutzern nicht mehr. Braucht einen
+  serverseitigen Master-Key (`WKCARDS_SECRET_KEY`, erzeugen mit
+  `python -c "from crypto import generate_master_key; print(generate_master_key())"`).
+- `migrations/` (Alembic): versioniertes Schema-Management für Postgres.
+  `alembic upgrade head` (läuft automatisch beim Container-Start, siehe
+  `docker-entrypoint.sh`) statt `db.create_all()` in Produktion – Letzteres
+  bleibt ein Komfort-Fallback nur für die lokale SQLite-Entwicklungs-DB.
+- `docker-compose.yml`: zusätzlicher `db`-Service (Postgres 16); `DATABASE_URL`
+  zeigt bei einem verwalteten Postgres-Dienst (RDS/Neon/Supabase) stattdessen
+  direkt dorthin, der `db`-Service ist nur für Self-Hosting/lokale Entwicklung.
+
+**Nötige Umgebungsvariablen für den Multi-User-Betrieb** (ohne sie fällt die
+App auf eine lokale SQLite-Datei + einen unsicheren Default-Session-Key
+zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
+öffentlichen Betrieb):
+
+| Variable | Zweck |
+|---|---|
+| `DATABASE_URL` | Postgres-Verbindung, z. B. `postgresql+psycopg2://user:pass@host/db`. Ohne gesetzt: SQLite unter `data/shiori.db`. |
+| `WKCARDS_SECRET_KEY` | Fernet-Master-Key zum Ver-/Entschlüsseln gespeicherter API-Keys (`crypto.py`). |
+| `WKCARDS_SESSION_SECRET` | Flasks Session-Signing-Key (`SECRET_KEY`) – bewusst **eine andere** Variable als `WKCARDS_SECRET_KEY`: unterschiedliche Rotationsanforderungen/Formate. |
+
+**Noch NICHT umgesetzt (Phase 2 und später, siehe Roadmap):** die
+bestehenden Endpunkte (`/api/resolve`, `/api/render`, `/api/text-annotate*`,
+Wortliste, Custom-/Kana-Cards, Jobs) laufen weiterhin auf den globalen
+JSON-Dateien unter `data/` – **nicht** pro Nutzer getrennt und **nicht**
+hinter `@login_required`. Wer sich anmeldet, bekommt also aktuell noch
+denselben globalen Datenbestand zu sehen wie jeder andere Account. Geplante
+nächste Schritte:
+
+1. **Datenmigration & Autorisierung** – jeder bestehende Endpunkt bekommt
+   `current_user`-Scoping (jede Query nach `user_id` gefiltert) + Tests, die
+   gezielt prüfen, dass Nutzer A **nicht** auf Daten von Nutzer B zugreifen
+   kann (IDOR-Schutz) – bei einer öffentlichen SaaS der wichtigste neue
+   Testbereich überhaupt.
+2. **Jobs/Dateien SaaS-tauglich machen** – `threading.Thread`-Rendering durch
+   eine echte Queue (Celery/RQ + Redis) ablösen, generierte PDFs/APKGs von
+   lokalem Disk in Object Storage (S3/MinIO, signierte Download-URLs,
+   Auto-Löschung nach X Tagen) verschieben.
+3. **Schutzmechanismen** – Rate-Limiting (`Flask-Limiter`) pro Nutzer/IP,
+   Limit an gleichzeitigen Render-Jobs pro Nutzer.
+4. **Betrieb & Recht** – strukturiertes Logging mit `user_id`-Kontext,
+   Backups, sowie (nicht-technisch, aber Pflicht bei fremden Nutzerdaten)
+   Datenschutzerklärung/ToS/DSGVO-Lösch- und Auskunftsfunktion.
 
 ## Architektur
 
@@ -875,9 +960,14 @@ keine andere Quelle gibt).
 ## Tests
 
 ```bash
-pip install pytest
+pip install -r requirements.txt -r requirements-web.txt pytest
 pytest
 ```
+
+(Die Web-Requirements sind seit dem Multi-User-Fundament nötig, weil
+`webapp.py` jetzt beim Import auch `Flask-SQLAlchemy`/`Flask-Login`
+braucht – `tests/conftest.py` zeigt `DATABASE_URL` dabei automatisch auf eine
+temporäre SQLite-Datei, keine laufende Postgres-Instanz nötig zum Testen.)
 
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 `paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`annotate_text`
@@ -895,7 +985,11 @@ Templates, Bild-Feld/Bedeutung-Flag nur bei gesetztem Bild), `KanaCard`-Bau sowi
 Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
 Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen im
 Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/
-`save_known`, `webapp.api_wortliste`, `anki_export._kana_note`).
+`save_known`, `webapp.api_wortliste`, `anki_export._kana_note`). Für das
+Multi-User-Fundament zusätzlich: `crypto.py` (Verschlüsselungs-Roundtrip,
+Fehlerfälle bei fehlendem/rotiertem Master-Key), `models.py` (Schema-
+Constraints wie Unique-per-User, Cascade-Delete) und `auth.py` (Signup/
+Login/Logout, inkl. Ablehnung doppelter E-Mails und falscher Passwörter).
 
 Die Test-Suite selbst läuft gemockt (kein Netzwerkzugriff nötig, `pytest`
 ist offline lauffähig). Live gegen echte Endpunkte verifiziert wurden

@@ -1,12 +1,43 @@
 services:
+  # Multi-User-Fundament: Postgres statt der SQLite-Fallback-Datei. Für einen
+  # verwalteten Postgres-Dienst in Produktion (RDS/Neon/Supabase) einfach
+  # DATABASE_URL beim shiori-Service überschreiben und diesen "db"-Service
+  # weglassen - er ist primär für lokale Entwicklung/Selfhosting gedacht.
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shiori
+      POSTGRES_PASSWORD: shiori
+      POSTGRES_DB: shiori
+    volumes:
+      - shiori_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiori"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   shiori:
     build: .
     image: shiori
     container_name: shiori
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "9020:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://shiori:shiori@db:5432/shiori
+      # Erzeugen: python -c "from crypto import generate_master_key; print(generate_master_key())"
+      WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
+      WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}
     volumes:
-      # Alle Daten (Einstellungen inkl. Token, erzeugte PDFs, Jobs, API-Cache)
-      # liegen dateibasiert im Host-Ordner ./data – keine Datenbank.
+      # PDFs/Anki-Exporte + API-Caches liegen weiterhin dateibasiert im Host-
+      # Ordner ./data (Phase 1: nur Accounts/Auth sind in Postgres, siehe
+      # README "Multi-User-Architektur" - Nutzdaten folgen in Phase 2).
       - ./data:/data
     restart: unless-stopped
+
+volumes:
+  shiori_pg_data:

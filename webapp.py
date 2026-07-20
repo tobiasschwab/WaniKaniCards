@@ -2,9 +2,18 @@
 """Web-Frontend für den WaniKani-Karten-Generator.
 
 Ablauf: Quelle *auflisten* (Level, Suche oder Komposition) → Elemente in einer
-Tabelle *auswählen* → ausgewählte Karten als **ein PDF** rendern. Keine
-Datenbank – Einstellungen (inkl. API-Token), Jobs und PDFs liegen als Dateien
-unter ``WKCARDS_DATA`` (Default: ``./data``).
+Tabelle *auswählen* → ausgewählte Karten als **ein PDF** rendern.
+
+**Übergangszustand Multi-User-Umbau (Phase 1):** Login/Accounts laufen über
+eine Datenbank (SQLite lokal, Postgres in Produktion – siehe `models.py`,
+`auth.py`, README-Abschnitt "Multi-User-Architektur"). Die eigentlichen
+Nutzdaten (Einstellungen inkl. API-Token, bekannte Wörter, eigene/Dictionary-
+Karten, Job-Verlauf, PDFs) liegen in dieser Phase NOCH als Dateien unter
+``WKCARDS_DATA`` (Default: ``./data``) – global, nicht pro Nutzer getrennt.
+Das Auftrennen dieser Endpunkte auf pro-Nutzer-Datenbank-Zeilen ist Phase 2
+und noch nicht umgesetzt; bis dahin ist die App bezüglich dieser Daten
+weiterhin faktisch Single-Tenant, auch wenn sich mehrere Accounts anmelden
+können.
 """
 from __future__ import annotations
 
@@ -25,7 +34,10 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 import anki_export as ae
 import kanji_cards as kc
+import models
 import pdf_import
+from auth import bp as auth_bp
+from extensions import db, login_manager
 
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
 # im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
@@ -90,6 +102,49 @@ app = Flask(__name__, static_folder=None)
 # Speicher gelesen zu werden (siehe api_text_extract()).
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = _MAX_UPLOAD_BYTES
+
+# ---------- Multi-User-Fundament: Datenbank + Login (Phase 1) --------------- #
+#
+# Ohne DATABASE_URL fällt die App auf eine lokale SQLite-Datei unter
+# WKCARDS_DATA zurück (Zero-Config für Demo/Entwicklung) - für den
+# produktiven Multi-User-Betrieb ist Postgres vorgesehen (siehe README,
+# Abschnitt "Multi-User-Architektur"). Bewusst nicht dieselbe Umgebungs-
+# variable wie WKCARDS_SECRET_KEY (Fernet-Verschlüsselung der API-Keys,
+# siehe crypto.py): Flasks Session-Signing-Key und der Secrets-Master-Key
+# haben unterschiedliche Rotationsanforderungen und Formate und sollten
+# unabhängig voneinander wechselbar sein.
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+    "DATABASE_URL", f"sqlite:///{DATA_DIR / 'shiori.db'}"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SECRET_KEY"] = os.environ.get("WKCARDS_SESSION_SECRET", "dev-insecure-change-me")
+
+db.init_app(app)
+login_manager.init_app(app)
+
+
+@login_manager.user_loader
+def _load_user(user_id: str) -> "models.User | None":
+    return db.session.get(models.User, int(user_id))
+
+
+@login_manager.unauthorized_handler
+def _unauthorized() -> Any:
+    """JSON statt Redirect: das Frontend ist eine Single-Page-App, kein
+    serverseitig gerendertes Login-Formular, auf das umgeleitet werden könnte."""
+    return jsonify({"error": "Nicht angemeldet."}), 401
+
+
+app.register_blueprint(auth_bp)
+
+# Tabellen anlegen, falls sie noch nicht existieren – nur ein Komfort-
+# Fallback für SQLite/lokale Entwicklung ohne eingerichtetes Alembic. In
+# Produktion (Postgres) übernimmt `alembic upgrade head` das Schema-
+# Management (siehe migrations/), db.create_all() dort NICHT verwenden (die
+# beiden Mechanismen würden sich sonst gegenseitig ins Gehege kommen).
+if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:"):
+    with app.app_context():
+        db.create_all()
 
 
 # ---------- Einstellungen ---------------------------------------------------- #

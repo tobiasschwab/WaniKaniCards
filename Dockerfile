@@ -25,17 +25,25 @@ COPY requirements.txt requirements-web.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 
 # App-Code (inkl. gebündelter Noto-JP-Schriften unter fonts/ und WanaKana-JS unter vendor/)
-COPY kanji_cards.py anki_export.py webapp.py dictionary.py gemini_client.py sample_data.json ./
+COPY kanji_cards.py anki_export.py webapp.py dictionary.py gemini_client.py pdf_import.py \
+     models.py extensions.py auth.py crypto.py sample_data.json ./
 COPY templates/ ./templates/
 COPY fonts/ ./fonts/
 COPY vendor/ ./vendor/
 COPY web/ ./web/
+COPY migrations/ ./migrations/
+COPY alembic.ini ./
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 
-# Datenverzeichnis (Volume): settings.json, output/, jobs/, .cache/
+# Datenverzeichnis (Volume): settings.json, output/, jobs/, .cache/ (Phase 1:
+# Accounts/Auth liegen in Postgres, siehe DATABASE_URL – Nutzdaten folgen erst
+# in Phase 2, siehe README "Multi-User-Architektur")
 RUN mkdir -p /data
 VOLUME ["/data"]
 
 EXPOSE 8000
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 # 2 Worker; großzügiger Timeout, da Exporte API-Aufrufe + Bild-Downloads machen.
 CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "2", "--timeout", "600", "webapp:app"]

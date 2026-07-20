@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""models.py – SQLAlchemy-Datenmodell für den Multi-User-Betrieb.
+
+Phase 1 des SaaS-Umbaus (siehe README-Abschnitt "Multi-User-Architektur"):
+ersetzt schrittweise die bisherigen JSON-Dateien pro Installation
+(settings.json, known.json/known_meta.json, customcards/*.json,
+kanacards/*.json, jobs/*.json) durch pro-Nutzer-Zeilen in einer relationalen
+Datenbank. Diese Datei definiert nur das Schema + Auth-Grundlagen (User);
+die bestehenden webapp.py-Endpunkte laufen vorerst WEITER auf den JSON-
+Dateien (Migration der Endpunkte selbst ist Phase 2).
+
+Bewusst `db.JSON` (portabler SQLAlchemy-Typ) statt `postgresql.JSONB`: läuft
+damit unverändert auch gegen SQLite (Tests, lokale Entwicklung ohne
+Postgres-Service), während echtes Postgres in Produktion trotzdem einen
+JSON/JSONB-kompatiblen Spaltentyp anlegt – kein separater Postgres-Dialekt-
+Import nötig.
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from flask_login import UserMixin
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from extensions import db
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _new_id() -> str:
+    """Kurze, URL-sichere ID für Job-/Karten-Primärschlüssel (analog zu den
+    bisherigen `uuid.uuid4().hex[:12]`-IDs in webapp.py)."""
+    return uuid.uuid4().hex[:12]
+
+
+class User(UserMixin, db.Model):
+    """Ein Nutzerkonto – E-Mail/Passwort statt WaniKani-Token als Login-
+    Credential (der WaniKani-Token ist ein Nutzungs-Detail, das erst NACH
+    dem Login in den Einstellungen hinterlegt wird, siehe UserSettings)."""
+
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_admin = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+
+    settings = db.relationship(
+        "UserSettings", back_populates="user", uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self) -> str:  # pragma: no cover - nur fürs Debugging
+        return f"<User {self.email!r}>"
+
+
+class UserSettings(db.Model):
+    """Pro-Nutzer-Pendant zu settings.json.
+
+    Secrets (`*_enc`-Spalten) liegen verschlüsselt (siehe crypto.py) statt im
+    Klartext wie in der alten Datei – Verschlüsselung/Entschlüsselung passiert
+    bewusst NICHT hier im Modell, sondern in der Endpunkt-Schicht (Phase 2),
+    damit dieses Modul ohne einen gesetzten WKCARDS_SECRET_KEY importierbar
+    bleibt (z. B. für Migrationen, die nur das Schema anlegen)."""
+
+    __tablename__ = "user_settings"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    username = db.Column(db.String(255), nullable=False, default="")
+    wanikani_token_enc = db.Column(db.Text, nullable=True)
+    deepl_key_enc = db.Column(db.Text, nullable=True)
+    gemini_key_enc = db.Column(db.Text, nullable=True)
+    gemini_model = db.Column(db.String(100), nullable=False, default="gemini-flash-latest")
+    target_lang = db.Column(db.String(10), nullable=False, default="DE")
+    # Level/Format/Layout/Paper/Duplex/CutMarks/Hole – dieselbe Struktur wie
+    # bisher settings["defaults"].
+    defaults = db.Column(db.JSON, nullable=False, default=dict)
+
+    user = db.relationship("User", back_populates="settings")
+
+
+class KnownWord(db.Model):
+    """Pro-Nutzer-Pendant zu known.json/known_meta.json – ein Wort, das
+    manuell als bekannt markiert wurde, ohne dass dafür zwingend eine Karte
+    existiert (siehe webapp.load_known/load_known_meta)."""
+
+    __tablename__ = "known_words"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "word_id", name="uq_known_word_per_user"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    word_id = db.Column(db.String(64), nullable=False)
+    characters = db.Column(db.String(255), nullable=False, default="")
+    meaning = db.Column(db.String(255), nullable=False, default="")
+    kind = db.Column(db.String(64), nullable=False, default="")
+    level = db.Column(db.Integer, nullable=True)
+    source = db.Column(db.String(32), nullable=False, default="manual")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+
+
+class CustomCard(db.Model):
+    """Pro-Nutzer-Pendant zu customcards/*.json (Frei-erstellen-Modus)."""
+
+    __tablename__ = "custom_cards"
+
+    id = db.Column(db.String(32), primary_key=True, default=_new_id)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    front_html = db.Column(db.Text, nullable=False, default="")
+    back_html = db.Column(db.Text, nullable=False, default="")
+    tags = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+
+
+class KanaCard(db.Model):
+    """Pro-Nutzer-Pendant zu kanacards/*.json (Dictionary-/KI-Karten aus dem
+    Text-Modus, siehe kc.KanaCard/dictionary.py)."""
+
+    __tablename__ = "kana_cards"
+
+    # Bewusst KEIN default=_new_id: die ID ist bislang ein stabiler Hash des
+    # Worts (kc.kana_card_id()), damit derselbe Text-Fund immer dieselbe
+    # Karte referenziert statt Duplikate anzulegen - das Erzeugen der ID
+    # bleibt Aufgabe der Endpunkt-Schicht (Phase 2), nicht des Modells.
+    id = db.Column(db.String(64), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    word = db.Column(db.String(255), nullable=False, default="")
+    kanji_hint = db.Column(db.String(255), nullable=True)
+    reading = db.Column(db.String(255), nullable=True)
+    meaning = db.Column(db.String(255), nullable=False, default="")
+    meaning_extra = db.Column(db.String(255), nullable=True)
+    sentence_ja = db.Column(db.Text, nullable=True)
+    sentence_translation = db.Column(db.Text, nullable=True)
+    sentence_audio_url = db.Column(db.Text, nullable=True)
+    source = db.Column(db.String(32), nullable=False, default="dictionary")
+    tags = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+
+
+class Job(db.Model):
+    """Pro-Nutzer-Pendant zu jobs/*.json (Render-Verlauf, siehe
+    webapp.write_job/read_job)."""
+
+    __tablename__ = "jobs"
+
+    id = db.Column(db.String(32), primary_key=True, default=_new_id)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    title = db.Column(db.String(255), nullable=False, default="")
+    status = db.Column(db.String(32), nullable=False, default="queued")
+    params = db.Column(db.JSON, nullable=False, default=dict)
+    filename = db.Column(db.String(255), nullable=True)
+    n_cards = db.Column(db.Integer, nullable=True)
+    error = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
