@@ -718,16 +718,21 @@ zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
   ein Vollbild-Overlay blockiert die App, bis `/api/auth/me` eine
   eingeloggte Sitzung bestätigt; „Registrieren"/„Anmelden" wechselbar per
   Klick, „Abmelden" oben rechts im Header.
-- **Bekannte, bewusst nicht behobene Einschränkung**: `_apply_token_env()`
-  setzt den WaniKani-Token weiterhin über eine **prozessglobale**
-  Umgebungsvariable statt ihn durch `kanji_cards.py` explizit
-  durchzureichen (historisch bedingt) – unter echter Nebenläufigkeit
-  mehrerer gleichzeitiger Nutzer-Requests im selben Worker ein
-  Race-Condition-Risiko. Der vollständige Fix erfordert, `kanji_cards.py`s
-  öffentliche Funktionen (u. a. `resolve_level()`, `annotate_text()`,
-  `resolve_subject_deck()`) auf einen explizit durchgereichten Token
-  umzustellen statt auf `WANIKANI_API_TOKEN` zu lesen – als eigener,
-  in sich abgeschlossener Schritt vorgesehen, nicht Teil dieses Umbaus.
+- **WaniKani-Token wird explizit durchgereicht, nicht mehr prozessglobal**:
+  `kanji_cards.py`s öffentliche Funktionen (`resolve_level()`,
+  `search_subjects()`, `resolve_composition()`, `resolve_subject_ids()`,
+  `resolve_subject_deck()`, `card_details_for_ids()`, `annotate_text()`,
+  `annotate_text_ai()`, `_make_client()`) akzeptieren jetzt ein optionales
+  `token`-Keyword – webapp.py übergibt dabei den Token des jeweils
+  eingeloggten Nutzers (`load_settings().get("token")`) statt wie zuvor
+  `_apply_token_env()` über `os.environ["WANIKANI_API_TOKEN"]` zu setzen
+  (eine **prozessglobale** Variable, unter echter Nebenläufigkeit mehrerer
+  Nutzer-Requests im selben Worker ein Race-Condition-Risiko – ein Request
+  hätte potenziell mit dem gerade von einem ANDEREN Nutzer gesetzten Token
+  laufen können). `WANIKANI_API_TOKEN` bleibt weiterhin der Fallback fürs
+  CLI (`python kanji_cards.py <level>`), wo pro Prozessaufruf ohnehin nur
+  ein Nutzer relevant ist – `_make_client()` liest die Variable nur, wenn
+  kein `token` explizit übergeben wurde.
 
 **Testbarkeit**: `tests/conftest.py` stellt dafür die Fixtures `db_session`
 (frische Tabellen pro Test), `client` (Testclient mit frisch registriertem
@@ -749,12 +754,9 @@ Context), in Tests aber notwendig für korrekte Multi-Tenant-Isolationstests.
    eine echte Queue (Celery/RQ + Redis) ablösen, generierte PDFs/APKGs von
    lokalem Disk in Object Storage (S3/MinIO, signierte Download-URLs,
    Auto-Löschung nach X Tagen) verschieben.
-2. **WaniKani-Token nicht mehr prozessglobal durchreichen** (siehe bekannte
-   Einschränkung oben) – `kanji_cards.py`s WaniKani-Client-Erzeugung auf
-   einen explizit übergebenen Token statt `WANIKANI_API_TOKEN` umstellen.
-3. **Schutzmechanismen** – Rate-Limiting (`Flask-Limiter`) pro Nutzer/IP,
+2. **Schutzmechanismen** – Rate-Limiting (`Flask-Limiter`) pro Nutzer/IP,
    Limit an gleichzeitigen Render-Jobs pro Nutzer.
-4. **Betrieb & Recht** – strukturiertes Logging mit `user_id`-Kontext,
+3. **Betrieb & Recht** – strukturiertes Logging mit `user_id`-Kontext,
    Backups, sowie (nicht-technisch, aber Pflicht bei fremden Nutzerdaten)
    Datenschutzerklärung/ToS/DSGVO-Lösch- und Auskunftsfunktion.
 
@@ -1040,11 +1042,16 @@ Templates, Bild-Feld/Bedeutung-Flag nur bei gesetztem Bild), `KanaCard`-Bau sowi
 Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
 Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen im
 Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/
-`save_known`, `webapp.api_wortliste`, `anki_export._kana_note`). Für das
-Multi-User-Fundament zusätzlich: `crypto.py` (Verschlüsselungs-Roundtrip,
+`_upsert_known_word`, `webapp.api_wortliste`, `anki_export._kana_note`). Für
+den Multi-User-Umbau zusätzlich: `crypto.py` (Verschlüsselungs-Roundtrip,
 Fehlerfälle bei fehlendem/rotiertem Master-Key), `models.py` (Schema-
-Constraints wie Unique-per-User, Cascade-Delete) und `auth.py` (Signup/
-Login/Logout, inkl. Ablehnung doppelter E-Mails und falscher Passwörter).
+Constraints wie Unique-per-User, Cascade-Delete, zusammengesetzter
+Primärschlüssel bei `KanaCard`), `auth.py` (Signup/Login/Logout, inkl.
+Ablehnung doppelter E-Mails und falscher Passwörter), Cross-Tenant-
+Isolationstests für Settings/Custom-/Kana-Cards/Jobs (IDOR-Schutz) sowie
+`kanji_cards._make_client` sowie mehrere `/api/*`-Endpunkte (verifizieren,
+dass der WaniKani-Token explizit pro Nutzer durchgereicht wird statt über
+die prozessglobale `WANIKANI_API_TOKEN`-Variable).
 
 Die Test-Suite selbst läuft gemockt (kein Netzwerkzugriff nötig, `pytest`
 ist offline lauffähig). Live gegen echte Endpunkte verifiziert wurden

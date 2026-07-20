@@ -237,7 +237,7 @@ def test_api_text_annotate_ai_passes_settings_key_and_model(client, monkeypatch)
 
     seen = {}
 
-    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None):
         seen["gemini_key"] = gemini_key
         seen["gemini_model"] = gemini_model
         return []
@@ -259,7 +259,7 @@ def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(client, monkey
 
     seen = {}
 
-    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None):
         seen["gemini_model"] = gemini_model
         return []
 
@@ -276,7 +276,7 @@ def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(client, mo
 
     import kanji_cards as kc
 
-    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None):
         return [{
             "sentence": "x", "translation_de": "Übersetzung", "grammar_notes": "Notiz", "error": None,
             "segments": [
@@ -883,3 +883,68 @@ def test_api_translate_uses_target_lang_and_source_lang(client, monkeypatch):
     assert r.status_code == 200
     assert r.get_json() == {"translation": "aile", "target_lang": "FR"}
     assert seen["args"] == ("wing", "mykey:fx", "FR", "EN")
+
+
+# --------------------------------------------------------------------------- #
+# WaniKani-Token wird explizit durchgereicht statt prozessglobal (Phase 3,
+# siehe README "Multi-User-Architektur") - jeder Nutzer bekommt garantiert
+# seinen EIGENEN Token an kanji_cards.py übergeben.
+# --------------------------------------------------------------------------- #
+
+def test_api_resolve_passes_stored_token_explicitly(client, monkeypatch):
+    client.post("/api/settings", json={"token": "alice-token"})
+
+    seen = {}
+
+    def fake_resolve_level(level, deck_types, *, use_cache=True, sample=False, token=None):
+        seen["token"] = token
+        return []
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc, "resolve_level", fake_resolve_level)
+
+    r = client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": False})
+    assert r.status_code == 200
+    assert seen["token"] == "alice-token"
+
+
+def test_api_resolve_sample_mode_passes_no_token(client, monkeypatch):
+    client.post("/api/settings", json={"token": "alice-token"})
+
+    seen = {}
+
+    def fake_resolve_level(level, deck_types, *, use_cache=True, sample=False, token=None):
+        seen["token"] = token
+        return []
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc, "resolve_level", fake_resolve_level)
+
+    r = client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": True})
+    assert r.status_code == 200
+    assert seen["token"] is None
+
+
+def test_two_users_render_with_their_own_tokens_not_each_others(client, db_session, monkeypatch):
+    """Kernszenario des Fixes: zwei Nutzer mit unterschiedlichen Tokens dürfen
+    sich nicht gegenseitig beeinflussen, selbst wenn ihre Requests
+    "gleichzeitig" (nacheinander im selben Prozess) laufen."""
+    client.post("/api/settings", json={"token": "alice-token"})
+
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "bobtoken@example.com", "password": "supersecret123"})
+    other.post("/api/settings", json={"token": "bob-token"})
+
+    seen_tokens = []
+
+    def fake_resolve_level(level, deck_types, *, use_cache=True, sample=False, token=None):
+        seen_tokens.append(token)
+        return []
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc, "resolve_level", fake_resolve_level)
+
+    client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": False})
+    other.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": False})
+
+    assert seen_tokens == ["alice-token", "bob-token"]

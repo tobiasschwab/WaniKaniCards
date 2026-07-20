@@ -1329,3 +1329,45 @@ def test_card_to_dict_vocab_image_fields_default_none_and_false():
     d = _card_to_dict(card)
     assert d["image_data_uri"] is None
     assert d["show_meaning_on_front"] is False
+
+
+# --------------------------------------------------------------------------- #
+# _make_client: expliziter Token statt prozessglobaler WANIKANI_API_TOKEN-Var
+# (Multi-User-Umbau Phase 3 - siehe README "Multi-User-Architektur")
+# --------------------------------------------------------------------------- #
+
+def test_make_client_uses_explicit_token_over_env_var(monkeypatch):
+    from kanji_cards import _make_client
+
+    monkeypatch.setenv("WANIKANI_API_TOKEN", "env-token")
+    client = _make_client(token="explicit-token")
+    assert client.token == "explicit-token"
+
+
+def test_make_client_falls_back_to_env_var_without_explicit_token(monkeypatch):
+    from kanji_cards import _make_client
+
+    monkeypatch.setenv("WANIKANI_API_TOKEN", "env-token")
+    client = _make_client()
+    assert client.token == "env-token"
+
+
+def test_make_client_raises_without_token_or_env_var(monkeypatch):
+    from kanji_cards import _make_client
+
+    monkeypatch.delenv("WANIKANI_API_TOKEN", raising=False)
+    with pytest.raises(WaniKaniError):
+        _make_client()
+
+
+def test_make_client_two_explicit_tokens_do_not_interfere(monkeypatch):
+    """Kernfrage des Fixes: zwei "gleichzeitige" Aufrufe mit unterschiedlichen
+    Tokens dürfen sich nicht über eine gemeinsame Umgebungsvariable
+    beeinflussen - jeder Client behält seinen eigenen Token."""
+    from kanji_cards import _make_client
+
+    monkeypatch.delenv("WANIKANI_API_TOKEN", raising=False)
+    client_a = _make_client(token="token-a")
+    client_b = _make_client(token="token-b")
+    assert client_a.token == "token-a"
+    assert client_b.token == "token-b"

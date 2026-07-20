@@ -13,12 +13,14 @@ weiterhin als Dateien unter ``WKCARDS_DATA`` (Default: ``./data``), aber
 jeder Zugriff prüft vorher das zugehörige `Job`-Datenbank-Objekt auf
 Eigentümerschaft.
 
-**Bekannte Einschränkung:** `_apply_token_env()` setzt den WaniKani-Token
-weiterhin über eine **prozessglobale** Umgebungsvariable statt ihn explizit
-durch `kanji_cards.py` durchzureichen (historisch bedingt, aus der
-Single-Tenant-Zeit). Unter echter Nebenläufigkeit (mehrere gleichzeitige
-Requests verschiedener Nutzer im selben Worker-Prozess/Thread) ist das ein
-Race-Condition-Risiko – als Fast-Follow vorgesehen, siehe README-Roadmap.
+Der WaniKani-Token des jeweils eingeloggten Nutzers wird dabei explizit als
+`token`-Parameter an `kanji_cards.py` durchgereicht (statt – wie noch in
+Phase 2 zunächst – über die prozessglobale Umgebungsvariable
+`WANIKANI_API_TOKEN`), damit unter echter Nebenläufigkeit mehrerer Nutzer im
+selben Worker kein Request versehentlich den Token eines anderen Nutzers
+verwendet. `WANIKANI_API_TOKEN` bleibt nur der Fallback fürs CLI
+(`python kanji_cards.py <level>`), wo es ohnehin nur einen Nutzer pro
+Prozessaufruf gibt.
 """
 from __future__ import annotations
 
@@ -282,23 +284,6 @@ def _remove_known_word(word_id: str) -> None:
 
 def _mask(token: str) -> str:
     return (("•" * max(0, len(token) - 4)) + token[-4:]) if token else ""
-
-
-def _apply_token_env(settings: dict[str, Any] | None = None) -> str:
-    """WaniKani-Token in die Prozessumgebung übernehmen (siehe `WaniKaniClient`/
-    `_make_client()` in kanji_cards.py, die den Token darüber statt als
-    Parameter beziehen). `settings` optional übergeben, wenn schon geladen
-    (z. B. `_run_render()` im Worker-Thread ohne `current_user`) - sonst wird
-    `load_settings()` des eingeloggten Nutzers verwendet.
-
-    ACHTUNG (siehe Modul-Docstring): das ist eine PROZESSGLOBALE Variable,
-    kein Request-lokaler Zustand - unter echter Nebenläufigkeit mehrerer
-    Nutzer im selben Worker ein Race-Condition-Risiko, als Fast-Follow
-    vorgesehen."""
-    s = settings if settings is not None else load_settings()
-    token = s.get("token", "")
-    os.environ["WANIKANI_API_TOKEN"] = token or ""
-    return token
 
 
 def _resolve_gemini_model(settings: dict[str, Any]) -> str:
@@ -578,12 +563,13 @@ def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
 
 # ---------- Render-Worker ---------------------------------------------------- #
 
-def _build_mixed_deck(p: dict[str, Any], user_id: int) -> list[Any]:
+def _build_mixed_deck(p: dict[str, Any], user_id: int, token: str | None = None) -> list[Any]:
     """Kombinierten Stapel aus WaniKani-Subjects, eigenen und Dictionary-
     Karten bauen – alle drei Quellen können in einem Export landen (z. B.
     Text-Modus: WaniKani-Vokabel + Dictionary-Wort zusammen ausgewählt).
     `user_id` explizit statt `current_user`, da auch vom Render-Worker-Thread
-    (kein Request-Kontext) aus aufgerufen."""
+    (kein Request-Kontext) aus aufgerufen; `token` ebenso explizit an
+    kanji_cards.py durchgereicht statt über die Prozessumgebung."""
     deck: list[Any] = []
     if p.get("subject_ids"):
         deck.extend(
@@ -593,6 +579,7 @@ def _build_mixed_deck(p: dict[str, Any], user_id: int) -> list[Any]:
                 sample=p.get("sample", False),
                 sentence_overrides=p.get("sentence_overrides"),
                 field_overrides=p.get("field_overrides"),
+                token=token,
             )
         )
     if p.get("custom_ids"):
@@ -632,9 +619,8 @@ def _run_render(job_id: str) -> None:
                     raise kc.WaniKaniError(
                         "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
                     )
-                _apply_token_env(settings)
 
-                deck = _build_mixed_deck(p, user_id)
+                deck = _build_mixed_deck(p, user_id, token=settings.get("token"))
                 if not deck:
                     raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
 
@@ -828,18 +814,17 @@ def api_resolve() -> Any:
     body = request.get_json(silent=True) or {}
     mode = body.get("mode")
     sample = bool(body.get("sample"))
+    token = None if sample else load_settings().get("token")
     try:
-        if not sample:
-            _apply_token_env()
         if mode == "level":
             level = int(body.get("level"))
             deck_types = body.get("types") or [body.get("type", "kanji")]
-            cards = kc.resolve_level(level, deck_types, sample=sample)
+            cards = kc.resolve_level(level, deck_types, sample=sample, token=token)
         elif mode == "search":
-            cards = kc.search_subjects(str(body.get("q", "")), sample=sample)
+            cards = kc.search_subjects(str(body.get("q", "")), sample=sample, token=token)
         elif mode == "compose":
             ids = body.get("subject_ids") or []
-            cards = kc.resolve_composition(ids, sample=sample)
+            cards = kc.resolve_composition(ids, sample=sample, token=token)
         else:
             return jsonify({"error": "Unbekannter Modus."}), 400
     except (TypeError, ValueError):
@@ -862,10 +847,9 @@ def api_card_detail() -> Any:
     body = request.get_json(silent=True) or {}
     ids = body.get("subject_ids") or []
     sample = bool(body.get("sample"))
+    token = None if sample else load_settings().get("token")
     try:
-        if not sample:
-            _apply_token_env()
-        details = kc.card_details_for_ids(ids, sample=sample)
+        details = kc.card_details_for_ids(ids, sample=sample, token=token)
     except (TypeError, ValueError):
         return jsonify({"error": "Ungültige Eingabe."}), 400
     except kc.WaniKaniError as exc:
@@ -926,12 +910,11 @@ def api_text_annotate() -> Any:
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", ""))
     sample = bool(body.get("sample"))
+    token = None if sample else load_settings().get("token")
     logger.info("text-annotate: %d Zeichen, sample=%s …", len(text), sample)
     t0 = time.monotonic()
     try:
-        if not sample:
-            _apply_token_env()
-        lines = kc.annotate_text(text, sample=sample)
+        lines = kc.annotate_text(text, sample=sample, token=token)
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
     logger.info("text-annotate: fertig in %.1fs (%d Zeilen)", time.monotonic() - t0, len(lines))
@@ -989,12 +972,13 @@ def api_text_annotate_ai() -> Any:
         return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
     gemini_model = _resolve_gemini_model(s)
 
+    token = None if sample else s.get("token")
     logger.info("text-annotate-ai: %d Zeichen, sample=%s, Modell=%s …", len(text), sample, gemini_model)
     t0 = time.monotonic()
     try:
-        if not sample:
-            _apply_token_env()
-        rows = kc.annotate_text_ai(text, gemini_key=gemini_key, gemini_model=gemini_model, sample=sample)
+        rows = kc.annotate_text_ai(
+            text, gemini_key=gemini_key, gemini_model=gemini_model, sample=sample, token=token,
+        )
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
     logger.info("text-annotate-ai: fertig in %.1fs (%d Sätze)", time.monotonic() - t0, len(rows))
@@ -1111,9 +1095,8 @@ def api_wortliste() -> Any:
     by_id: dict[int, dict[str, Any]] = {}
     if wk_ids:
         try:
-            if not sample:
-                _apply_token_env()
-            by_id = {d["id"]: d for d in kc.resolve_subject_ids(wk_ids, sample=sample)}
+            token = None if sample else load_settings().get("token")
+            by_id = {d["id"]: d for d in kc.resolve_subject_ids(wk_ids, sample=sample, token=token)}
         except kc.WaniKaniError:
             by_id = {}
     for sid in wk_ids:

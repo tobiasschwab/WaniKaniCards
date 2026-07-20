@@ -1192,9 +1192,18 @@ def load_sample_radicals(path: Path | None = None) -> list[RadicalCard]:
     return build_radical_cards(radical_list, kanji_map)
 
 
-def _make_client(*, use_cache: bool = True) -> WaniKaniClient:
-    load_dotenv()
-    token = os.environ.get("WANIKANI_API_TOKEN")
+def _make_client(*, use_cache: bool = True, token: str | None = None) -> WaniKaniClient:
+    """`token` explizit übergeben (Web-Frontend: der Token des jeweils
+    eingeloggten Nutzers, siehe webapp.py) statt aus der PROZESSGLOBALEN
+    Umgebungsvariable `WANIKANI_API_TOKEN` zu lesen – letztere bleibt nur der
+    Fallback fürs CLI (`python kanji_cards.py <level>`, `.env`-Datei), wo es
+    ohnehin nur einen Nutzer pro Prozessaufruf gibt. Ohne explizit
+    übergebenen Token bei mehreren gleichzeitigen Web-Requests verschiedener
+    Nutzer im selben Prozess bestünde sonst ein Race-Condition-Risiko
+    (ein Request könnte mit dem Token eines anderen Nutzers laufen)."""
+    if not token:
+        load_dotenv()
+        token = os.environ.get("WANIKANI_API_TOKEN")
     if not token:
         raise WaniKaniError(
             "Kein WANIKANI_API_TOKEN gesetzt. Bitte in der Umgebung oder in "
@@ -1204,9 +1213,9 @@ def _make_client(*, use_cache: bool = True) -> WaniKaniClient:
     return WaniKaniClient(token, use_cache=use_cache)
 
 
-def load_cards_from_api(level: int, *, use_cache: bool = True) -> list[Card]:
+def load_cards_from_api(level: int, *, use_cache: bool = True, token: str | None = None) -> list[Card]:
     """Kanji eines Levels via WaniKani-API holen und in Cards umwandeln."""
-    client = _make_client(use_cache=use_cache)
+    client = _make_client(use_cache=use_cache, token=token)
     kanji_list = client.fetch_kanji(level)
     if not kanji_list:
         raise WaniKaniError(f"Keine Kanji für Level {level} gefunden.")
@@ -1224,9 +1233,9 @@ def load_cards_from_api(level: int, *, use_cache: bool = True) -> list[Card]:
     return build_cards(kanji_list, subject_map, client.fetch_image_data_uri)
 
 
-def load_radicals_from_api(level: int, *, use_cache: bool = True) -> list[RadicalCard]:
+def load_radicals_from_api(level: int, *, use_cache: bool = True, token: str | None = None) -> list[RadicalCard]:
     """Radicals eines Levels via WaniKani-API holen und in RadicalCards wandeln."""
-    client = _make_client(use_cache=use_cache)
+    client = _make_client(use_cache=use_cache, token=token)
     radical_list = client.fetch_radicals(level)
     if not radical_list:
         raise WaniKaniError(f"Keine Radicals für Level {level} gefunden.")
@@ -1262,6 +1271,7 @@ def resolve_level(
     *,
     use_cache: bool = True,
     sample: bool = False,
+    token: str | None = None,
 ) -> list[dict[str, Any]]:
     """Kanji, Radicals und/oder Vokabeln eines Levels als Tabellen-Beschreibungen.
 
@@ -1283,7 +1293,7 @@ def resolve_level(
         for t in types:
             items.extend(raw.get(_LEVEL_SAMPLE_KEY[t], []))
     else:
-        client = _make_client(use_cache=use_cache)
+        client = _make_client(use_cache=use_cache, token=token)
         fetchers = {
             "radicals": client.fetch_radicals,
             "kanji": client.fetch_kanji,
@@ -1297,7 +1307,7 @@ def resolve_level(
 
 
 def search_subjects(
-    query: str, *, use_cache: bool = True, sample: bool = False
+    query: str, *, use_cache: bool = True, sample: bool = False, token: str | None = None
 ) -> list[dict[str, Any]]:
     """Subjects per Zeichen/Namen suchen → Tabellen-Beschreibungen."""
     if sample:
@@ -1312,19 +1322,19 @@ def search_subjects(
             if q and (q == chars or q in meanings):
                 out.append(s)
         return [_subject_descriptor(s) for s in out]
-    client = _make_client(use_cache=use_cache)
+    client = _make_client(use_cache=use_cache, token=token)
     return [_subject_descriptor(s) for s in client.search_subjects(query)]
 
 
 def resolve_composition(
-    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False
+    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False, token: str | None = None
 ) -> list[dict[str, Any]]:
     """Rekursiv über die Komposition absteigen (Vokabel→Kanji→Radicals)."""
     root_ids = [int(i) for i in subject_ids]
     if sample:
         reg = _sample_registry()
     else:
-        client = _make_client(use_cache=use_cache)
+        client = _make_client(use_cache=use_cache, token=token)
         reg = {}
         frontier = list(root_ids)
         while frontier:
@@ -1345,7 +1355,7 @@ def resolve_composition(
 
 
 def resolve_subject_ids(
-    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False
+    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False, token: str | None = None
 ) -> list[dict[str, Any]]:
     """Beschreibungen für genau die übergebenen Subject-IDs (ohne Komposition
     rekursiv abzusteigen) – für die Wortliste, die bereits bekannte/exportierte
@@ -1356,7 +1366,7 @@ def resolve_subject_ids(
     if sample:
         reg = _sample_registry()
     else:
-        client = _make_client(use_cache=use_cache)
+        client = _make_client(use_cache=use_cache, token=token)
         reg = client.fetch_subjects(ids)
     return [_subject_descriptor(reg[i]) for i in ids if i in reg]
 
@@ -1465,6 +1475,7 @@ def annotate_text(
     *,
     use_cache: bool = True,
     sample: bool = False,
+    token: str | None = None,
 ) -> list[list[dict[str, Any]]]:
     """Text zeilenweise in Anzeige-Segmente zerlegen (für die schreibgeschützte
     Textansicht im „Aus Text"-Modus): reine Janome-Lemmatisierung + WaniKani-
@@ -1530,7 +1541,7 @@ def annotate_text(
                 if chars in all_lemmas:
                     hits_by_chars.setdefault(chars, []).append(s)
         else:
-            client = _make_client(use_cache=use_cache)
+            client = _make_client(use_cache=use_cache, token=token)
             lemma_list = list(all_lemmas)
             for i in range(0, len(lemma_list), _TEXT_LOOKUP_CHUNK):
                 chunk = lemma_list[i : i + _TEXT_LOOKUP_CHUNK]
@@ -1606,6 +1617,7 @@ def annotate_text_ai(
     gemini_model: str = gemini_client.DEFAULT_MODEL,
     use_cache: bool = True,
     sample: bool = False,
+    token: str | None = None,
 ) -> list[dict[str, Any]]:
     """Text per Gemini satzweise analysieren – eigener „KI"-Modus (siehe
     `annotate_text()` für den Gemini-freien „Aus Text"-Modus).
@@ -1687,7 +1699,7 @@ def annotate_text_ai(
                 if chars in all_lemmas:
                     hits_by_chars.setdefault(chars, []).append(s)
         else:
-            client = _make_client(use_cache=use_cache)
+            client = _make_client(use_cache=use_cache, token=token)
             lemma_list = list(all_lemmas)
             for i in range(0, len(lemma_list), _TEXT_LOOKUP_CHUNK):
                 chunk = lemma_list[i : i + _TEXT_LOOKUP_CHUNK]
@@ -1829,14 +1841,14 @@ def _apply_field_overrides(card: Any, overrides: dict[str, Any] | None) -> None:
 
 
 def _build_subject_registry(
-    ids: list[int], *, use_cache: bool, sample: bool,
+    ids: list[int], *, use_cache: bool, sample: bool, token: str | None = None,
 ) -> tuple[dict[int, dict[str, Any]], "callable | None"]:
     """Subjects + ihre Bezüge (Beispielvokabeln, Kompositions-Radicals) einmalig
     laden – gemeinsam genutzt von `resolve_subject_deck()` und
     `card_details_for_ids()`. Gibt `(registry, image_fetcher)` zurück."""
     if sample:
         return _sample_registry(), None
-    client = _make_client(use_cache=use_cache)
+    client = _make_client(use_cache=use_cache, token=token)
     reg = dict(client.fetch_subjects(ids))
     # Bezüge nachladen: Kanji→Beispielvokabeln, Radical→Beispielkanji.
     related: set[int] = set()
@@ -1862,6 +1874,7 @@ def resolve_subject_deck(
     sample: bool = False,
     sentence_overrides: dict[Any, Any] | None = None,
     field_overrides: dict[Any, Any] | None = None,
+    token: str | None = None,
 ) -> list[Card | RadicalCard | VocabCard]:
     """Die gewählten Subjects (nach ID) in Card-Objekte auflösen (ohne zu rendern).
 
@@ -1877,7 +1890,7 @@ def resolve_subject_deck(
     ids = [int(i) for i in subject_ids]
     overrides = _normalize_id_keyed_overrides(sentence_overrides)
     overrides_fields = _normalize_id_keyed_overrides(field_overrides)
-    reg, image_fetcher = _build_subject_registry(ids, use_cache=use_cache, sample=sample)
+    reg, image_fetcher = _build_subject_registry(ids, use_cache=use_cache, sample=sample, token=token)
 
     deck: list[Card | RadicalCard | VocabCard] = []
     for i in ids:
@@ -1892,7 +1905,7 @@ def resolve_subject_deck(
 
 
 def card_details_for_ids(
-    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False,
+    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False, token: str | None = None,
 ) -> dict[int, dict[str, Any]]:
     """Volle Karten-Felder (alle Dataclass-Felder, nicht nur die Tabellen-
     Kurzfassung aus `_subject_descriptor()`) für die gegebenen Subject-IDs –
@@ -1901,7 +1914,7 @@ def card_details_for_ids(
     VocabCard-Objekte wie `resolve_subject_deck()`, exportiert sie aber nur
     als Dict statt ein PDF/Anki-Deck daraus zu erzeugen."""
     ids = [int(i) for i in subject_ids]
-    reg, image_fetcher = _build_subject_registry(ids, use_cache=use_cache, sample=sample)
+    reg, image_fetcher = _build_subject_registry(ids, use_cache=use_cache, sample=sample, token=token)
     out: dict[int, dict[str, Any]] = {}
     for i in ids:
         s = reg.get(i)
