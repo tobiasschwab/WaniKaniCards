@@ -118,6 +118,11 @@ _CSS = """
 .wk-big-img img { height: 100px; width: auto; max-width: 80%; object-fit: contain; }
 .wk-fallback { font-family: "WKSans"; font-weight: 700; font-size: 26px; }
 
+/* Bildkarte (Vokabel, per Gemini generiertes Clipart statt Text-Vorderseite). */
+.wk-stage-img img { height: 140px; width: auto; max-width: 80%; object-fit: contain; }
+.wk-image-meaning { font-size: 14px; color: #777; margin-top: 4px; }
+.night_mode .wk-image-meaning { color: #999; }
+
 .wk-back { text-align: left; margin-top: 6px; }
 .wk-refhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .wk-refhead .wk-ref { font-family: "WKSerif", "WKSans", serif; font-weight: 600; font-size: 30px; flex: 0 0 auto; }
@@ -318,13 +323,17 @@ _KANJI_BACK = """
 </div>
 """.strip()
 
+# {{^ImageHtml}}…{{/ImageHtml}} (Mustache-Inversion): diese Karte entsteht
+# NICHT, wenn eine Bildkarte generiert wurde (siehe _VOCAB_FRONT_IMAGE unten).
 _VOCAB_FRONT_MEANING = """
+{{^ImageHtml}}
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage"><div class="wk-big" style="font-size:{{VocabFontSize}}px;">{{Vocab}}</div></div>
 <div class="wk-typein">
   <div class="wk-typein-label">Bedeutung eingeben</div>
   {{type:MeaningPlain}}
 </div>
+{{/ImageHtml}}
 """.strip()
 
 # Eigene Karte für die Lesung (statt nur Bedeutung) – mit WanaKana-Bindung
@@ -332,7 +341,9 @@ _VOCAB_FRONT_MEANING = """
 # IME-Umschalten eingegeben werden kann. {{#ReadingsPrimary}}…{{/ReadingsPrimary}}
 # überspringt die Karte automatisch, falls eine Vokabel ausnahmsweise keine
 # Lesung hat (kein manuelles Filtern nötig, wie bei On'yomi/Kun'yomi).
+# Auch hier: entsteht NICHT für Bildkarten (siehe _VOCAB_FRONT_IMAGE).
 _VOCAB_FRONT_READING = """
+{{^ImageHtml}}
 {{#ReadingsPrimary}}
 <div class="wk-tags">{{TagsHtml}}</div>
 <div class="wk-stage"><div class="wk-big" style="font-size:{{VocabFontSize}}px;">{{Vocab}}</div></div>
@@ -342,6 +353,29 @@ _VOCAB_FRONT_READING = """
 </div>
 """ + _WANAKANA_BIND_SCRIPT + """
 {{/ReadingsPrimary}}
+{{/ImageHtml}}
+""".strip()
+
+# Bildkarte (per Gemini generiertes Clipart statt Text-Vorderseite, siehe
+# kc.VocabCard.image_data_uri) – NUR die Lesung wird abgefragt (die Bedeutung
+# steht ja optional schon als Bild/Beschriftung auf der Vorderseite, ein
+# zweites Bedeutung-Karte wäre redundant). {{#ImageHtml}}…{{/ImageHtml}}
+# aktiviert diese Karte nur, wenn tatsächlich ein Bild generiert wurde; die
+# beiden Text-Templates oben sind umgekehrt in {{^ImageHtml}}…{{/ImageHtml}}
+# gewrappt, damit für Bildkarten NICHT zusätzlich die üblichen zwei
+# Text-Karten entstehen (Anki überspringt Karten mit leerer Vorderseite).
+_VOCAB_FRONT_IMAGE = """
+{{#ImageHtml}}
+<div class="wk-tags">{{TagsHtml}}</div>
+<div class="wk-stage wk-stage-img">{{ImageHtml}}</div>
+<div class="wk-big" style="font-size:{{VocabFontSize}}px;">{{Vocab}}</div>
+{{#ShowMeaningFlag}}<div class="wk-image-meaning">{{MeaningPlain}}</div>{{/ShowMeaningFlag}}
+<div class="wk-typein">
+  <div class="wk-typein-label">Lesung eingeben</div>
+  {{type:ReadingsPrimary}}
+</div>
+""" + _WANAKANA_BIND_SCRIPT + """
+{{/ImageHtml}}
 """.strip()
 
 _VOCAB_BACK = """
@@ -437,12 +471,13 @@ def _build_models(genanki: Any) -> dict[str, Any]:
                 for n in (
                     "Vocab", "VocabFontSize", "MeaningsHtml", "Readings",
                     "PartsOfSpeech", "MnemonicsHtml", "SentenceHtml", "TagsHtml", "MeaningPlain",
-                    "AudioHtml", "DocLinkHtml", "ReadingsPrimary",
+                    "AudioHtml", "DocLinkHtml", "ReadingsPrimary", "ImageHtml", "ShowMeaningFlag",
                 )
             ],
             templates=[
                 {"name": "Bedeutung", "qfmt": _VOCAB_FRONT_MEANING, "afmt": _VOCAB_BACK},
                 {"name": "Lesung", "qfmt": _VOCAB_FRONT_READING, "afmt": _VOCAB_BACK},
+                {"name": "Bild", "qfmt": _VOCAB_FRONT_IMAGE, "afmt": _VOCAB_BACK},
             ],
             css=_css_with_accent("vocab"),
             sort_field_index=0,
@@ -706,6 +741,7 @@ def _kanji_note(genanki: Any, model: Any, card: kc.Card) -> Any:
 
 
 def _vocab_note(genanki: Any, model: Any, card: kc.VocabCard) -> Any:
+    image_html = f'<img src="{card.image_data_uri}" alt="">' if card.image_data_uri else ""
     fields = [
         _esc(card.vocab),
         str(_vocab_font_size(card.vocab)),
@@ -719,6 +755,8 @@ def _vocab_note(genanki: Any, model: Any, card: kc.VocabCard) -> Any:
         _audio_html(card.audio_url),
         _doclink_html(card.document_url),
         _esc(card.readings[0]) if card.readings else "",
+        image_html,
+        "1" if (image_html and card.show_meaning_on_front) else "",
     ]
     guid = genanki.guid_for("wkcards", "vocab", card.subject_id) if card.subject_id else None
     return genanki.Note(model=model, fields=fields, tags=_anki_tags(card.tags), guid=guid)

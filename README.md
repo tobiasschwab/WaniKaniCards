@@ -247,6 +247,26 @@ Bedarf weiter von Hand anpassen, statt blind einer maschinellen Übersetzung zu
 vertrauen. Braucht einen DeepL-Key in den Einstellungen (derselbe, der auch
 für Beispielsatz-Übersetzungen auf Dictionary-Karten genutzt wird).
 
+**🖼 Bildkarten (nur für Vokabeln):** Für Vokabeln, die sich gut bildlich
+darstellen lassen (z. B. 家/„Haus"), lässt sich statt der üblichen Text-
+Vorderseite ein einfaches **Clipart-Bild** generieren – „🖼"-Button pro
+Vokabel-Zeile öffnet einen Dialog mit „Generieren" (per Gemini, kein Text/
+Kanji im Bild selbst), Vorschau, „Neu generieren" (Bildgenerierung ist nicht
+deterministisch, jeder Klick liefert ein neues Ergebnis) und „Übernehmen".
+Manche Begriffe sind als reines Bild mehrdeutig – die Checkbox „Bedeutung
+zusätzlich auf der Vorderseite anzeigen" druckt die Bedeutung klein mit
+darunter. Übernommene Zeilen bekommen ein „🖼 Bildkarte"-Badge; wie bei
+„Felder manuell anpassen" wirkt die Änderung erst beim Erzeugen der Karten
+und lässt sich über „Bild entfernen" wieder rückgängig machen. **Rückseite
+bleibt unverändert** (Lesungen, Bedeutungen, Beispielsatz wie bei jeder
+anderen Vokabelkarte). Im **Anki-Export** entsteht für Bildkarten statt der
+üblichen zwei Karten (Bedeutung/Lesung) nur **eine**: Bild + Wort vorne,
+Lesung eintippen (per WanaKana, kein IME-Umschalten nötig) – die Bedeutung
+separat abzufragen wäre redundant, wenn sie ohnehin (optional) schon auf dem
+Bild steht. Braucht einen Gemini-Key in den Einstellungen; bewusst **manuell
+pro Karte** angestoßen statt automatisch für alle Vokabeln, da nicht jeder
+Begriff sich gut als Bild darstellen lässt.
+
 ## Dictionary-Karten
 
 Ein fünfter, WaniKani-**unabhängiger** Kartentyp für kanji-freie Wörter aus
@@ -661,6 +681,33 @@ Textkonvention (kein zusätzliches Datenmodell-Feld nötig), die den
 Originaltext zur Kontrolle sichtbar hält, wie im Feld-Dialog gespeichert wird
 es dann wie jedes andere manuell bearbeitete Feld über `field_overrides`.
 
+**Bildkarten** (`gemini_client.generate_image()`, Endpunkt
+`/api/gemini/generate-image`): eigenes Bild-Modell (`IMAGE_MODEL =
+"gemini-2.5-flash-image"`) statt des Text-Chat-Modells der Satzanalyse – nur
+bestimmte Gemini-Modelle können überhaupt Bilder erzeugen, die „-latest"-
+Text-Aliase (siehe `DEFAULT_MODEL`) nicht. Anders als `transcribe_image()`/
+`synthesize_speech()` **bewusst ungecacht**: Bildgenerierung ist nicht
+deterministisch, „Neu generieren" im Frontend muss bei jedem Klick
+tatsächlich ein neues Ergebnis liefern statt denselben gecachten Treffer.
+Zwei neue, optionale Felder auf `kc.VocabCard` (`image_data_uri`,
+`show_meaning_on_front`) statt eines eigenen Kartentyps – die Rückseite ist
+identisch zur normalen Vokabelkarte, nur die Vorderseite unterscheidet sich
+(PDF-Template: neuer Zweig in `templates/cards.html.j2` für `cell.type ==
+"vocab"`, analog zum bestehenden `image_uri`-Fallback bei Radicals). Landet
+im Frontend über denselben `field_overrides`-Mechanismus wie „Felder manuell
+anpassen" – ein generiertes Bild wird als `image_data_uri` in
+`fieldOverrides[id]` gespeichert, kein separater Persistenz-Weg nötig.
+
+Anki-seitig bekommt das `vocab`-Notiztyp-Modell (`anki_export.py`) ein
+drittes Template „Bild" zusätzlich zu „Bedeutung"/„Lesung": über Mustache-
+Bedingungen (`{{#ImageHtml}}…{{/ImageHtml}}` für das neue Template,
+`{{^ImageHtml}}…{{/ImageHtml}}` – die **Inversion** – für die beiden
+bestehenden) entsteht für eine Bildkarte **nur** die Bild→Lesung-Karte, die
+beiden Text-Karten bekommen eine leere Vorderseite und werden von Anki
+automatisch übersprungen (Standard-Anki-Verhalten: leere Vorderseite ⇒ keine
+Karte) – kein zusätzlicher Python-seitiger Verzweigungscode nötig, nur
+Template-Bedingungen.
+
 **Wörterbuch-Fallback** (`dictionary.py`, unabhängig von WaniKani): lädt die
 deutsche Edition von [JMdict-simplified](https://github.com/scriptin/jmdict-simplified)
 (`jmdict-ger-*.json.zip`, JSON, per GitHub-Releases-API immer die neueste
@@ -842,7 +889,9 @@ Satz-Tabelle inkl. Fehlerfälle), `dictionary.py`
 Seiten-Deckel, Fehlerfälle), `card_details_for_ids`/`_apply_field_overrides`
 (Felder-manuell-anpassen-Dialog, inkl. defensivem Ignorieren unbekannter
 Feldnamen), `webapp.api_card_detail`/`api_translate` (inkl. Zielsprache aus
-den Einstellungen), `KanaCard`-Bau sowie das
+den Einstellungen), `gemini_client.generate_image` (Bildkarten, inkl.
+Fehlerfälle und dass NICHT gecacht wird), `anki_export`-Vokabelmodell (drei
+Templates, Bild-Feld/Bedeutung-Flag nur bei gesetztem Bild), `KanaCard`-Bau sowie das
 Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
 Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen im
 Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/

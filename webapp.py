@@ -542,6 +542,30 @@ def api_gemini_tts() -> Any:
     return jsonify({"audio_data_uri": audio_data_uri})
 
 
+@app.post("/api/gemini/generate-image")
+def api_gemini_generate_image() -> Any:
+    """Bildkarten-Feature: ein einfaches Clipart-Bild für eine Vokabel per
+    Gemini generieren lassen (siehe `gemini_client.generate_image()`) – gibt
+    eine data-URI zurück, die im Frontend direkt als Vorschau angezeigt und
+    bei „Übernehmen" als `field_overrides[id].image_data_uri` gespeichert
+    wird (siehe FIELD_SCHEMAS in web/app.js). Bewusst pro Klick ein neuer,
+    ungecachter Request – „Neu generieren" soll ein anderes Ergebnis liefern."""
+    body = request.get_json(silent=True) or {}
+    word = str(body.get("word", "")).strip()
+    if not word:
+        return jsonify({"error": "Kein Wort angegeben."}), 400
+    meaning = str(body.get("meaning", "")).strip()
+    gemini_key = load_settings().get("gemini_key") or None
+    if not gemini_key:
+        return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt."}), 400
+    result = kc.gemini_client.generate_image(word, meaning, gemini_key)
+    if result is None:
+        return jsonify({"error": "Bildgenerierung fehlgeschlagen (Netzwerk, Quota, ungültiger Key oder kein Bild in der Antwort)."}), 502
+    image_bytes, mime_type = result
+    image_data_uri = f"data:{mime_type};base64," + base64.b64encode(image_bytes).decode("ascii")
+    return jsonify({"image_data_uri": image_data_uri})
+
+
 @app.post("/api/test-token")
 def api_test_token() -> Any:
     token = (request.get_json(silent=True) or {}).get("token") or load_settings().get(

@@ -327,11 +327,51 @@ def test_vocab_note_readings_primary_empty_without_readings():
     assert note.fields[field_names.index("ReadingsPrimary")] == ""
 
 
-def test_vocab_model_has_two_templates_meaning_and_reading():
+def test_vocab_model_has_three_templates_meaning_reading_bild():
     genanki = ae._require_genanki()
     models = ae._build_models(genanki)
     names = [t["name"] for t in models["vocab"].templates]
-    assert names == ["Bedeutung", "Lesung"]
+    assert names == ["Bedeutung", "Lesung", "Bild"]
+
+
+def test_vocab_note_image_html_empty_without_image():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.VocabCard(vocab="家", readings=["いえ"], meanings=["Haus"], subject_id=1)
+    note = ae._vocab_note(genanki, models["vocab"], card)
+    field_names = [f["name"] for f in models["vocab"].fields]
+    assert note.fields[field_names.index("ImageHtml")] == ""
+    assert note.fields[field_names.index("ShowMeaningFlag")] == ""
+
+
+def test_vocab_note_image_html_contains_data_uri_when_set():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    card = kc.VocabCard(
+        vocab="家", readings=["いえ"], meanings=["Haus"], subject_id=1,
+        image_data_uri="data:image/png;base64,AAAA",
+    )
+    note = ae._vocab_note(genanki, models["vocab"], card)
+    field_names = [f["name"] for f in models["vocab"].fields]
+    assert "data:image/png;base64,AAAA" in note.fields[field_names.index("ImageHtml")]
+
+
+def test_vocab_note_show_meaning_flag_only_set_with_image():
+    genanki = ae._require_genanki()
+    models = ae._build_models(genanki)
+    field_names = [f["name"] for f in ae._build_models(genanki)["vocab"].fields]
+    # show_meaning_on_front ohne Bild ist bedeutungslos (kann so aus dem
+    # Frontend nicht vorkommen) - darf trotzdem nicht das Flag setzen.
+    card_no_image = kc.VocabCard(vocab="家", meanings=["Haus"], show_meaning_on_front=True)
+    note1 = ae._vocab_note(genanki, models["vocab"], card_no_image)
+    assert note1.fields[field_names.index("ShowMeaningFlag")] == ""
+
+    card_with_image = kc.VocabCard(
+        vocab="家", meanings=["Haus"], show_meaning_on_front=True,
+        image_data_uri="data:image/png;base64,AAAA",
+    )
+    note2 = ae._vocab_note(genanki, models["vocab"], card_with_image)
+    assert note2.fields[field_names.index("ShowMeaningFlag")] == "1"
 
 
 # --------------------------------------------------------------------------- #

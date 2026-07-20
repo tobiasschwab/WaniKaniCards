@@ -92,6 +92,14 @@ body {
    mit Label, Eingabe (Text oder mehrzeilig bei Listen-Feldern wie Bedeutungen)
    und optional einem Übersetzen-Button. */
 #fieldEditPanel { max-width: 640px; }
+
+/* Bildkarten-Dialog: Vorschau des per Gemini generierten Cliparts. */
+.image-card-preview {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 160px; border: 1px dashed var(--border); border-radius: 12px;
+  background: var(--bg); margin-top: 10px; padding: 10px;
+}
+.image-card-preview img { max-height: 220px; max-width: 100%; object-fit: contain; }
 .field-edit-body { display: flex; flex-direction: column; gap: 14px; }
 .field-edit-row .field-edit-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .field-edit-row .label { font-size: 13px; font-weight: 600; }

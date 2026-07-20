@@ -149,6 +149,15 @@ class VocabCard:
     document_url: str | None = None
     tags: list[str] = field(default_factory=list)
     subject_id: int | None = None
+    # Bildkarten-Feature (manuell pro Vokabel per Gemini generiert, siehe
+    # /api/gemini/generate-image): wenn gesetzt, zeigt die Vorderseite NUR
+    # das Bild + das Wort statt Bedeutung/Lesung als Text – Anki generiert
+    # dafür dann auch nur die Lesung-Type-in-Karte statt der beiden üblichen
+    # Bedeutung/Lesung-Karten (siehe anki_export._build_models()).
+    image_data_uri: str | None = None
+    # Manche Begriffe sind als reines Bild mehrdeutig (z. B. abstrakte
+    # Verben) – optional die Bedeutung klein mit auf die Vorderseite drucken.
+    show_meaning_on_front: bool = False
     level: int | None = None
 
 
@@ -1030,6 +1039,8 @@ def _card_to_dict(
             "sentence_en": card.sentence_en,
             "sentences": _merged_sentences(card),
             "tags": card.tags,
+            "image_data_uri": card.image_data_uri,
+            "show_meaning_on_front": card.show_meaning_on_front,
         }
     if isinstance(card, CustomCard):
         return {

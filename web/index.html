@@ -157,6 +157,30 @@
       </section>
     </div>
 
+    <!-- Bildkarte erzeugen (Vokabel-Vorderseite = Gemini-Clipart statt Text) -->
+    <div id="imageCardOverlay" class="modal-overlay hidden">
+      <section id="imageCardPanel" class="modal-panel">
+        <div class="modal-head">
+          <h2 id="imageCardTitle">Bildkarte</h2>
+          <button id="imageCardClose" class="icon-btn" title="Schließen">✕</button>
+        </div>
+        <p class="hint">Erzeugt ein einfaches Clipart-Bild per Gemini für die Vorderseite dieser Vokabel – die Rückseite bleibt wie gewohnt. Eignet sich nur für Begriffe, die sich gut bildlich darstellen lassen.</p>
+        <div id="imageCardPreview" class="image-card-preview">
+          <span class="muted">Noch kein Bild generiert.</span>
+        </div>
+        <label class="switch" style="margin-top:10px">
+          <input type="checkbox" id="imageCardShowMeaning">
+          <span></span>Bedeutung zusätzlich auf der Vorderseite anzeigen
+        </label>
+        <div class="row gap" style="margin-top:14px">
+          <button id="imageCardGenerate" class="btn primary">Generieren</button>
+          <button id="imageCardAccept" class="btn" disabled>Übernehmen</button>
+          <button id="imageCardRemove" class="btn small">Bild entfernen</button>
+          <span id="imageCardStatus" class="muted"></span>
+        </div>
+      </section>
+    </div>
+
     <!-- Quelle wählen -->
     <section class="panel">
       <div class="tab-groups" id="modeTabs" data-value="level">

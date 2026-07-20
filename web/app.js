@@ -223,12 +223,13 @@ function renderTable(list, title, mode) {
     const editable = tableMode !== "custom" && _EDITABLE_OBJECT_TYPES.has(c.object);
     const tr = document.createElement("tr");
     tr.classList.toggle("is-exported", !!c.already_exported);
+    const hasImageOverride = !!(fieldOverrides[id] && fieldOverrides[id].image_data_uri);
     if (fieldOverrides[id]) tr.classList.add("has-field-overrides");
     tr.innerHTML = `
       <td class="c-check"><input type="checkbox" data-id="${escapeHtml(id)}"></td>
       <td class="c-char">${escapeHtml(c.characters || (c.has_image ? "🖼" : "—"))}</td>
       <td><span class="tag-mini ${c.object}">${escapeHtml(c.kind)}</span></td>
-      <td>${escapeHtml(c.meaning)}${c.already_exported ? '<span class="tag-mini exported" title="Bereits exportiert">✓ exportiert</span>' : ""}${fieldOverrides[id] ? '<span class="tag-mini" title="Felder manuell angepasst">✎ angepasst</span>' : ""}</td>
+      <td>${escapeHtml(c.meaning)}${c.already_exported ? '<span class="tag-mini exported" title="Bereits exportiert">✓ exportiert</span>' : ""}${fieldOverrides[id] ? '<span class="tag-mini" title="Felder manuell angepasst">✎ angepasst</span>' : ""}${hasImageOverride ? '<span class="tag-mini" title="Bildkarte">🖼 Bildkarte</span>' : ""}</td>
       <td class="c-lvl">${c.level ?? ""}</td>
       <td class="c-act"></td>`;
     const cb = tr.querySelector("input");
@@ -245,6 +246,11 @@ function renderTable(list, title, mode) {
       const ed = document.createElement("button"); ed.className = "chip-btn"; ed.textContent = "✎"; ed.title = "Felder manuell anpassen";
       ed.onclick = (e) => { e.stopPropagation(); openFieldEditModal(id, c.object); };
       act.append(ed);
+      if (c.object === "vocabulary") {
+        const img = document.createElement("button"); img.className = "chip-btn"; img.textContent = "🖼"; img.title = "Bildkarte erzeugen";
+        img.onclick = (e) => { e.stopPropagation(); openImageCardModal(id, c); };
+        act.append(img);
+      }
     }
     tb.append(tr);
   }
@@ -382,6 +388,79 @@ function saveFieldEdits() {
   toast(Object.keys(overrides).length ? "Änderungen gespeichert – wirken beim Erzeugen der Karten." : "Keine Änderungen.");
   renderTable(cards, $("#tableTitle").textContent.replace(/\s*\(\d+\)$/, ""), tableMode);
 }
+
+// ---------- Bildkarten (Vokabel-Vorderseite = Gemini-Clipart) ----------
+let _imageCardCurrentId = null;
+let _imageCardPreviewUri = null; // noch nicht übernommenes, frisch generiertes Bild
+
+function openImageCardModal(id, c) {
+  _imageCardCurrentId = String(id);
+  _imageCardPreviewUri = null;
+  $("#imageCardTitle").textContent = `Bildkarte: ${c.characters || c.meaning || ""}`;
+  $("#imageCardStatus").textContent = "";
+  $("#imageCardGenerate").textContent = "Generieren";
+  $("#imageCardAccept").disabled = true;
+  const existing = (fieldOverrides[_imageCardCurrentId] || {}).image_data_uri;
+  const existingShowMeaning = (fieldOverrides[_imageCardCurrentId] || {}).show_meaning_on_front;
+  $("#imageCardShowMeaning").checked = !!existingShowMeaning;
+  const preview = $("#imageCardPreview");
+  if (existing) {
+    preview.innerHTML = `<img src="${existing}" alt="">`;
+    $("#imageCardGenerate").textContent = "Neu generieren";
+  } else {
+    preview.innerHTML = '<span class="muted">Noch kein Bild generiert.</span>';
+  }
+  $("#imageCardOverlay").classList.remove("hidden");
+}
+
+async function generateImageCard() {
+  const c = cards.find((x) => String(x.id) === _imageCardCurrentId);
+  if (!c) return;
+  const btn = $("#imageCardGenerate");
+  btn.disabled = true;
+  $("#imageCardStatus").textContent = "Generiere Bild… (kann einige Sekunden dauern)";
+  try {
+    const r = await api("/api/gemini/generate-image", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word: c.characters, meaning: c.meaning }),
+    });
+    _imageCardPreviewUri = r.image_data_uri;
+    $("#imageCardPreview").innerHTML = `<img src="${r.image_data_uri}" alt="">`;
+    $("#imageCardAccept").disabled = false;
+    $("#imageCardStatus").textContent = "";
+    btn.textContent = "Neu generieren";
+  } catch (e) {
+    $("#imageCardStatus").textContent = "";
+    toast(e.message, true);
+  }
+  btn.disabled = false;
+}
+
+function acceptImageCard() {
+  const id = _imageCardCurrentId;
+  if (!id || !_imageCardPreviewUri) return;
+  fieldOverrides[id] = {
+    ...(fieldOverrides[id] || {}),
+    image_data_uri: _imageCardPreviewUri,
+    show_meaning_on_front: $("#imageCardShowMeaning").checked,
+  };
+  $("#imageCardOverlay").classList.add("hidden");
+  toast("Bildkarte übernommen – wirkt beim Erzeugen der Karten.");
+  renderTable(cards, $("#tableTitle").textContent.replace(/\s*\(\d+\)$/, ""), tableMode);
+}
+
+function removeImageCard() {
+  const id = _imageCardCurrentId;
+  if (id && fieldOverrides[id]) {
+    delete fieldOverrides[id].image_data_uri;
+    delete fieldOverrides[id].show_meaning_on_front;
+    if (!Object.keys(fieldOverrides[id]).length) delete fieldOverrides[id];
+  }
+  _imageCardPreviewUri = null;
+  $("#imageCardOverlay").classList.add("hidden");
+  renderTable(cards, $("#tableTitle").textContent.replace(/\s*\(\d+\)$/, ""), tableMode);
+}
+
 function toggle(id, on) { if (on) selected.add(id); else selected.delete(id); syncChecks(); updateRenderBtn(); }
 function selectAll(on) {
   selected.clear(); if (on) cards.forEach((c) => selected.add(String(c.id)));
@@ -1424,6 +1503,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("#settingsOverlay").addEventListener("click", (e) => { if (e.target === $("#settingsOverlay")) $("#settingsOverlay").classList.add("hidden"); });
   $("#fieldEditOverlay").addEventListener("click", (e) => { if (e.target === $("#fieldEditOverlay")) $("#fieldEditOverlay").classList.add("hidden"); });
+  $("#imageCardClose").addEventListener("click", () => $("#imageCardOverlay").classList.add("hidden"));
+  $("#imageCardOverlay").addEventListener("click", (e) => { if (e.target === $("#imageCardOverlay")) $("#imageCardOverlay").classList.add("hidden"); });
+  $("#imageCardGenerate").addEventListener("click", generateImageCard);
+  $("#imageCardAccept").addEventListener("click", acceptImageCard);
+  $("#imageCardRemove").addEventListener("click", removeImageCard);
   $("#tokenShow").addEventListener("click", () => { const i = $("#tokenInput"); i.type = i.type === "password" ? "text" : "password"; });
   $("#tokenSave").addEventListener("click", async () => {
     try { await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: $("#tokenInput").value }) });

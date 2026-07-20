@@ -301,6 +301,24 @@
     line-height: 1.05;
     text-align: center;
   }
+  /* Bildkarte (per Gemini generiertes Clipart statt Text-Vorderseite). */
+  .vocab-front .vocab-img {
+    height: 42mm;
+    width: auto;
+    max-width: 80%;
+    object-fit: contain;
+    margin-bottom: 2mm;
+  }
+  .vocab-front .vocab-img-word {
+    font-size: 30pt;
+  }
+  .vocab-front .vocab-img-meaning {
+    font-family: "SansJP", sans-serif;
+    font-size: 10pt;
+    color: #666;
+    margin-top: 1mm;
+    text-align: center;
+  }
   /* ---------- Vokabel: Rückseite ---------- */
   .back .pos {
     font-size: 8.5pt;
@@ -618,7 +636,15 @@
         <div class="card front vocab-front" style="{{ pos }}">
           {% if show_hole %}<div class="hole"></div>{% endif %}
           {{ tags(cell) }}
+          {% if cell.image_data_uri %}
+          <img class="vocab-img" src="{{ cell.image_data_uri }}" alt="{{ cell.vocab }}">
+          <div class="vword vocab-img-word">{{ cell.vocab }}</div>
+          {% if cell.show_meaning_on_front and cell.meanings %}
+          <div class="vocab-img-meaning">{{ cell.meanings[0] }}</div>
+          {% endif %}
+          {% else %}
           <div class="vword" style="font-size: {{ vfs }}pt;">{{ cell.vocab }}</div>
+          {% endif %}
         </div>
         {% elif cell.type == "custom" %}
         <div class="card front free-front" style="{{ pos }}">

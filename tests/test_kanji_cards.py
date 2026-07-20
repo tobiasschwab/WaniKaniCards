@@ -1307,3 +1307,25 @@ def test_card_to_dict_serializes_kana_card():
     assert d["word"] == "しあい"
     assert d["kanji_hint"] == "試合"
     assert d["sentence_translation"] == "Übersetzung."
+
+
+def test_card_to_dict_serializes_vocab_image_fields():
+    from kanji_cards import _card_to_dict
+
+    card = VocabCard(
+        vocab="家", readings=["いえ"], meanings=["Haus"],
+        image_data_uri="data:image/png;base64,AAAA", show_meaning_on_front=True,
+    )
+    d = _card_to_dict(card)
+    assert d["type"] == "vocab"
+    assert d["image_data_uri"] == "data:image/png;base64,AAAA"
+    assert d["show_meaning_on_front"] is True
+
+
+def test_card_to_dict_vocab_image_fields_default_none_and_false():
+    from kanji_cards import _card_to_dict
+
+    card = VocabCard(vocab="家", readings=["いえ"], meanings=["Haus"])
+    d = _card_to_dict(card)
+    assert d["image_data_uri"] is None
+    assert d["show_meaning_on_front"] is False

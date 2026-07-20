@@ -487,3 +487,69 @@ def test_transcribe_image_uses_cache_on_second_call(tmp_path, monkeypatch):
     second = gc.transcribe_image(b"sameimage", "key", session=session, use_cache=True)
     assert len(session.calls) == 1  # kein zweiter Request nötig
     assert first == second == "同じ画像。"
+
+
+# --------------------------------------------------------------------------- #
+# generate_image (Bildkarten-Feature: Clipart-Bild per Gemini)
+# --------------------------------------------------------------------------- #
+
+def _image_gen_body(image_b64: str, mime_type: str = "image/png") -> dict:
+    return {
+        "candidates": [
+            {"content": {"parts": [
+                {"text": "hier ist dein Bild"},
+                {"inlineData": {"mimeType": mime_type, "data": image_b64}},
+            ]}}
+        ]
+    }
+
+
+def test_generate_image_returns_bytes_and_mime_type():
+    import base64
+    b64 = base64.b64encode(b"fake-png-bytes").decode("ascii")
+    session = _FakeSession({"key": _FakeResp(json_data=_image_gen_body(b64, "image/png"))})
+    result = gc.generate_image("家", "Haus", "key", session=session)
+    assert result == (b"fake-png-bytes", "image/png")
+
+
+def test_generate_image_sends_word_and_meaning_in_prompt():
+    import base64
+    b64 = base64.b64encode(b"x").decode("ascii")
+    session = _FakeSession({"key": _FakeResp(json_data=_image_gen_body(b64))})
+    gc.generate_image("家", "Haus", "key", session=session)
+    sent = session.calls[0]["json"]
+    prompt = sent["contents"][0]["parts"][0]["text"]
+    assert "家" in prompt and "Haus" in prompt
+    assert sent["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
+
+
+def test_generate_image_returns_none_without_word_or_key():
+    assert gc.generate_image("", "Haus", "key", session=_FakeSession({})) is None
+    assert gc.generate_image("家", "Haus", "", session=_FakeSession({})) is None
+
+
+def test_generate_image_returns_none_on_network_error():
+    assert gc.generate_image("家", "Haus", "key", session=_FakeSession(error=True)) is None
+
+
+def test_generate_image_returns_none_on_malformed_response():
+    session = _FakeSession({"key": _FakeResp(json_data={"candidates": []})})
+    assert gc.generate_image("家", "Haus", "key", session=session) is None
+
+
+def test_generate_image_returns_none_when_response_has_no_image_part():
+    session = _FakeSession({"key": _FakeResp(json_data={
+        "candidates": [{"content": {"parts": [{"text": "kein Bild, sorry"}]}}]
+    })})
+    assert gc.generate_image("家", "Haus", "key", session=session) is None
+
+
+def test_generate_image_is_not_cached_across_calls():
+    """Anders als transcribe_image/synthesize_speech: jeder Aufruf muss
+    tatsächlich einen neuen Request auslösen ("Neu generieren" im Frontend)."""
+    import base64
+    b64 = base64.b64encode(b"x").decode("ascii")
+    session = _FakeSession({"key": _FakeResp(json_data=_image_gen_body(b64))})
+    gc.generate_image("家", "Haus", "key", session=session)
+    gc.generate_image("家", "Haus", "key", session=session)
+    assert len(session.calls) == 2

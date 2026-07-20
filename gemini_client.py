@@ -606,3 +606,69 @@ def transcribe_image(
         except OSError:
             pass
     return text
+
+
+# --------------------------------------------------------------------------- #
+# Bildkarten: Clipart-Bild für eine Vokabel generieren (Vorderseite = nur
+# Bild + Wort statt Text) – siehe webapp.api_gemini_generate_image()
+# --------------------------------------------------------------------------- #
+
+# Eigenes Bild-Modell statt des Text-Chat-Modells der Satzanalyse (siehe
+# DEFAULT_MODEL) – nur bestimmte Gemini-Modelle können überhaupt Bilder
+# erzeugen, "-latest"-Text-Aliase können das nicht. Bewusst keine "-latest"-
+# Variante: für Bildgenerierung pflegt Google (Stand jetzt) keinen stabilen
+# Alias, die konkrete Modellversion muss direkt benannt werden.
+IMAGE_MODEL = "gemini-2.5-flash-image"
+
+_IMAGE_PROMPT_TEMPLATE = """Erstelle ein einfaches, flaches Clipart-/Icon-Bild (KEIN Foto, KEIN Text, \
+KEINE Schriftzeichen im Bild), das den Begriff "{meaning}" (japanisch: {word}) \
+klar und eindeutig darstellt. Ein einzelnes zentrales Motiv, reduzierter \
+freundlicher Icon-Stil, schlichter oder transparenter Hintergrund – \
+geeignet als Vorderseite einer Lernkarteikarte."""
+
+
+def generate_image(
+    word: str,
+    meaning: str,
+    api_key: str,
+    *,
+    model: str = IMAGE_MODEL,
+    session: requests.Session | None = None,
+) -> tuple[bytes, str] | None:
+    """Ein einfaches Clipart-Bild für eine Vokabel generieren (Bildkarten-
+    Feature) – gibt `(bild_bytes, mime_type)` zurück oder `None` bei
+    fehlendem Wort/Key, Netzwerkfehler, Quota oder Antwort ohne Bild.
+
+    Bewusst UNGECACHT (anders als `transcribe_image`/`synthesize_speech`):
+    Bildgenerierung ist nicht deterministisch, der "Neu generieren"-Button im
+    Frontend soll bei jedem Klick tatsächlich ein neues Ergebnis anfragen
+    statt denselben gecachten Treffer zurückzubekommen."""
+    if not word or not api_key:
+        return None
+    session = session or requests.Session()
+    prompt = _IMAGE_PROMPT_TEMPLATE.format(meaning=meaning or word, word=word)
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+    }
+    url = f"{_API_BASE}/models/{model}:generateContent"
+    label = f"Bildgenerierung ({word}, {model})"
+    resp = _post_with_retry(url, api_key, body, session, label)
+    if resp is None:
+        return None
+
+    try:
+        parts = resp.json()["candidates"][0]["content"]["parts"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        logger.warning("Gemini: Bildgenerierungs-Antwort für %s nicht auswertbar (%s): %s", label, type(exc).__name__, exc)
+        return None
+
+    for part in parts:
+        inline = part.get("inlineData")
+        if inline and inline.get("data"):
+            try:
+                return base64.b64decode(inline["data"]), inline.get("mimeType") or "image/png"
+            except (ValueError, TypeError):
+                return None
+    logger.warning("Gemini: Antwort für %s enthielt kein Bild.", label)
+    return None

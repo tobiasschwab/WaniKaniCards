@@ -470,6 +470,46 @@ def test_api_gemini_tts_returns_502_on_synthesis_failure(tmp_path, monkeypatch):
     assert r.status_code == 502
 
 
+def test_api_gemini_generate_image_requires_word(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    r = client.post("/api/gemini/generate-image", json={})
+    assert r.status_code == 400
+
+
+def test_api_gemini_generate_image_requires_stored_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    r = client.post("/api/gemini/generate-image", json={"word": "家", "meaning": "Haus"})
+    assert r.status_code == 400
+    assert "Gemini" in r.get_json()["error"]
+
+
+def test_api_gemini_generate_image_returns_data_uri(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc.gemini_client, "generate_image", lambda word, meaning, key, **kw: (b"pngbytes", "image/png"))
+
+    r = client.post("/api/gemini/generate-image", json={"word": "家", "meaning": "Haus"})
+    assert r.status_code == 200
+    assert r.get_json()["image_data_uri"].startswith("data:image/png;base64,")
+
+
+def test_api_gemini_generate_image_returns_502_on_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc.gemini_client, "generate_image", lambda word, meaning, key, **kw: None)
+
+    r = client.post("/api/gemini/generate-image", json={"word": "家", "meaning": "Haus"})
+    assert r.status_code == 502
+
+
 def test_api_create_kanacard_ai_stores_sentence_audio_url(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
