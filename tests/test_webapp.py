@@ -338,6 +338,27 @@ def test_api_settings_get_set_gemini_key_and_model(tmp_path, monkeypatch):
     assert r1["gemini_model"] == "gemini-pro-latest"
 
 
+def test_api_settings_get_set_target_lang(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+
+    r0 = client.get("/api/settings").get_json()
+    assert r0["target_lang"] == "DE"
+    assert "EN" in r0["target_langs"]
+
+    client.post("/api/settings", json={"target_lang": "fr"})
+    r1 = client.get("/api/settings").get_json()
+    assert r1["target_lang"] == "FR"
+
+
+def test_api_settings_rejects_unknown_target_lang(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"target_lang": "XX"})
+    r = client.get("/api/settings").get_json()
+    assert r["target_lang"] == "DE"  # ungültiger Wert wird ignoriert, Default bleibt
+
+
 def test_api_gemini_models_requires_key(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
     client = webapp.app.test_client()
@@ -692,3 +713,85 @@ def test_build_mixed_deck_skips_missing_custom_or_kana_ids(tmp_path, monkeypatch
     (tmp_path / "kanacards").mkdir()
     deck = webapp._build_mixed_deck({"custom_ids": ["missing"], "kana_ids": ["missing"]})
     assert deck == []
+
+
+def test_build_mixed_deck_applies_field_overrides():
+    deck = webapp._build_mixed_deck(
+        {
+            "subject_ids": [2467],  # 一 (Vokabel, Sample-Daten)
+            "sample": True,
+            "field_overrides": {"2467": {"meanings": ["Eigene Bedeutung"]}},
+        }
+    )
+    assert deck[0].meanings == ["Eigene Bedeutung"]
+
+
+def test_api_render_stores_field_overrides_in_job_params(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
+    monkeypatch.setattr(webapp, "OUTPUT_DIR", tmp_path / "output")
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "output").mkdir()
+    client = webapp.app.test_client()
+    r = client.post(
+        "/api/render",
+        json={
+            "subject_ids": [2467], "sample": True, "format": "pdf",
+            "field_overrides": {"2467": {"meanings": ["Eigene Bedeutung"]}},
+        },
+    )
+    assert r.status_code == 202
+    job_id = r.get_json()["id"]
+    job = webapp.read_job(job_id)
+    assert job["params"]["field_overrides"] == {"2467": {"meanings": ["Eigene Bedeutung"]}}
+
+
+# --------------------------------------------------------------------------- #
+# /api/card-detail, /api/translate
+# --------------------------------------------------------------------------- #
+
+def test_api_card_detail_returns_full_fields_for_kanji():
+    client = webapp.app.test_client()
+    r = client.post("/api/card-detail", json={"subject_ids": [440], "sample": True})  # 一 (Kanji)
+    assert r.status_code == 200
+    data = r.get_json()["cards"]
+    assert "440" in data
+    assert data["440"]["kind"] == "Card"
+    assert "meanings" in data["440"] and "onyomi" in data["440"]
+
+
+def test_api_card_detail_skips_unknown_ids():
+    client = webapp.app.test_client()
+    r = client.post("/api/card-detail", json={"subject_ids": [999999999], "sample": True})
+    assert r.status_code == 200
+    assert r.get_json()["cards"] == {}
+
+
+def test_api_translate_requires_deepl_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    r = client.post("/api/translate", json={"text": "wing"})
+    assert r.status_code == 400
+    assert "DeepL" in r.get_json()["error"]
+
+
+def test_api_translate_requires_text():
+    client = webapp.app.test_client()
+    r = client.post("/api/translate", json={"text": ""})
+    assert r.status_code == 400
+
+
+def test_api_translate_uses_target_lang_and_source_lang(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+    client = webapp.app.test_client()
+    client.post("/api/settings", json={"deepl_key": "mykey:fx", "target_lang": "FR"})
+
+    seen = {}
+    def fake_translate(text, api_key, *, target_lang="DE", source_lang="JA", session=None):
+        seen["args"] = (text, api_key, target_lang, source_lang)
+        return "aile"
+
+    monkeypatch.setattr(webapp.kc.dictionary, "translate_sentence", fake_translate)
+    r = client.post("/api/translate", json={"text": "wing", "source_lang": "en"})
+    assert r.status_code == 200
+    assert r.get_json() == {"translation": "aile", "target_lang": "FR"}
+    assert seen["args"] == ("wing", "mykey:fx", "FR", "EN")

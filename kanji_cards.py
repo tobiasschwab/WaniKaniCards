@@ -21,7 +21,7 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as dataclass_fields, asdict
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -1790,16 +1790,58 @@ def annotate_text_ai(
     return rows
 
 
-def _normalize_sentence_overrides(
-    sentence_overrides: dict[Any, Any] | None,
+def _normalize_id_keyed_overrides(
+    overrides: dict[Any, Any] | None,
 ) -> dict[int, dict[str, Any]]:
-    """Overrides-Keys robust in int wandeln (kommen z. B. als JSON-String-Keys an)."""
+    """Overrides-Keys robust in int wandeln (kommen z. B. als JSON-String-Keys
+    an) – gemeinsam genutzt von `sentence_overrides` und `field_overrides`."""
     out: dict[int, dict[str, Any]] = {}
-    for k, v in (sentence_overrides or {}).items():
+    for k, v in (overrides or {}).items():
         ik = _int_or_none(k)
         if ik is not None and isinstance(v, dict):
             out[ik] = v
     return out
+
+
+def _apply_field_overrides(card: Any, overrides: dict[str, Any] | None) -> None:
+    """Manuell im Web-Frontend angepasste Felder auf ein bereits gebautes
+    Card/RadicalCard/VocabCard-Objekt anwenden (siehe `/api/card-detail` bzw.
+    den Felder-manuell-anpassen-Dialog). Nur Namen, die tatsächlich als
+    Dataclass-Feld existieren, werden übernommen – alles andere wird
+    defensiv ignoriert statt einen Fehler zu werfen."""
+    if not overrides:
+        return
+    valid = {f.name for f in dataclass_fields(card)}
+    for key, value in overrides.items():
+        if key in valid:
+            setattr(card, key, value)
+
+
+def _build_subject_registry(
+    ids: list[int], *, use_cache: bool, sample: bool,
+) -> tuple[dict[int, dict[str, Any]], "callable | None"]:
+    """Subjects + ihre Bezüge (Beispielvokabeln, Kompositions-Radicals) einmalig
+    laden – gemeinsam genutzt von `resolve_subject_deck()` und
+    `card_details_for_ids()`. Gibt `(registry, image_fetcher)` zurück."""
+    if sample:
+        return _sample_registry(), None
+    client = _make_client(use_cache=use_cache)
+    reg = dict(client.fetch_subjects(ids))
+    # Bezüge nachladen: Kanji→Beispielvokabeln, Radical→Beispielkanji.
+    related: set[int] = set()
+    for i in ids:
+        s = reg.get(i)
+        if not s:
+            continue
+        sdata = s.get("data", {})
+        for a in sdata.get("amalgamation_subject_ids") or []:
+            related.add(int(a))
+        for c in sdata.get("component_subject_ids") or []:
+            related.add(int(c))
+    related -= set(reg)
+    if related:
+        reg.update(client.fetch_subjects(related))
+    return reg, client.fetch_image_data_uri
 
 
 def resolve_subject_deck(
@@ -1808,6 +1850,7 @@ def resolve_subject_deck(
     use_cache: bool = True,
     sample: bool = False,
     sentence_overrides: dict[Any, Any] | None = None,
+    field_overrides: dict[Any, Any] | None = None,
 ) -> list[Card | RadicalCard | VocabCard]:
     """Die gewählten Subjects (nach ID) in Card-Objekte auflösen (ohne zu rendern).
 
@@ -1815,39 +1858,49 @@ def resolve_subject_deck(
     `sentence_overrides` (optional): Vokabel-Subject-ID → `{"ja": str, "en":
     str|None}` – z. B. aus dem Text-Modus (siehe `annotate_text`), wird vom
     Frontend beim „Hinzufügen" einer im Text gefundenen Vokabel gesetzt.
+    `field_overrides` (optional): Subject-ID → `{feldname: neuer_wert, …}` –
+    manuell im „Felder anpassen"-Dialog geänderte Karten-Felder (siehe
+    `card_details_for_ids()`/`_apply_field_overrides()`), werden NACH dem
+    Karten-Bau angewendet und überschreiben damit gezielt einzelne Felder.
     """
     ids = [int(i) for i in subject_ids]
-    overrides = _normalize_sentence_overrides(sentence_overrides)
-    image_fetcher: "callable | None" = None
-    if sample:
-        reg = _sample_registry()
-    else:
-        client = _make_client(use_cache=use_cache)
-        reg = dict(client.fetch_subjects(ids))
-        # Bezüge nachladen: Kanji→Beispielvokabeln, Radical→Beispielkanji.
-        related: set[int] = set()
-        for i in ids:
-            s = reg.get(i)
-            if not s:
-                continue
-            sdata = s.get("data", {})
-            for a in sdata.get("amalgamation_subject_ids") or []:
-                related.add(int(a))
-            for c in sdata.get("component_subject_ids") or []:
-                related.add(int(c))
-        related -= set(reg)
-        if related:
-            reg.update(client.fetch_subjects(related))
-        image_fetcher = client.fetch_image_data_uri
+    overrides = _normalize_id_keyed_overrides(sentence_overrides)
+    overrides_fields = _normalize_id_keyed_overrides(field_overrides)
+    reg, image_fetcher = _build_subject_registry(ids, use_cache=use_cache, sample=sample)
 
     deck: list[Card | RadicalCard | VocabCard] = []
     for i in ids:
         s = reg.get(i)
         if s:
-            deck.append(build_any_card(s, reg, image_fetcher, overrides))
+            card = build_any_card(s, reg, image_fetcher, overrides)
+            _apply_field_overrides(card, overrides_fields.get(i))
+            deck.append(card)
     if not deck:
         raise WaniKaniError("Keine gültigen Karten für die Auswahl gefunden.")
     return deck
+
+
+def card_details_for_ids(
+    subject_ids: Iterable[int], *, use_cache: bool = True, sample: bool = False,
+) -> dict[int, dict[str, Any]]:
+    """Volle Karten-Felder (alle Dataclass-Felder, nicht nur die Tabellen-
+    Kurzfassung aus `_subject_descriptor()`) für die gegebenen Subject-IDs –
+    Grundlage für den „Felder manuell anpassen"-Dialog im Web-Frontend
+    (siehe `webapp.api_card_detail()`). Baut dieselben Card/RadicalCard/
+    VocabCard-Objekte wie `resolve_subject_deck()`, exportiert sie aber nur
+    als Dict statt ein PDF/Anki-Deck daraus zu erzeugen."""
+    ids = [int(i) for i in subject_ids]
+    reg, image_fetcher = _build_subject_registry(ids, use_cache=use_cache, sample=sample)
+    out: dict[int, dict[str, Any]] = {}
+    for i in ids:
+        s = reg.get(i)
+        if not s:
+            continue
+        card = build_any_card(s, reg, image_fetcher)
+        d = asdict(card)
+        d["kind"] = type(card).__name__  # "Card" | "RadicalCard" | "VocabCard"
+        out[i] = d
+    return out
 
 
 def render_subjects(

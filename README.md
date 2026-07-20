@@ -225,6 +225,28 @@ Text und in die Prozentanzeige ein wie tatsächlich exportierte/erstellte
 Wörter – landet aber in einer eigenen, kleinen Datei (`data/known.json`),
 getrennt vom Export-/Karten-Verlauf.
 
+**Felder manuell anpassen (✎ pro Zeile):** WaniKani-Kanji/Vokabeln/Radicals in
+der Tabelle lassen sich vor dem Export **einzeln bearbeiten** – „✎" öffnet ein
+Pop-up mit allen Karten-Feldern (Bedeutungen, On'yomi/Kun'yomi bzw. Lesungen,
+Beispielvokabel/-satz, Merkhilfen, je nach Kartentyp), jedes Feld einzeln als
+Text-/Mehrzeilenfeld editierbar, „↺" setzt ein einzelnes Feld auf den
+WaniKani-Original­wert zurück. Bearbeitete Zeilen bekommen ein „✎ angepasst"-
+Badge in der Tabelle; die Änderungen wirken erst beim tatsächlichen Erzeugen
+der Karten (PDF/Anki) und bleiben bis „Tabelle leeren" erhalten – die
+WaniKani-Originaldaten selbst werden nie verändert, nur das jeweils
+exportierte Kartenfeld.
+
+**🌐 Übersetzen:** Für alle textlichen (englischen) Felder – Bedeutungen,
+Merkhilfen, Beispielvokabel-Bedeutung, Beispielsatz-Übersetzung – übersetzt
+ein „🌐 Übersetzen"-Button den aktuellen Feldinhalt per DeepL in die in den
+Einstellungen hinterlegte **Zielsprache** (Default Deutsch, unter
+DeepL → „Zielsprache" umstellbar). Die Übersetzung wird dem Original dabei
+**vorangestellt statt es zu überschreiben** (`Übersetzung\n—\nOriginal`) –
+so bleibt der WaniKani-Originaltext zur Kontrolle sichtbar und lässt sich bei
+Bedarf weiter von Hand anpassen, statt blind einer maschinellen Übersetzung zu
+vertrauen. Braucht einen DeepL-Key in den Einstellungen (derselbe, der auch
+für Beispielsatz-Übersetzungen auf Dictionary-Karten genutzt wird).
+
 ## Dictionary-Karten
 
 Ein fünfter, WaniKani-**unabhängiger** Kartentyp für kanji-freie Wörter aus
@@ -608,6 +630,37 @@ angewendet (`resolve_subject_deck()` → `build_card()` / `build_vocab_card()`)
 – WaniKanis eigene Beispielsätze gehen dabei nicht verloren, sie rutschen nur
 eine Position nach hinten.
 
+**Felder manuell anpassen** (`kc.card_details_for_ids()` / `kc._apply_field_overrides()`,
+Endpunkte `/api/card-detail` und `/api/render`): Der Bearbeiten-Dialog in der
+Kartentabelle braucht zunächst die **vollen** Karten-Felder statt der
+Kurzfassung aus `_subject_descriptor()` (nur Zeichen/Bedeutung/Level) –
+`card_details_for_ids()` baut dieselben Card/RadicalCard/VocabCard-Objekte
+wie `resolve_subject_deck()` (gemeinsame Registry-Lade-Logik in
+`_build_subject_registry()`, kein doppelter API-Aufruf-Code) und exportiert
+sie per `dataclasses.asdict()` als JSON statt daraus ein PDF zu erzeugen.
+Gespeicherte Änderungen landen clientseitig in `field_overrides`
+(Subject-ID → `{feldname: neuer_wert}`, analog zu `sentence_overrides`) und
+werden erst beim eigentlichen Rendern angewendet: `_apply_field_overrides()`
+prüft für jeden übergebenen Feldnamen per `dataclasses.fields()`, ob er
+tatsächlich auf der jeweiligen Dataclass existiert, und `setattr()`t nur dann
+– unbekannte/falsche Keys (z. B. durch einen Frontend-Bug oder manipulierte
+Requests) werden defensiv ignoriert statt einen Fehler zu werfen oder
+beliebige Attribute auf dem Objekt zu erzeugen. Die WaniKani-Originaldaten
+selbst bleiben dabei unangetastet – die Overrides wirken nur auf das jeweils
+frisch gebaute Karten-Objekt für **diesen** Export.
+
+**🌐 Übersetzen-Button & Zielsprache-Einstellung** (`/api/translate`): nutzt
+dieselbe DeepL-Anbindung wie die Beispielsatz-Übersetzung für Dictionary-
+Karten (`dictionary.translate_sentence()`), nur mit `source_lang="EN"` statt
+`"JA"` (die WaniKani-Texte sind englisch) und der in `settings.json`
+hinterlegten `target_lang` (Default `"DE"`, wählbar aus einer festen Liste
+`_TARGET_LANGS` in `webapp.py`) statt eines hartkodierten Zielsprachcodes.
+Frontend-seitig wird die Übersetzung dem Original-Text **vorangestellt**
+(`Übersetzung\n—\nOriginal`) statt ihn zu ersetzen – rein clientseitige
+Textkonvention (kein zusätzliches Datenmodell-Feld nötig), die den
+Originaltext zur Kontrolle sichtbar hält, wie im Feld-Dialog gespeichert wird
+es dann wie jedes andere manuell bearbeitete Feld über `field_overrides`.
+
 **Wörterbuch-Fallback** (`dictionary.py`, unabhängig von WaniKani): lädt die
 deutsche Edition von [JMdict-simplified](https://github.com/scriptin/jmdict-simplified)
 (`jmdict-ger-*.json.zip`, JSON, per GitHub-Releases-API immer die neueste
@@ -786,7 +839,10 @@ Satz-Tabelle inkl. Fehlerfälle), `dictionary.py`
 (JMdict-Download/-Index, DeepL-Übersetzung), `gemini_client.py`
 (Satzanalyse, Caching, 429-Backoff, Fehlerfälle, Bild-Transkription),
 `pdf_import.py` (Textlayer-Extraktion, OCR-Fallback für Scans/Bilder,
-Seiten-Deckel, Fehlerfälle), `KanaCard`-Bau sowie das
+Seiten-Deckel, Fehlerfälle), `card_details_for_ids`/`_apply_field_overrides`
+(Felder-manuell-anpassen-Dialog, inkl. defensivem Ignorieren unbekannter
+Feldnamen), `webapp.api_card_detail`/`api_translate` (inkl. Zielsprache aus
+den Einstellungen), `KanaCard`-Bau sowie das
 Auflösen bereits exportierter bzw. manuell als bekannt markierter Subject-/
 Dictionary-IDs, die Wortlisten-Aggregation und die Anki-Notiztypen im
 Web-Frontend (`webapp._already_exported_ids`, `webapp.load_known`/

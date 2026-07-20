@@ -54,6 +54,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deepl_key": "",
     "gemini_key": "",
     "gemini_model": kc.gemini_client.DEFAULT_MODEL,
+    # Zielsprache für DeepL-Übersetzungen (Beispielsätze UND der neue
+    # Felder-Übersetzen-Dialog) – DeepL-Sprachcode, z. B. "DE"/"EN"/"FR".
+    "target_lang": "DE",
     "defaults": {
         "level": 1,
         "types": ["kanji"],
@@ -67,6 +70,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 logger = logging.getLogger(__name__)
+
+# DeepL-Zielsprachen zur Auswahl in den Einstellungen (Teilmenge der von
+# DeepL unterstützten Sprachen – https://developers.deepl.com/docs/resources/supported-languages,
+# nur die "einfachen" Codes ohne Regionalvarianten wie EN-US/PT-BR, die für
+# diesen Anwendungsfall (kurze Vokabel-/Satzübersetzungen) nicht relevant sind).
+_TARGET_LANGS = (
+    "BG", "CS", "DA", "DE", "EL", "EN", "ES", "ET", "FI", "FR", "HU", "ID",
+    "IT", "JA", "KO", "LT", "LV", "NB", "NL", "PL", "PT", "RO", "RU", "SK",
+    "SL", "SV", "TR", "UK", "ZH",
+)
 
 app = Flask(__name__, static_folder=None)
 
@@ -362,6 +375,7 @@ def _build_mixed_deck(p: dict[str, Any]) -> list[Any]:
                 use_cache=p.get("use_cache", True),
                 sample=p.get("sample", False),
                 sentence_overrides=p.get("sentence_overrides"),
+                field_overrides=p.get("field_overrides"),
             )
         )
     if p.get("custom_ids"):
@@ -462,6 +476,8 @@ def api_get_settings() -> Any:
             "gemini_key_hint": _mask(gemini_key),
             "gemini_model": s.get("gemini_model", kc.gemini_client.DEFAULT_MODEL),
             "gemini_models": list(kc.gemini_client.AVAILABLE_MODELS),
+            "target_lang": s.get("target_lang", "DE"),
+            "target_langs": list(_TARGET_LANGS),
             "defaults": s["defaults"],
         }
     )
@@ -480,6 +496,8 @@ def api_post_settings() -> Any:
         s["gemini_key"] = body["gemini_key"].strip()
     if isinstance(body.get("gemini_model"), str) and body["gemini_model"].strip().startswith("gemini-"):
         s["gemini_model"] = body["gemini_model"].strip()
+    if isinstance(body.get("target_lang"), str) and body["target_lang"].strip().upper() in _TARGET_LANGS:
+        s["target_lang"] = body["target_lang"].strip().upper()
     if isinstance(body.get("defaults"), dict):
         s["defaults"] = {**s["defaults"], **body["defaults"]}
     save_settings(s)
@@ -574,6 +592,53 @@ def api_resolve() -> Any:
         return jsonify({"error": str(exc)}), 502
     cards = _mark_exported(cards)
     return jsonify({"cards": cards})
+
+
+@app.post("/api/card-detail")
+def api_card_detail() -> Any:
+    """Volle Karten-Felder (alle Dataclass-Felder) für die gegebenen Subject-
+    IDs liefern – Grundlage für den „Felder manuell anpassen"-Dialog in der
+    Kartentabelle. Die Tabelle selbst (`/api/resolve`) zeigt nur eine
+    Kurzfassung (Zeichen/Bedeutung/Level), zum Bearbeiten braucht das
+    Frontend aber alle Felder (Lesungen, Beispielvokabel/-satz, Merkhilfen …).
+    """
+    body = request.get_json(silent=True) or {}
+    ids = body.get("subject_ids") or []
+    sample = bool(body.get("sample"))
+    try:
+        if not sample:
+            _apply_token_env()
+        details = kc.card_details_for_ids(ids, sample=sample)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Ungültige Eingabe."}), 400
+    except kc.WaniKaniError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"cards": {str(k): v for k, v in details.items()}})
+
+
+@app.post("/api/translate")
+def api_translate() -> Any:
+    """Einen einzelnen Text (z. B. eine WaniKani-Bedeutung/Merkhilfe auf
+    Englisch) per DeepL in die in den Einstellungen hinterlegte Zielsprache
+    übersetzen – für den „Felder manuell anpassen"-Dialog (dortiger
+    🌐-Button). `source_lang` per Default "EN", da WaniKani-Texte englisch
+    sind; für japanische Beispielsätze übergibt das Frontend "JA"."""
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text", "")).strip()
+    if not text:
+        return jsonify({"error": "Kein Text angegeben."}), 400
+    source_lang = str(body.get("source_lang") or "EN").strip().upper()
+    s = load_settings()
+    deepl_key = s.get("deepl_key") or None
+    if not deepl_key:
+        return jsonify({"error": "Kein DeepL-API-Key in den Einstellungen hinterlegt."}), 400
+    target_lang = s.get("target_lang", "DE")
+    translation = kc.dictionary.translate_sentence(
+        text, deepl_key, target_lang=target_lang, source_lang=source_lang,
+    )
+    if translation is None:
+        return jsonify({"error": "Übersetzung fehlgeschlagen (Netzwerk, Quota oder ungültiger Key)."}), 502
+    return jsonify({"translation": translation, "target_lang": target_lang})
 
 
 # ---------- API: Text-Modus (lemmatisieren, annotieren, bekannt markieren) -- #
@@ -917,6 +982,7 @@ def api_render() -> Any:
         return jsonify({"error": "Ungültiges Layout."}), 400
 
     sentence_overrides = body.get("sentence_overrides")
+    field_overrides = body.get("field_overrides")
     params = {
         "subject_ids": [int(i) for i in subject_ids] if subject_ids else [],
         "custom_ids": [str(i) for i in custom_ids] if custom_ids else [],
@@ -930,6 +996,7 @@ def api_render() -> Any:
         "use_cache": not bool(body.get("no_cache", False)),
         "sample": bool(body.get("sample", False)),
         "sentence_overrides": sentence_overrides if isinstance(sentence_overrides, dict) else {},
+        "field_overrides": field_overrides if isinstance(field_overrides, dict) else {},
     }
     n = len(params["custom_ids"]) + len(params["subject_ids"]) + len(params["kana_ids"])
     title = body.get("title") or f"{n} Karten"

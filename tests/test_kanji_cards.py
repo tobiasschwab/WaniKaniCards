@@ -44,6 +44,7 @@ from kanji_cards import (  # noqa: E402
     _split_sentences,
     _is_kana_only,
     _reconcile_gemini_tokens,
+    _load_sample_raw,
 )
 
 import dictionary as dic
@@ -1114,6 +1115,56 @@ def test_resolve_subject_deck_normalizes_string_keyed_overrides():
     vocab_cards = {c.subject_id: c for c in deck if isinstance(c, VocabCard)}
     for sid, override in overrides.items():
         assert vocab_cards[sid].sentence_ja == override["ja"]
+
+
+def test_resolve_subject_deck_applies_field_overrides():
+    """Manuell im Web-Frontend geänderte Felder (Felder-anpassen-Dialog)
+    überschreiben gezielt einzelne Karten-Felder nach dem Bau."""
+    from kanji_cards import resolve_subject_deck
+
+    raw = _load_sample_raw()
+    kanji_id = int(raw["kanji"][0]["id"])
+    deck = resolve_subject_deck(
+        [kanji_id], sample=True,
+        field_overrides={kanji_id: {"meanings": ["Meine eigene Bedeutung"]}},
+    )
+    card = next(c for c in deck if getattr(c, "subject_id", None) == kanji_id)
+    assert card.meanings == ["Meine eigene Bedeutung"]
+
+
+def test_resolve_subject_deck_field_overrides_ignore_unknown_keys():
+    from kanji_cards import resolve_subject_deck
+
+    raw = _load_sample_raw()
+    kanji_id = int(raw["kanji"][0]["id"])
+    # "not_a_real_field" existiert auf keiner Dataclass - darf nicht crashen.
+    deck = resolve_subject_deck(
+        [kanji_id], sample=True,
+        field_overrides={str(kanji_id): {"not_a_real_field": "x", "vocab_meaning": "Neu"}},
+    )
+    card = next(c for c in deck if getattr(c, "subject_id", None) == kanji_id)
+    assert card.vocab_meaning == "Neu"
+    assert not hasattr(card, "not_a_real_field")
+
+
+def test_card_details_for_ids_returns_all_fields_with_kind():
+    from kanji_cards import card_details_for_ids
+
+    raw = _load_sample_raw()
+    kanji_id = int(raw["kanji"][0]["id"])
+    radical_id = int(raw["radicals"][0]["id"])
+    details = card_details_for_ids([kanji_id, radical_id], sample=True)
+    assert details[kanji_id]["kind"] == "Card"
+    assert "meanings" in details[kanji_id] and "onyomi" in details[kanji_id]
+    assert details[radical_id]["kind"] == "RadicalCard"
+    assert "meaning" in details[radical_id]
+
+
+def test_card_details_for_ids_skips_unknown_ids():
+    from kanji_cards import card_details_for_ids
+
+    details = card_details_for_ids([999999999], sample=True)
+    assert details == {}
 
 
 # --------------------------------------------------------------------------- #

@@ -87,6 +87,11 @@
                 </div>
                 <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
               </label>
+              <label class="field" style="margin-top:10px">
+                <span class="label">Zielsprache</span>
+                <select id="targetLang" class="select"></select>
+                <span class="hint">Gilt für alle DeepL-Übersetzungen: Beispielsätze auf Dictionary-Karten <strong>und</strong> den 🌐-Button im „Felder anpassen"-Dialog.</span>
+              </label>
               <div class="row gap">
                 <button id="deeplSave" class="btn primary">Speichern</button>
               </div>
@@ -132,6 +137,22 @@
               <div id="geminiStatus" class="status" style="margin-top:8px"></div>
             </div>
           </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Felder manuell anpassen (Kartentabelle) -->
+    <div id="fieldEditOverlay" class="modal-overlay hidden">
+      <section id="fieldEditPanel" class="modal-panel">
+        <div class="modal-head">
+          <h2 id="fieldEditTitle">Karte bearbeiten</h2>
+          <button id="fieldEditClose" class="icon-btn" title="Schließen">✕</button>
+        </div>
+        <div id="fieldEditBody" class="field-edit-body"></div>
+        <div class="row gap" style="margin-top:14px">
+          <button id="fieldEditSave" class="btn primary">Speichern</button>
+          <button id="fieldEditResetAll" class="btn small">Alles zurücksetzen</button>
+          <span id="fieldEditStatus" class="muted"></span>
         </div>
       </section>
     </div>
@@ -392,7 +413,7 @@
               <th>Typ</th>
               <th>Bedeutung</th>
               <th class="c-lvl">Level</th>
-              <th class="c-act hidden" id="thActions"></th>
+              <th class="c-act" id="thActions"></th>
             </tr>
           </thead>
           <tbody id="tableBody"></tbody>

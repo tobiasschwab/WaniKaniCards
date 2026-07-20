@@ -216,9 +216,12 @@ def translate_sentence(
     api_key: str,
     *,
     target_lang: str = "DE",
+    source_lang: str = "JA",
     session: requests.Session | None = None,
 ) -> str | None:
-    """Satz per DeepL übersetzen (Default: Deutsch, passend zur restlichen App-Sprache).
+    """Text per DeepL übersetzen (Default: Japanisch → Deutsch, passend zur
+    restlichen App-Sprache). `source_lang` lässt sich überschreiben, z. B.
+    "EN" für die (englischen) WaniKani-Texte im Felder-Übersetzen-Dialog.
 
     Gibt bei fehlendem Text/Key, Netzwerkfehler oder unerwarteter Antwort
     `None` zurück statt einer Exception – die Karte wird dann trotzdem
@@ -233,7 +236,7 @@ def translate_sentence(
         resp = session.post(
             url,
             headers={"Authorization": f"DeepL-Auth-Key {api_key}"},
-            data={"text": text, "target_lang": target_lang, "source_lang": "JA"},
+            data={"text": text, "target_lang": target_lang, "source_lang": source_lang},
             timeout=20,
         )
     except requests.RequestException:

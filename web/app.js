@@ -29,6 +29,19 @@ let composeLabels = [];
 // akkumuliert über mehrere "Zur Tabelle"-Klicks im Text-Popup hinweg.
 let sentenceOverrides = {};
 
+// "Felder manuell anpassen"-Dialog (Kartentabelle): Subject-ID (String) →
+// {feldname: neuer_wert, …} – nur tatsächlich geänderte Felder, wird beim
+// Rendern mitgeschickt (siehe doRender()) und serverseitig NACH dem
+// Karten-Bau angewendet (kc._apply_field_overrides()). Bleibt über mehrere
+// Bearbeitungen/Tabellen hinweg bestehen, bis "Tabelle leeren" geklickt wird.
+let fieldOverrides = {};
+// Cache der vollen Original-Karten-Felder je Subject-ID (String), damit ein
+// erneutes Öffnen des Dialogs nicht jedes Mal neu vom Server holt und der
+// "Zurücksetzen"-Button die echten WaniKani-Originalwerte kennt.
+let _cardDetailCache = {};
+let _fieldEditCurrentId = null;
+let _fieldEditCurrentType = null;
+
 // Text-Modus: die zuletzt annotierten Zeilen (für Popup-Lookups und die
 // Bekannt-Prozent-Anzeige, ohne bei jeder Markierung neu vom Server zu holen).
 let textLines = [];
@@ -101,6 +114,25 @@ function _setConnDot(el, name, connected) {
   el.className = "conn-dot " + (connected ? "on" : "off");
   el.title = `${name}: ${connected ? "verbunden" : "nicht verbunden"}`;
 }
+// Nur für die Anzeige im Dropdown – DeepL selbst braucht nur den Code.
+const _LANG_NAMES = {
+  BG: "Bulgarisch", CS: "Tschechisch", DA: "Dänisch", DE: "Deutsch", EL: "Griechisch",
+  EN: "Englisch", ES: "Spanisch", ET: "Estnisch", FI: "Finnisch", FR: "Französisch",
+  HU: "Ungarisch", ID: "Indonesisch", IT: "Italienisch", JA: "Japanisch", KO: "Koreanisch",
+  LT: "Litauisch", LV: "Lettisch", NB: "Norwegisch", NL: "Niederländisch", PL: "Polnisch",
+  PT: "Portugiesisch", RO: "Rumänisch", RU: "Russisch", SK: "Slowakisch", SL: "Slowenisch",
+  SV: "Schwedisch", TR: "Türkisch", UK: "Ukrainisch", ZH: "Chinesisch",
+};
+function _populateTargetLangSelect(codes, current) {
+  const sel = $("#targetLang");
+  sel.innerHTML = "";
+  codes.forEach((code) => {
+    const opt = document.createElement("option");
+    opt.value = code; opt.textContent = `${_LANG_NAMES[code] || code} (${code})`;
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
+}
 function _populateGeminiModelSelect(models) {
   const sel = $("#geminiModel");
   const current = sel.value;
@@ -135,6 +167,7 @@ async function loadSettings() {
   _setConnPill($("#geminiRowPill"), s.gemini_key_set);
   if (s.gemini_models && s.gemini_models.length) { _populateGeminiModelSelect(s.gemini_models); }
   if (s.gemini_model) { _selectGeminiModel(s.gemini_model); }
+  _populateTargetLangSelect(s.target_langs || ["DE"], s.target_lang || "DE");
   const d = s.defaults || {};
   if (d.level) $("#level").value = d.level;
   if (d.types && d.types.length) chipcheckSet("type", d.types);
@@ -176,37 +209,178 @@ async function resolve(body) {
 }
 function showResolveError(m) { const el = $("#resolveError"); el.textContent = "⚠ " + m; el.classList.remove("hidden"); }
 
+// Objekt-Typen, für die "Felder manuell anpassen" verfügbar ist – reine
+// WaniKani-Subjects mit numerischer ID (nicht kana_/manual_-Einträge, die
+// über /api/kanacards bzw. Wortliste eigene Bearbeitungswege haben).
+const _EDITABLE_OBJECT_TYPES = new Set(["kanji", "vocabulary", "radical"]);
+
 function renderTable(list, title, mode) {
   cards = list; tableMode = mode || "subject"; selected.clear();
   $("#tableTitle").textContent = title + ` (${list.length})`;
-  $("#thActions").classList.toggle("hidden", tableMode !== "custom");
   const tb = $("#tableBody"); tb.innerHTML = "";
   for (const c of list) {
     const id = String(c.id);
+    const editable = tableMode !== "custom" && _EDITABLE_OBJECT_TYPES.has(c.object);
     const tr = document.createElement("tr");
     tr.classList.toggle("is-exported", !!c.already_exported);
+    if (fieldOverrides[id]) tr.classList.add("has-field-overrides");
     tr.innerHTML = `
       <td class="c-check"><input type="checkbox" data-id="${escapeHtml(id)}"></td>
       <td class="c-char">${escapeHtml(c.characters || (c.has_image ? "🖼" : "—"))}</td>
       <td><span class="tag-mini ${c.object}">${escapeHtml(c.kind)}</span></td>
-      <td>${escapeHtml(c.meaning)}${c.already_exported ? '<span class="tag-mini exported" title="Bereits exportiert">✓ exportiert</span>' : ""}</td>
+      <td>${escapeHtml(c.meaning)}${c.already_exported ? '<span class="tag-mini exported" title="Bereits exportiert">✓ exportiert</span>' : ""}${fieldOverrides[id] ? '<span class="tag-mini" title="Felder manuell angepasst">✎ angepasst</span>' : ""}</td>
       <td class="c-lvl">${c.level ?? ""}</td>
-      <td class="c-act ${tableMode === "custom" ? "" : "hidden"}"></td>`;
+      <td class="c-act"></td>`;
     const cb = tr.querySelector("input");
     cb.addEventListener("change", () => toggle(id, cb.checked));
     tr.addEventListener("click", (e) => { if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") { cb.checked = !cb.checked; toggle(id, cb.checked); } });
+    const act = tr.querySelector(".c-act");
     if (tableMode === "custom") {
-      const act = tr.querySelector(".c-act");
       const ed = document.createElement("button"); ed.className = "chip-btn"; ed.textContent = "✎"; ed.title = "Bearbeiten";
       ed.onclick = () => editCustom(id);
       const del = document.createElement("button"); del.className = "chip-btn danger"; del.textContent = "✕"; del.title = "Löschen";
       del.onclick = async () => { await api(`/api/customcards/${id}`, { method: "DELETE" }); loadCustoms(); };
       act.append(ed, del);
+    } else if (editable) {
+      const ed = document.createElement("button"); ed.className = "chip-btn"; ed.textContent = "✎"; ed.title = "Felder manuell anpassen";
+      ed.onclick = (e) => { e.stopPropagation(); openFieldEditModal(id, c.object); };
+      act.append(ed);
     }
     tb.append(tr);
   }
   selectDefault();
   $("#tablePanel").classList.remove("hidden");
+}
+
+// ---------- Felder manuell anpassen (Kartentabelle) ----------
+const FIELD_SCHEMAS = {
+  kanji: [
+    { key: "meanings", label: "Bedeutungen", list: true, translatable: true },
+    { key: "onyomi", label: "On'yomi", list: true },
+    { key: "kunyomi", label: "Kun'yomi", list: true },
+    { key: "meaning_mnemonic", label: "Bedeutungs-Merkhilfe", translatable: true },
+    { key: "reading_mnemonic", label: "Lesungs-Merkhilfe", translatable: true },
+    { key: "vocab", label: "Beispielvokabel" },
+    { key: "vocab_reading", label: "Lesung der Beispielvokabel" },
+    { key: "vocab_meaning", label: "Bedeutung der Beispielvokabel", translatable: true },
+    { key: "sentence_ja", label: "Beispielsatz (Japanisch)" },
+    { key: "sentence_en", label: "Beispielsatz-Übersetzung", translatable: true },
+  ],
+  vocabulary: [
+    { key: "readings", label: "Lesungen", list: true },
+    { key: "meanings", label: "Bedeutungen", list: true, translatable: true },
+    { key: "meaning_mnemonic", label: "Bedeutungs-Merkhilfe", translatable: true },
+    { key: "reading_mnemonic", label: "Lesungs-Merkhilfe", translatable: true },
+    { key: "sentence_ja", label: "Beispielsatz (Japanisch)" },
+    { key: "sentence_en", label: "Beispielsatz-Übersetzung", translatable: true },
+  ],
+  radical: [
+    { key: "meaning", label: "Bedeutung", translatable: true },
+    { key: "mnemonic", label: "Merkhilfe", translatable: true },
+  ],
+};
+
+async function openFieldEditModal(id, objectType) {
+  _fieldEditCurrentId = String(id);
+  _fieldEditCurrentType = objectType;
+  $("#fieldEditOverlay").classList.remove("hidden");
+  $("#fieldEditStatus").textContent = "Lade…";
+  $("#fieldEditBody").innerHTML = "";
+  let detail = _cardDetailCache[_fieldEditCurrentId];
+  if (!detail) {
+    try {
+      const r = await api("/api/card-detail", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject_ids: [id], sample: isSample() }),
+      });
+      detail = r.cards[_fieldEditCurrentId];
+    } catch (e) {
+      $("#fieldEditStatus").textContent = ""; toast(e.message, true);
+      $("#fieldEditOverlay").classList.add("hidden");
+      return;
+    }
+    if (detail) _cardDetailCache[_fieldEditCurrentId] = detail;
+  }
+  if (!detail) {
+    $("#fieldEditStatus").textContent = "";
+    toast("Karte nicht gefunden.", true);
+    $("#fieldEditOverlay").classList.add("hidden");
+    return;
+  }
+  $("#fieldEditStatus").textContent = "";
+  $("#fieldEditTitle").textContent = `Bearbeiten: ${detail.kanji || detail.vocab || detail.radical || ""}`;
+  renderFieldEditBody(detail, objectType);
+}
+
+function renderFieldEditBody(detail, objectType) {
+  const schema = FIELD_SCHEMAS[objectType] || [];
+  const overrides = fieldOverrides[_fieldEditCurrentId] || {};
+  const wrap = $("#fieldEditBody");
+  wrap.innerHTML = "";
+  for (const f of schema) {
+    const hasOverride = Object.prototype.hasOwnProperty.call(overrides, f.key);
+    const value = hasOverride ? overrides[f.key] : detail[f.key];
+    const textValue = f.list ? (value || []).join("\n") : (value || "");
+    const row = document.createElement("div");
+    row.className = "field-edit-row" + (hasOverride ? " is-overridden" : "");
+    row.dataset.field = f.key;
+    row.dataset.list = f.list ? "1" : "0";
+    row.innerHTML = `
+      <div class="field-edit-label-row">
+        <span class="label">${escapeHtml(f.label)}</span>
+        <div class="field-edit-actions">
+          ${f.translatable ? '<button type="button" class="chip-btn field-translate" title="Übersetzen (Original bleibt zur Kontrolle erhalten)">🌐 Übersetzen</button>' : ""}
+          <button type="button" class="chip-btn field-reset" title="Zurücksetzen auf WaniKani-Original">↺</button>
+        </div>
+      </div>
+      <textarea rows="${f.list || textValue.length > 60 ? 3 : 1}">${escapeHtml(textValue)}</textarea>`;
+    const ta = row.querySelector("textarea");
+    row.querySelector(".field-reset").onclick = () => {
+      ta.value = f.list ? (detail[f.key] || []).join("\n") : (detail[f.key] || "");
+      row.classList.remove("is-overridden");
+    };
+    const translateBtn = row.querySelector(".field-translate");
+    if (translateBtn) {
+      translateBtn.onclick = async () => {
+        const original = ta.value;
+        if (!original.trim()) return;
+        translateBtn.disabled = true; translateBtn.textContent = "…";
+        try {
+          const r = await api("/api/translate", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: original, source_lang: "EN" }),
+          });
+          // Übersetzung VOR den Original-Text setzen, nicht überschreiben –
+          // so bleibt die Original-WaniKani-Angabe zur Kontrolle sichtbar.
+          ta.value = `${r.translation}\n—\n${original}`;
+          row.classList.add("is-overridden");
+        } catch (e) { toast(e.message, true); }
+        translateBtn.disabled = false; translateBtn.textContent = "🌐 Übersetzen";
+      };
+    }
+    wrap.append(row);
+  }
+}
+
+function saveFieldEdits() {
+  const id = _fieldEditCurrentId;
+  const detail = _cardDetailCache[id];
+  if (!id || !detail) return;
+  const overrides = {};
+  $("#fieldEditBody").querySelectorAll(".field-edit-row").forEach((row) => {
+    const key = row.dataset.field;
+    const isList = row.dataset.list === "1";
+    const raw = row.querySelector("textarea").value;
+    const newValue = isList ? raw.split("\n").map((s) => s.trim()).filter(Boolean) : raw.trim();
+    const original = isList ? (detail[key] || []) : (detail[key] || "");
+    const changed = isList ? JSON.stringify(newValue) !== JSON.stringify(original) : newValue !== original;
+    if (changed) overrides[key] = newValue;
+  });
+  if (Object.keys(overrides).length) fieldOverrides[id] = overrides;
+  else delete fieldOverrides[id];
+  $("#fieldEditOverlay").classList.add("hidden");
+  toast(Object.keys(overrides).length ? "Änderungen gespeichert – wirken beim Erzeugen der Karten." : "Keine Änderungen.");
+  renderTable(cards, $("#tableTitle").textContent.replace(/\s*\(\d+\)$/, ""), tableMode);
 }
 function toggle(id, on) { if (on) selected.add(id); else selected.delete(id); syncChecks(); updateRenderBtn(); }
 function selectAll(on) {
@@ -264,7 +438,7 @@ function appendComposition(newCards, label) {
   renderTable(composeAccum, title, "subject");
 }
 function clearCompose() {
-  composeAccum = []; composeLabels = []; sentenceOverrides = {};
+  composeAccum = []; composeLabels = []; sentenceOverrides = {}; fieldOverrides = {};
   cards = []; selected.clear();
   renderTable([], "Karten", "subject");
 }
@@ -1137,6 +1311,7 @@ async function doRender() {
     body.subject_ids = subjectIds;
     if (kanaIds.length) body.kana_ids = kanaIds;
     if (Object.keys(sentenceOverrides).length) body.sentence_overrides = sentenceOverrides;
+    if (Object.keys(fieldOverrides).length) body.field_overrides = fieldOverrides;
   }
   $("#btnRender").disabled = true;
   $("#progress").classList.remove("hidden"); $("#progressText").textContent = "Wird erzeugt…";
@@ -1240,7 +1415,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#settingsToggle").addEventListener("click", () => $("#settingsOverlay").classList.remove("hidden"));
   $("#settingsClose").addEventListener("click", () => $("#settingsOverlay").classList.add("hidden"));
+  $("#fieldEditClose").addEventListener("click", () => $("#fieldEditOverlay").classList.add("hidden"));
+  $("#fieldEditSave").addEventListener("click", saveFieldEdits);
+  $("#fieldEditResetAll").addEventListener("click", () => {
+    delete fieldOverrides[_fieldEditCurrentId];
+    const detail = _cardDetailCache[_fieldEditCurrentId];
+    if (detail) renderFieldEditBody(detail, _fieldEditCurrentType);
+  });
   $("#settingsOverlay").addEventListener("click", (e) => { if (e.target === $("#settingsOverlay")) $("#settingsOverlay").classList.add("hidden"); });
+  $("#fieldEditOverlay").addEventListener("click", (e) => { if (e.target === $("#fieldEditOverlay")) $("#fieldEditOverlay").classList.add("hidden"); });
   $("#tokenShow").addEventListener("click", () => { const i = $("#tokenInput"); i.type = i.type === "password" ? "text" : "password"; });
   $("#tokenSave").addEventListener("click", async () => {
     try { await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: $("#tokenInput").value }) });
@@ -1259,7 +1442,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#deeplSave").addEventListener("click", async () => {
     const st = $("#deeplStatus");
     try {
-      await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deepl_key: $("#deeplInput").value }) });
+      await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deepl_key: $("#deeplInput").value, target_lang: $("#targetLang").value }) });
       $("#deeplInput").value = ""; await loadSettings(); toast("Gespeichert"); st.textContent = "DeepL-Key gespeichert ✓"; st.className = "status ok";
     } catch (e) { st.textContent = e.message; st.className = "status err"; }
   });

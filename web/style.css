@@ -88,6 +88,18 @@ body {
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .modal-head h2 { margin: 0; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
 
+/* Felder-manuell-anpassen-Dialog (Kartentabelle): pro Karten-Feld eine Zeile
+   mit Label, Eingabe (Text oder mehrzeilig bei Listen-Feldern wie Bedeutungen)
+   und optional einem Übersetzen-Button. */
+#fieldEditPanel { max-width: 640px; }
+.field-edit-body { display: flex; flex-direction: column; gap: 14px; }
+.field-edit-row .field-edit-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.field-edit-row .label { font-size: 13px; font-weight: 600; }
+.field-edit-row textarea, .field-edit-row input[type="text"] { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: inherit; }
+.field-edit-row textarea { min-height: 44px; resize: vertical; line-height: 1.45; }
+.field-edit-row.is-overridden textarea, .field-edit-row.is-overridden input[type="text"] { border-color: var(--accent, #6a8caf); }
+.field-edit-actions { display: flex; align-items: center; gap: 6px; }
+
 /* Einstellungen als Integrations-Liste: eine Zeile pro Anbindung (Status auf
    einen Blick), Key-Feld erst nach dem Aufklappen – statt drei identischer
    Formulare untereinander. */
