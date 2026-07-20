@@ -1,4 +1,6 @@
-"""Tests für webapp.py-Hilfsfunktionen (keine Netzwerk-/Flask-Server-Abhängigkeit)."""
+"""Tests für webapp.py – Endpunkte laufen jetzt pro Nutzer über die Datenbank
+(siehe models.py) statt über dateibasierte JSON-Dateien. `client`/`db_session`/
+`logged_in_user`-Fixtures kommen aus conftest.py."""
 from __future__ import annotations
 
 import sys
@@ -6,39 +8,49 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import models  # noqa: E402
 import webapp  # noqa: E402
+from extensions import db  # noqa: E402
 
 
-def _job(job_id: str, status: str, subject_ids: list[int]) -> dict:
-    return {
-        "id": job_id,
-        "status": status,
-        "params": {"subject_ids": subject_ids},
-        "created_at": "2024-01-01T00:00:00+00:00",
-    }
+# --------------------------------------------------------------------------- #
+# _already_exported_ids / _mark_exported (current_user-Scoping)
+# --------------------------------------------------------------------------- #
 
-
-def test_already_exported_ids_only_counts_done_jobs(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path)
-    webapp.write_job(_job("a", "done", [1, 2, 3]))
-    webapp.write_job(_job("b", "error", [4, 5]))
-    webapp.write_job(_job("c", "queued", [6]))
+def test_already_exported_ids_only_counts_done_jobs(logged_in_user):
+    uid = logged_in_user.id
+    db.session.add(models.Job(id="a", user_id=uid, status="done", params={"subject_ids": [1, 2, 3]}))
+    db.session.add(models.Job(id="b", user_id=uid, status="error", params={"subject_ids": [4, 5]}))
+    db.session.add(models.Job(id="c", user_id=uid, status="queued", params={"subject_ids": [6]}))
+    db.session.commit()
 
     assert webapp._already_exported_ids() == {1, 2, 3}
 
 
-def test_already_exported_ids_ignores_custom_only_jobs(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path)
-    job = _job("a", "done", [])
-    job["params"]["custom_ids"] = ["free1"]
-    webapp.write_job(job)
-
+def test_already_exported_ids_ignores_custom_only_jobs(logged_in_user):
+    db.session.add(models.Job(
+        id="a", user_id=logged_in_user.id, status="done",
+        params={"subject_ids": [], "custom_ids": ["free1"]},
+    ))
+    db.session.commit()
     assert webapp._already_exported_ids() == set()
 
 
-def test_mark_exported_flags_matching_cards(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path)
-    webapp.write_job(_job("a", "done", [1, 2]))
+def test_already_exported_ids_scoped_to_current_user(logged_in_user, db_session):
+    other = models.User(email="other@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    db.session.add(models.Job(id="mine", user_id=logged_in_user.id, status="done", params={"subject_ids": [1]}))
+    db.session.add(models.Job(id="theirs", user_id=other.id, status="done", params={"subject_ids": [2]}))
+    db.session.commit()
+
+    assert webapp._already_exported_ids() == {1}
+
+
+def test_mark_exported_flags_matching_cards(logged_in_user):
+    db.session.add(models.Job(id="a", user_id=logged_in_user.id, status="done", params={"subject_ids": [1, 2]}))
+    db.session.commit()
 
     cards = [{"id": 1}, {"id": 2}, {"id": 3}]
     marked = webapp._mark_exported(cards)
@@ -46,41 +58,44 @@ def test_mark_exported_flags_matching_cards(tmp_path, monkeypatch):
     assert [c["already_exported"] for c in marked] == [True, True, False]
 
 
-def test_mark_exported_empty_history_leaves_everything_unmarked(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path)
+def test_mark_exported_empty_history_leaves_everything_unmarked(logged_in_user):
     cards = [{"id": 1}, {"id": 2}]
     marked = webapp._mark_exported(cards)
     assert [c["already_exported"] for c in marked] == [False, False]
 
 
 # --------------------------------------------------------------------------- #
-# Manuell als "bekannt" markierte Wörter (data/known.json)
+# Manuell als "bekannt" markierte Wörter (KnownWord, pro Nutzer)
 # --------------------------------------------------------------------------- #
 
-def test_load_known_defaults_to_empty_set(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
+def test_load_known_defaults_to_empty_set(logged_in_user):
     assert webapp.load_known() == set()
 
 
-def test_save_and_load_known_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    webapp.save_known({3, 1, 2})
+def test_upsert_and_load_known_roundtrip(logged_in_user):
+    webapp._upsert_known_word("3", {})
+    webapp._upsert_known_word("1", {})
+    webapp._upsert_known_word("2", {})
     assert webapp.load_known() == {1, 2, 3}
 
 
-def test_load_known_ignores_corrupt_file(tmp_path, monkeypatch):
-    known_file = tmp_path / "known.json"
-    known_file.write_text("not json", encoding="utf-8")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", known_file)
-    assert webapp.load_known() == set()
-
-
-def test_known_ids_support_mixed_int_and_string(tmp_path, monkeypatch):
-    """WaniKani-Subject-IDs (int) und Dictionary-Wörter (kana_… str) landen
-    in derselben Datei – beide bedeuten „bekannt"."""
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    webapp.save_known({42, "kana_abc123"})
+def test_known_ids_support_mixed_int_and_string(logged_in_user):
+    """WaniKani-Subject-IDs (int) und Dictionary-Wörter (kana_… str) landen in
+    derselben Tabelle – beide bedeuten „bekannt"."""
+    webapp._upsert_known_word("42", {})
+    webapp._upsert_known_word("kana_abc123", {})
     assert webapp.load_known() == {42, "kana_abc123"}
+
+
+def test_known_words_scoped_to_current_user(logged_in_user, db_session):
+    other = models.User(email="other2@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    db.session.add(models.KnownWord(user_id=other.id, word_id="99"))
+    db.session.commit()
+
+    assert webapp.load_known() == set()  # gehört einem anderen Nutzer
 
 
 def test_coerce_known_id_digit_string_becomes_int():
@@ -98,46 +113,55 @@ def test_coerce_known_id_kana_id_stays_string():
 # Abhängigkeit)
 # --------------------------------------------------------------------------- #
 
-def test_api_mark_and_unmark_known(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    client = webapp.app.test_client()
+def test_api_endpoints_require_login(client):
+    """Stichprobe: ohne Session liefern die zentralen Endpunkte 401 statt
+    Daten preiszugeben (siehe login_manager.unauthorized_handler)."""
+    anon = webapp.app.test_client()
+    for method, path in [
+        ("get", "/api/config"), ("get", "/api/settings"), ("post", "/api/resolve"),
+        ("get", "/api/wortliste"), ("get", "/api/customcards"), ("get", "/api/kanacards"),
+        ("get", "/api/jobs"),
+    ]:
+        r = getattr(anon, method)(path)
+        assert r.status_code == 401, f"{method.upper()} {path} sollte 401 liefern"
 
+
+def test_api_mark_and_unmark_known(client):
     r = client.post("/api/known/42")
     assert r.status_code == 200
     assert r.get_json() == {"ok": True, "id": 42, "known": True}
-    assert webapp.load_known() == {42}
+    assert models.KnownWord.query.filter_by(user_id=client.test_user_id, word_id="42").count() == 1
 
     r = client.delete("/api/known/42")
     assert r.status_code == 200
     assert r.get_json() == {"ok": True, "id": 42, "known": False}
-    assert webapp.load_known() == set()
+    assert models.KnownWord.query.filter_by(user_id=client.test_user_id, word_id="42").count() == 0
 
 
-def test_api_mark_known_persists_metadata_for_wortliste(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    client = webapp.app.test_client()
-
+def test_api_mark_known_persists_metadata_for_wortliste(client):
     r = client.post(
         "/api/known/kana_abc123",
         json={"characters": "しあい", "meaning": "match; game", "kind": "Dict", "source": "dictionary"},
     )
     assert r.status_code == 200
-    meta = webapp.load_known_meta()
-    assert meta["kana_abc123"]["characters"] == "しあい"
-    assert meta["kana_abc123"]["meaning"] == "match; game"
+    row = models.KnownWord.query.filter_by(user_id=client.test_user_id, word_id="kana_abc123").first()
+    assert row.characters == "しあい"
+    assert row.meaning == "match; game"
 
     client.delete("/api/known/kana_abc123")
-    assert webapp.load_known_meta() == {}
+    assert models.KnownWord.query.filter_by(user_id=client.test_user_id, word_id="kana_abc123").first() is None
 
 
-def test_api_text_annotate_returns_lines_and_stats(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    (tmp_path / "jobs").mkdir()
-    client = webapp.app.test_client()
+def test_api_known_words_isolated_between_users(client, db_session):
+    client.post("/api/known/42")
 
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "other3@example.com", "password": "supersecret123"})
+    r = other.get("/api/wortliste?sample=1")
+    assert not any(e["id"] == 42 for e in r.get_json()["entries"])
+
+
+def test_api_text_annotate_returns_lines_and_stats(client):
     r = client.post(
         "/api/text-annotate",
         json={"text": "大きい山に人が一人います。", "sample": True},
@@ -153,12 +177,7 @@ def test_api_text_annotate_returns_lines_and_stats(tmp_path, monkeypatch):
     assert data["stats"]["percent"] == 0.0
 
 
-def test_api_text_annotate_marks_manually_known_words(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    (tmp_path / "jobs").mkdir()
-    client = webapp.app.test_client()
-
+def test_api_text_annotate_marks_manually_known_words(client):
     first = client.post(
         "/api/text-annotate", json={"text": "大きい", "sample": True}
     ).get_json()
@@ -175,16 +194,10 @@ def test_api_text_annotate_marks_manually_known_words(tmp_path, monkeypatch):
     assert second["stats"]["percent"] == 100.0
 
 
-def test_api_text_annotate_classifies_dictionary_words(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
+def test_api_text_annotate_classifies_dictionary_words(client, monkeypatch):
     import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
 
-    client = webapp.app.test_client()
     r = client.post("/api/text-annotate", json={"text": "しあいがはじまりました。", "sample": True})
     assert r.status_code == 200
     data = r.get_json()
@@ -196,17 +209,10 @@ def test_api_text_annotate_classifies_dictionary_words(tmp_path, monkeypatch):
     assert words[0]["ready"] is False
 
 
-def test_api_text_annotate_ready_true_when_dictionary_card_already_created(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
+def test_api_text_annotate_ready_true_when_dictionary_card_already_created(client, monkeypatch):
     import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
 
-    client = webapp.app.test_client()
     first = client.post("/api/text-annotate", json={"text": "しあいがはじまりました。", "sample": True}).get_json()
     word = next(s for line in first["lines"] for s in line if s["type"] == "word")
     client.post("/api/kanacards", json={"word": "しあい"})
@@ -220,24 +226,13 @@ def test_api_text_annotate_ready_true_when_dictionary_card_already_created(tmp_p
     assert word2["known"] is True
 
 
-def test_api_text_annotate_ai_without_key_returns_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    (tmp_path / "jobs").mkdir()
-    client = webapp.app.test_client()
-
+def test_api_text_annotate_ai_without_key_returns_error(client):
     r = client.post("/api/text-annotate-ai", json={"text": "大きい山です。", "sample": True})
     assert r.status_code == 400
     assert "Gemini" in r.get_json()["error"]
 
 
-def test_api_text_annotate_ai_passes_settings_key_and_model(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    (tmp_path / "jobs").mkdir()
-    client = webapp.app.test_client()
+def test_api_text_annotate_ai_passes_settings_key_and_model(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey", "gemini_model": "gemini-pro-latest"})
 
     seen = {}
@@ -256,16 +251,11 @@ def test_api_text_annotate_ai_passes_settings_key_and_model(tmp_path, monkeypatc
     assert seen["gemini_model"] == "gemini-pro-latest"
 
 
-def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(tmp_path, monkeypatch):
+def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(client, monkeypatch):
     # Modelle werden dynamisch bei Google abgefragt (nicht mehr hart codiert) ->
     # jeder gespeicherte "gemini-*"-Name wird 1:1 durchgereicht, auch wenn er
     # nicht in der kleinen AVAILABLE_MODELS-Fallback-Liste steht.
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    (tmp_path / "jobs").mkdir()
-    client = webapp.app.test_client()
-    webapp.save_settings({**webapp.load_settings(), "gemini_key": "mykey", "gemini_model": "gemini-3-pro-preview"})
+    client.post("/api/settings", json={"gemini_key": "mykey", "gemini_model": "gemini-3-pro-preview"})
 
     seen = {}
 
@@ -281,14 +271,7 @@ def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(tmp_path, monk
     assert seen["gemini_model"] == "gemini-3-pro-preview"
 
 
-def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
+def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
     import kanji_cards as kc
@@ -323,10 +306,11 @@ def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(tmp_path, 
     assert seg2["status"] == "known"
 
 
-def test_api_settings_get_set_gemini_key_and_model(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+# --------------------------------------------------------------------------- #
+# Einstellungen (UserSettings, verschlüsselte Secrets)
+# --------------------------------------------------------------------------- #
 
+def test_api_settings_get_set_gemini_key_and_model(client):
     r0 = client.get("/api/settings").get_json()
     assert r0["gemini_key_set"] is False
     assert r0["gemini_model"] == "gemini-flash-latest"
@@ -338,10 +322,16 @@ def test_api_settings_get_set_gemini_key_and_model(tmp_path, monkeypatch):
     assert r1["gemini_model"] == "gemini-pro-latest"
 
 
-def test_api_settings_get_set_target_lang(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_settings_secrets_stored_encrypted_not_plaintext(client):
+    client.post("/api/settings", json={"token": "supersecrettoken", "deepl_key": "mydeeplkey"})
+    row = models.UserSettings.query.filter_by(user_id=client.test_user_id).first()
+    assert row.wanikani_token_enc is not None
+    assert "supersecrettoken" not in row.wanikani_token_enc
+    assert row.deepl_key_enc is not None
+    assert "mydeeplkey" not in row.deepl_key_enc
 
+
+def test_api_settings_get_set_target_lang(client):
     r0 = client.get("/api/settings").get_json()
     assert r0["target_lang"] == "DE"
     assert "EN" in r0["target_langs"]
@@ -351,25 +341,34 @@ def test_api_settings_get_set_target_lang(tmp_path, monkeypatch):
     assert r1["target_lang"] == "FR"
 
 
-def test_api_settings_rejects_unknown_target_lang(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_settings_rejects_unknown_target_lang(client):
     client.post("/api/settings", json={"target_lang": "XX"})
     r = client.get("/api/settings").get_json()
     assert r["target_lang"] == "DE"  # ungültiger Wert wird ignoriert, Default bleibt
 
 
-def test_api_gemini_models_requires_key(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_settings_isolated_between_users(client, db_session):
+    client.post("/api/settings", json={"gemini_model": "gemini-pro-latest"})
+
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "other4@example.com", "password": "supersecret123"})
+    r = other.get("/api/settings").get_json()
+    assert r["gemini_model"] == "gemini-flash-latest"  # unverändert, eigener Datensatz
+
+
+def test_api_settings_post_ignores_unknown_gemini_model(client):
+    client.post("/api/settings", json={"gemini_model": "not-a-real-model"})
+    r = client.get("/api/settings").get_json()
+    assert r["gemini_model"] == "gemini-flash-latest"  # ungültiger Wert wird ignoriert
+
+
+def test_api_gemini_models_requires_key(client):
     r = client.post("/api/gemini/models", json={})
     assert r.status_code == 400
     assert "Key" in r.get_json()["error"]
 
 
-def test_api_gemini_models_uses_stored_key_when_none_provided(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_models_uses_stored_key_when_none_provided(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "storedkey"})
 
     seen = {}
@@ -389,9 +388,7 @@ def test_api_gemini_models_uses_stored_key_when_none_provided(tmp_path, monkeypa
     assert data["default"] == kc.gemini_client.DEFAULT_MODEL
 
 
-def test_api_gemini_models_prefers_explicit_key_over_stored(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_models_prefers_explicit_key_over_stored(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "storedkey"})
 
     seen = {}
@@ -408,10 +405,7 @@ def test_api_gemini_models_prefers_explicit_key_over_stored(tmp_path, monkeypatc
     assert seen["key"] == "explicitkey"
 
 
-def test_api_gemini_models_returns_502_on_invalid_key(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
-
+def test_api_gemini_models_returns_502_on_invalid_key(client, monkeypatch):
     import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "list_models", lambda key, **kw: None)
 
@@ -419,10 +413,7 @@ def test_api_gemini_models_returns_502_on_invalid_key(tmp_path, monkeypatch):
     assert r.status_code == 502
 
 
-def test_api_gemini_models_returns_502_on_empty_result(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
-
+def test_api_gemini_models_returns_502_on_empty_result(client, monkeypatch):
     import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "list_models", lambda key, **kw: [])
 
@@ -430,24 +421,18 @@ def test_api_gemini_models_returns_502_on_empty_result(tmp_path, monkeypatch):
     assert r.status_code == 502
 
 
-def test_api_gemini_tts_requires_text(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_tts_requires_text(client):
     r = client.post("/api/gemini/tts", json={})
     assert r.status_code == 400
 
 
-def test_api_gemini_tts_requires_stored_key(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_tts_requires_stored_key(client):
     r = client.post("/api/gemini/tts", json={"text": "大きい山です。"})
     assert r.status_code == 400
     assert "Gemini" in r.get_json()["error"]
 
 
-def test_api_gemini_tts_returns_data_uri(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_tts_returns_data_uri(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
     import kanji_cards as kc
@@ -458,9 +443,7 @@ def test_api_gemini_tts_returns_data_uri(tmp_path, monkeypatch):
     assert r.get_json()["audio_data_uri"].startswith("data:audio/wav;base64,")
 
 
-def test_api_gemini_tts_returns_502_on_synthesis_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_tts_returns_502_on_synthesis_failure(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
     import kanji_cards as kc
@@ -470,24 +453,18 @@ def test_api_gemini_tts_returns_502_on_synthesis_failure(tmp_path, monkeypatch):
     assert r.status_code == 502
 
 
-def test_api_gemini_generate_image_requires_word(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_generate_image_requires_word(client):
     r = client.post("/api/gemini/generate-image", json={})
     assert r.status_code == 400
 
 
-def test_api_gemini_generate_image_requires_stored_key(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_generate_image_requires_stored_key(client):
     r = client.post("/api/gemini/generate-image", json={"word": "家", "meaning": "Haus"})
     assert r.status_code == 400
     assert "Gemini" in r.get_json()["error"]
 
 
-def test_api_gemini_generate_image_returns_data_uri(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_generate_image_returns_data_uri(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
     import kanji_cards as kc
@@ -498,9 +475,7 @@ def test_api_gemini_generate_image_returns_data_uri(tmp_path, monkeypatch):
     assert r.get_json()["image_data_uri"].startswith("data:image/png;base64,")
 
 
-def test_api_gemini_generate_image_returns_502_on_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_gemini_generate_image_returns_502_on_failure(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
     import kanji_cards as kc
@@ -510,42 +485,25 @@ def test_api_gemini_generate_image_returns_502_on_failure(tmp_path, monkeypatch)
     assert r.status_code == 502
 
 
-def test_api_create_kanacard_ai_stores_sentence_audio_url(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
+# --------------------------------------------------------------------------- #
+# Dictionary-Karten (KanaCard) – CRUD über /api/kanacards
+# --------------------------------------------------------------------------- #
 
+def test_api_create_kanacard_ai_stores_sentence_audio_url(client):
     r = client.post("/api/kanacards", json={
         "word": "入る", "source": "ai", "meaning": "hineingehen", "reading": "はいる",
         "sentence": "高校に入りました。", "sentence_audio_url": "data:audio/wav;base64,AAAA",
     })
     assert r.status_code == 200
     kid = r.get_json()["id"]
-    stored = webapp.read_kana(kid)
+    stored = webapp.read_kana_for_user(client.test_user_id, kid)
     assert stored["sentence_audio_url"] == "data:audio/wav;base64,AAAA"
 
 
-def test_api_settings_post_ignores_unknown_gemini_model(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
-    client.post("/api/settings", json={"gemini_model": "not-a-real-model"})
-    r = client.get("/api/settings").get_json()
-    assert r["gemini_model"] == "gemini-flash-latest"  # ungültiger Wert wird ignoriert
-
-
-# --------------------------------------------------------------------------- #
-# Dictionary-Karten (kanacards/) – CRUD über /api/kanacards
-# --------------------------------------------------------------------------- #
-
-def test_api_create_kanacard_persists_and_returns_descriptor(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "kanacards").mkdir()
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+def test_api_create_kanacard_persists_and_returns_descriptor(client, monkeypatch):
     import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
 
-    client = webapp.app.test_client()
     r = client.post("/api/kanacards", json={"word": "しあい", "sentence": "しあいがはじまりました。"})
     assert r.status_code == 200
     desc = r.get_json()
@@ -553,40 +511,29 @@ def test_api_create_kanacard_persists_and_returns_descriptor(tmp_path, monkeypat
     assert desc["meaning"] == "match; game"
     assert desc["kind"] == "Dict"
 
-    stored = webapp.read_kana(desc["id"])
+    stored = webapp.read_kana_for_user(client.test_user_id, desc["id"])
     assert stored["word"] == "しあい"
     assert stored["kanji_hint"] == "試合"
     assert stored["sentence_ja"] == "しあいがはじまりました。"
 
 
-def test_api_create_kanacard_404_when_not_in_dictionary(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "kanacards").mkdir()
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+def test_api_create_kanacard_404_when_not_in_dictionary(client, monkeypatch):
     import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {})
 
-    client = webapp.app.test_client()
     r = client.post("/api/kanacards", json={"word": "ぜんぜんちがう"})
     assert r.status_code == 404
 
 
-def test_api_create_kanacard_requires_word(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
+def test_api_create_kanacard_requires_word(client):
     r = client.post("/api/kanacards", json={})
     assert r.status_code == 400
 
 
-def test_api_kanacards_list_and_delete(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "kanacards").mkdir()
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
+def test_api_kanacards_list_and_delete(client, monkeypatch):
     import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
 
-    client = webapp.app.test_client()
     created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
 
     listed = client.get("/api/kanacards").get_json()
@@ -594,9 +541,84 @@ def test_api_kanacards_list_and_delete(tmp_path, monkeypatch):
 
     r = client.delete(f"/api/kanacards/{created['id']}")
     assert r.status_code == 200
-    assert webapp.read_kana(created["id"]) is None
+    assert webapp.read_kana_for_user(client.test_user_id, created["id"]) is None
 
     assert client.delete(f"/api/kanacards/{created['id']}").status_code == 404
+
+
+def test_api_kanacards_isolated_between_users(client, db_session, monkeypatch):
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
+    created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
+
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "other5@example.com", "password": "supersecret123"})
+    assert other.get(f"/api/customcards/{created['id']}").status_code == 404
+    assert other.get("/api/kanacards").get_json() == []
+    assert other.delete(f"/api/kanacards/{created['id']}").status_code == 404
+
+
+def test_api_kanacards_same_word_different_users_no_collision(client, db_session, monkeypatch):
+    """Zwei Nutzer legen dieselbe Vokabel als Karte an - der zusammengesetzte
+    Primärschlüssel (user_id, id) in KanaCard verhindert, dass sich die
+    beiden gegenseitig überschreiben (siehe models.KanaCard-Docstring)."""
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {})
+
+    r1 = client.post("/api/kanacards", json={"word": "テスト", "source": "ai", "meaning": "Alice meaning"})
+    assert r1.status_code == 200
+    kid = r1.get_json()["id"]
+
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "other6@example.com", "password": "supersecret123"})
+    r2 = other.post("/api/kanacards", json={"word": "テスト", "source": "ai", "meaning": "Bob meaning"})
+    assert r2.status_code == 200
+    assert r2.get_json()["id"] == kid  # gleicher Hash, da wortbasiert
+
+    assert client.get("/api/kanacards").get_json()[0]["meaning"] == "Alice meaning"
+    assert other.get("/api/kanacards").get_json()[0]["meaning"] == "Bob meaning"
+
+
+# --------------------------------------------------------------------------- #
+# Eigene Karten (CustomCard) – CRUD über /api/customcards
+# --------------------------------------------------------------------------- #
+
+def test_api_customcard_create_read_update_delete(client):
+    created = client.post("/api/customcards", json={"front_html": "<b>x</b>", "back_html": "y", "tags": ["Lv 1"]}).get_json()
+    cid = created["id"]
+
+    fetched = client.get(f"/api/customcards/{cid}").get_json()
+    assert fetched["front_html"] == "<b>x</b>"
+
+    updated = client.post("/api/customcards", json={"id": cid, "front_html": "<b>neu</b>", "back_html": "y", "tags": []}).get_json()
+    assert updated["front_html"] == "<b>neu</b>"
+
+    r = client.delete(f"/api/customcards/{cid}")
+    assert r.status_code == 200
+    assert client.get(f"/api/customcards/{cid}").status_code == 404
+
+
+def test_api_customcard_edit_rejects_foreign_id(client, db_session):
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "other7@example.com", "password": "supersecret123"})
+    foreign = other.post("/api/customcards", json={"front_html": "foreign", "back_html": "y", "tags": []}).get_json()
+
+    r = client.post("/api/customcards", json={"id": foreign["id"], "front_html": "hijacked", "back_html": "y", "tags": []})
+    assert r.status_code == 404
+    # Fremde Karte bleibt unverändert.
+    assert other.get(f"/api/customcards/{foreign['id']}").get_json()["front_html"] == "foreign"
+
+
+def test_api_customcard_isolated_between_users(client, db_session):
+    created = client.post("/api/customcards", json={"front_html": "mine", "back_html": "y", "tags": []}).get_json()
+
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "other8@example.com", "password": "supersecret123"})
+    assert other.get(f"/api/customcards/{created['id']}").status_code == 404
+    assert other.get("/api/customcards").get_json() == []
+    assert other.delete(f"/api/customcards/{created['id']}").status_code == 404
+    # Karte existiert für den Eigentümer weiterhin.
+    assert client.get(f"/api/customcards/{created['id']}").status_code == 200
 
 
 # --------------------------------------------------------------------------- #
@@ -604,17 +626,13 @@ def test_api_kanacards_list_and_delete(tmp_path, monkeypatch):
 # rein manuelle Einträge), filter-/entfernbar über /api/wortliste
 # --------------------------------------------------------------------------- #
 
-def test_api_wortliste_combines_wanikani_dictionary_and_manual(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
-
-    webapp.write_job(_job("a", "done", [2467]))  # 一 (Sample-Daten) – über Export bekannt
-    webapp.write_kana({"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"], "updated_at": "x"})
+def test_api_wortliste_combines_wanikani_dictionary_and_manual(client):
+    db.session.add(models.Job(id="a", user_id=client.test_user_id, status="done", params={"subject_ids": [2467]}))
+    db.session.commit()
+    webapp.write_kana(
+        {"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"]},
+        user_id=client.test_user_id,
+    )
     client.post("/api/wortliste", json={"characters": "genki", "meaning": "gesund/munter"})
 
     r = client.get("/api/wortliste?sample=1")
@@ -640,21 +658,16 @@ def test_api_wortliste_combines_wanikani_dictionary_and_manual(tmp_path, monkeyp
     assert man["removable"] is True
 
 
-def test_api_wortliste_ai_sourced_entry_shows_ki_kind_and_sentence_context(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
-
-    webapp.write_kana({
-        "id": "aikana_x", "word": "入る", "reading": "はいる", "meaning": "hineingehen",
-        "source": "ai", "tags": ["KI"], "sentence_ja": "高校に入りました。",
-        "sentence_translation": "Ich bin in die Oberschule eingetreten.",
-        "sentence_audio_url": "data:audio/wav;base64,AAAA", "updated_at": "x",
-    })
+def test_api_wortliste_ai_sourced_entry_shows_ki_kind_and_sentence_context(client):
+    webapp.write_kana(
+        {
+            "id": "aikana_x", "word": "入る", "reading": "はいる", "meaning": "hineingehen",
+            "source": "ai", "tags": ["KI"], "sentence_ja": "高校に入りました。",
+            "sentence_translation": "Ich bin in die Oberschule eingetreten.",
+            "sentence_audio_url": "data:audio/wav;base64,AAAA",
+        },
+        user_id=client.test_user_id,
+    )
 
     r = client.get("/api/wortliste?sample=1")
     data = r.get_json()
@@ -667,15 +680,7 @@ def test_api_wortliste_ai_sourced_entry_shows_ki_kind_and_sentence_context(tmp_p
     assert entry["sentence_audio_url"] == "data:audio/wav;base64,AAAA"
 
 
-def test_api_wortliste_add_manual_then_remove(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
-
+def test_api_wortliste_add_manual_then_remove(client):
     entry = client.post("/api/wortliste", json={"characters": "genki", "meaning": "gesund"}).get_json()
     wid = entry["id"]
     assert wid.startswith("manual_")
@@ -688,23 +693,12 @@ def test_api_wortliste_add_manual_then_remove(tmp_path, monkeypatch):
     assert not any(e["id"] == wid for e in listed2["entries"])
 
 
-def test_api_wortliste_add_manual_requires_characters(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    client = webapp.app.test_client()
+def test_api_wortliste_add_manual_requires_characters(client):
     r = client.post("/api/wortliste", json={})
     assert r.status_code == 400
 
 
-def test_api_wortliste_manually_known_wanikani_word_is_removable(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "KNOWN_FILE", tmp_path / "known.json")
-    monkeypatch.setattr(webapp, "KNOWN_META_FILE", tmp_path / "known_meta.json")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "kanacards").mkdir()
-    client = webapp.app.test_client()
-
+def test_api_wortliste_manually_known_wanikani_word_is_removable(client):
     client.post(
         "/api/known/2467",
         json={"characters": "一", "meaning": "one", "kind": "Kanji", "level": 1, "source": "wanikani"},
@@ -720,14 +714,10 @@ def test_api_wortliste_manually_known_wanikani_word_is_removable(tmp_path, monke
 # _build_mixed_deck: WaniKani + Custom + Dictionary in einem Export kombinieren
 # --------------------------------------------------------------------------- #
 
-def test_build_mixed_deck_combines_all_three_sources(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "CUSTOM_DIR", tmp_path / "customcards")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "customcards").mkdir()
-    (tmp_path / "kanacards").mkdir()
-
-    webapp.write_custom({"id": "free1", "front_html": "<b>x</b>", "back_html": "y", "tags": []})
-    webapp.write_kana({"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"]})
+def test_build_mixed_deck_combines_all_three_sources(logged_in_user):
+    uid = logged_in_user.id
+    webapp.write_custom({"id": "free1", "front_html": "<b>x</b>", "back_html": "y", "tags": []}, user_id=uid)
+    webapp.write_kana({"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"]}, user_id=uid)
 
     deck = webapp._build_mixed_deck(
         {
@@ -735,43 +725,54 @@ def test_build_mixed_deck_combines_all_three_sources(tmp_path, monkeypatch):
             "custom_ids": ["free1"],
             "kana_ids": ["kana_x"],
             "sample": True,
-        }
+        },
+        uid,
     )
     kinds = {type(c).__name__ for c in deck}
     assert kinds == {"VocabCard", "CustomCard", "KanaCard"}
     assert len(deck) == 3
 
 
-def test_build_mixed_deck_empty_params_returns_empty_deck():
-    assert webapp._build_mixed_deck({}) == []
+def test_build_mixed_deck_empty_params_returns_empty_deck(logged_in_user):
+    assert webapp._build_mixed_deck({}, logged_in_user.id) == []
 
 
-def test_build_mixed_deck_skips_missing_custom_or_kana_ids(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "CUSTOM_DIR", tmp_path / "customcards")
-    monkeypatch.setattr(webapp, "KANA_DIR", tmp_path / "kanacards")
-    (tmp_path / "customcards").mkdir()
-    (tmp_path / "kanacards").mkdir()
-    deck = webapp._build_mixed_deck({"custom_ids": ["missing"], "kana_ids": ["missing"]})
+def test_build_mixed_deck_skips_missing_custom_or_kana_ids(logged_in_user):
+    deck = webapp._build_mixed_deck({"custom_ids": ["missing"], "kana_ids": ["missing"]}, logged_in_user.id)
     assert deck == []
 
 
-def test_build_mixed_deck_applies_field_overrides():
+def test_build_mixed_deck_applies_field_overrides(logged_in_user):
     deck = webapp._build_mixed_deck(
         {
             "subject_ids": [2467],  # 一 (Vokabel, Sample-Daten)
             "sample": True,
             "field_overrides": {"2467": {"meanings": ["Eigene Bedeutung"]}},
-        }
+        },
+        logged_in_user.id,
     )
     assert deck[0].meanings == ["Eigene Bedeutung"]
 
 
-def test_api_render_stores_field_overrides_in_job_params(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "JOBS_DIR", tmp_path / "jobs")
-    monkeypatch.setattr(webapp, "OUTPUT_DIR", tmp_path / "output")
-    (tmp_path / "jobs").mkdir()
-    (tmp_path / "output").mkdir()
-    client = webapp.app.test_client()
+def test_build_mixed_deck_only_sees_own_custom_and_kana_cards(client, db_session):
+    """`_build_mixed_deck` bekommt einen expliziten `user_id` - eine fremde
+    custom_id/kana_id wird dadurch NICHT gefunden (IDOR-Schutz), selbst wenn
+    sie existiert (siehe api_render()-Validierung, die das vorher abfängt)."""
+    other = models.User(email="deckowner@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    webapp.write_custom({"id": "theirs", "front_html": "x", "back_html": "y", "tags": []}, user_id=other.id)
+
+    deck = webapp._build_mixed_deck({"custom_ids": ["theirs"]}, client.test_user_id)
+    assert deck == []
+
+
+# --------------------------------------------------------------------------- #
+# /api/render, Jobs (Ownership-Checks, IDOR-Schutz)
+# --------------------------------------------------------------------------- #
+
+def test_api_render_stores_field_overrides_in_job_params(client):
     r = client.post(
         "/api/render",
         json={
@@ -783,14 +784,66 @@ def test_api_render_stores_field_overrides_in_job_params(tmp_path, monkeypatch):
     job_id = r.get_json()["id"]
     job = webapp.read_job(job_id)
     assert job["params"]["field_overrides"] == {"2467": {"meanings": ["Eigene Bedeutung"]}}
+    assert job["user_id"] == client.test_user_id
+
+
+def test_api_render_rejects_foreign_custom_id(client, db_session):
+    other = models.User(email="rendertheirs@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    webapp.write_custom({"id": "theirs", "front_html": "x", "back_html": "y", "tags": []}, user_id=other.id)
+
+    r = client.post("/api/render", json={"custom_ids": ["theirs"], "sample": True, "format": "pdf"})
+    assert r.status_code == 404
+    assert models.Job.query.count() == 0  # kein Job angelegt
+
+
+def test_api_render_rejects_foreign_kana_id(client, db_session):
+    other = models.User(email="renderkana@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    webapp.write_kana({"id": "kana_theirs", "word": "x", "meaning": "y", "tags": []}, user_id=other.id)
+
+    r = client.post("/api/render", json={"kana_ids": ["kana_theirs"], "sample": True, "format": "pdf"})
+    assert r.status_code == 404
+    assert models.Job.query.count() == 0
+
+
+def test_api_render_requires_at_least_one_card(client):
+    r = client.post("/api/render", json={"sample": True, "format": "pdf"})
+    assert r.status_code == 400
+
+
+def test_api_jobs_isolated_between_users(client, db_session):
+    r = client.post("/api/render", json={"subject_ids": [2467], "sample": True, "format": "pdf"})
+    job_id = r.get_json()["id"]
+
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "jobsother@example.com", "password": "supersecret123"})
+    assert other.get(f"/api/jobs/{job_id}").status_code == 404
+    assert other.delete(f"/api/jobs/{job_id}").status_code == 404
+    assert other.get(f"/api/jobs/{job_id}/pdf").status_code == 404
+    assert other.get(f"/api/jobs/{job_id}/apkg").status_code == 404
+    assert other.get("/api/jobs").get_json() == []
+
+    # Eigentümer selbst sieht den Job weiterhin.
+    assert client.get(f"/api/jobs/{job_id}").status_code == 200
+
+
+def test_api_delete_job_removes_own_job(client):
+    r = client.post("/api/render", json={"subject_ids": [2467], "sample": True, "format": "pdf"})
+    job_id = r.get_json()["id"]
+    assert client.delete(f"/api/jobs/{job_id}").status_code == 200
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
 
 
 # --------------------------------------------------------------------------- #
 # /api/card-detail, /api/translate
 # --------------------------------------------------------------------------- #
 
-def test_api_card_detail_returns_full_fields_for_kanji():
-    client = webapp.app.test_client()
+def test_api_card_detail_returns_full_fields_for_kanji(client):
     r = client.post("/api/card-detail", json={"subject_ids": [440], "sample": True})  # 一 (Kanji)
     assert r.status_code == 200
     data = r.get_json()["cards"]
@@ -799,33 +852,28 @@ def test_api_card_detail_returns_full_fields_for_kanji():
     assert "meanings" in data["440"] and "onyomi" in data["440"]
 
 
-def test_api_card_detail_skips_unknown_ids():
-    client = webapp.app.test_client()
+def test_api_card_detail_skips_unknown_ids(client):
     r = client.post("/api/card-detail", json={"subject_ids": [999999999], "sample": True})
     assert r.status_code == 200
     assert r.get_json()["cards"] == {}
 
 
-def test_api_translate_requires_deepl_key(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_translate_requires_deepl_key(client):
     r = client.post("/api/translate", json={"text": "wing"})
     assert r.status_code == 400
     assert "DeepL" in r.get_json()["error"]
 
 
-def test_api_translate_requires_text():
-    client = webapp.app.test_client()
+def test_api_translate_requires_text(client):
     r = client.post("/api/translate", json={"text": ""})
     assert r.status_code == 400
 
 
-def test_api_translate_uses_target_lang_and_source_lang(tmp_path, monkeypatch):
-    monkeypatch.setattr(webapp, "SETTINGS_FILE", tmp_path / "settings.json")
-    client = webapp.app.test_client()
+def test_api_translate_uses_target_lang_and_source_lang(client, monkeypatch):
     client.post("/api/settings", json={"deepl_key": "mykey:fx", "target_lang": "FR"})
 
     seen = {}
+
     def fake_translate(text, api_key, *, target_lang="DE", source_lang="JA", session=None):
         seen["args"] = (text, api_key, target_lang, source_lang)
         return "aile"

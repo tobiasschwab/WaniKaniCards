@@ -13,6 +13,66 @@ const api = async (url, opts) => {
   return data;
 };
 
+// ---------- Anmeldung (Multi-User: Backend braucht jetzt einen eingeloggten
+// Nutzer für praktisch jeden Endpunkt) ----------
+let authMode = "login"; // "login" | "signup"
+
+async function checkAuthAndInit() {
+  let me;
+  try {
+    me = await api("/api/auth/me");
+  } catch (_) {
+    me = { authenticated: false };
+  }
+  if (me.authenticated) {
+    onAuthenticated(me.email);
+  } else {
+    $("#authOverlay").classList.remove("hidden");
+  }
+}
+
+function onAuthenticated(email) {
+  $("#authOverlay").classList.add("hidden");
+  $("#accountEmail").textContent = email;
+  $("#accountEmail").classList.remove("hidden");
+  $("#logoutBtn").classList.remove("hidden");
+  loadSettings().catch(() => {});
+  loadHistory();
+  restoreKiStateFromStorage();
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  $("#authTitle").textContent = mode === "signup" ? "Konto erstellen" : "Anmelden";
+  $("#authSubmit").textContent = mode === "signup" ? "Registrieren" : "Anmelden";
+  $("#authToggleMode").textContent = mode === "signup"
+    ? "Schon ein Konto? Anmelden" : "Noch kein Konto? Registrieren";
+  $("#authStatus").textContent = "";
+}
+
+async function submitAuthForm() {
+  const email = $("#authEmail").value.trim();
+  const password = $("#authPassword").value;
+  const st = $("#authStatus");
+  st.textContent = "";
+  const path = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+  try {
+    const r = await api(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    $("#authPassword").value = "";
+    onAuthenticated(r.email);
+  } catch (e) {
+    st.textContent = e.message; st.className = "status err";
+  }
+}
+
+async function doLogout() {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch (_) {}
+  location.reload();
+}
+
 let cards = [];                 // aktuelle Tabellenzeilen (Descriptors)
 const selected = new Set();     // ausgewählte ids (als String)
 let tableMode = "subject";      // "subject" | "custom"
@@ -1627,7 +1687,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#selNone").addEventListener("click", () => selectAll(false));
   $("#btnRender").addEventListener("click", doRender);
 
-  loadSettings().catch(() => {});
-  loadHistory();
-  restoreKiStateFromStorage();
+  $("#authToggleMode").addEventListener("click", () => setAuthMode(authMode === "signup" ? "login" : "signup"));
+  $("#authSubmit").addEventListener("click", submitAuthForm);
+  $("#authPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAuthForm(); });
+  $("#logoutBtn").addEventListener("click", doLogout);
+
+  checkAuthAndInit();
 });

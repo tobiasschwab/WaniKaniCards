@@ -121,19 +121,30 @@ class CustomCard(db.Model):
     back_html = db.Column(db.Text, nullable=False, default="")
     tags = db.Column(db.JSON, nullable=False, default=list)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+    # Bei jedem Speichern aktualisiert (Card-Editor kann bestehende Karten
+    # überschreiben) - treibt die "zuletzt bearbeitet zuerst"-Sortierung im
+    # Verlauf, analog zum bisherigen "updated_at" in customcards/*.json.
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
 class KanaCard(db.Model):
     """Pro-Nutzer-Pendant zu kanacards/*.json (Dictionary-/KI-Karten aus dem
-    Text-Modus, siehe kc.KanaCard/dictionary.py)."""
+    Text-Modus, siehe kc.KanaCard/dictionary.py).
+
+    Zusammengesetzter Primärschlüssel `(user_id, id)` statt `id` allein: die
+    ID ist ein reiner Wort-Hash (`kc.kana_card_id()`), unabhängig vom Nutzer –
+    zwei verschiedene Nutzer, die dasselbe Wort im Text-Modus als Karte
+    anlegen, bekämen sonst denselben Primärschlüssel und würden sich
+    gegenseitig die Karte überschreiben."""
 
     __tablename__ = "kana_cards"
+    __table_args__ = (db.PrimaryKeyConstraint("user_id", "id"),)
 
-    # Bewusst KEIN default=_new_id: die ID ist bislang ein stabiler Hash des
-    # Worts (kc.kana_card_id()), damit derselbe Text-Fund immer dieselbe
-    # Karte referenziert statt Duplikate anzulegen - das Erzeugen der ID
-    # bleibt Aufgabe der Endpunkt-Schicht (Phase 2), nicht des Modells.
-    id = db.Column(db.String(64), primary_key=True)
+    # Bewusst KEIN default=_new_id: die ID ist ein stabiler Hash des Worts
+    # (kc.kana_card_id()), damit derselbe Text-Fund für DENSELBEN Nutzer immer
+    # dieselbe Karte referenziert statt Duplikate anzulegen - das Erzeugen der
+    # ID bleibt Aufgabe der Endpunkt-Schicht, nicht des Modells.
+    id = db.Column(db.String(64), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     word = db.Column(db.String(255), nullable=False, default="")
     kanji_hint = db.Column(db.String(255), nullable=True)
@@ -146,6 +157,7 @@ class KanaCard(db.Model):
     source = db.Column(db.String(32), nullable=False, default="dictionary")
     tags = db.Column(db.JSON, nullable=False, default=list)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
 class Job(db.Model):

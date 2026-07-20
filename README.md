@@ -576,21 +576,19 @@ Gemini-Grammatikanalyse kombiniert: Karten über **Level-Stapel**, **Suche**
 (rekursive Komposition), den **Text-Modus** oder **frei** erstellen, in einer
 **Tabelle auswählen**, daraus **ein PDF oder Anki-Paket** erzeugen, dazu eine
 **Wortliste** über alles, was schon bekannt ist, und ein **Verlauf** mit
-Direkt-Download. Aktuell (Phase 1 des Multi-User-Umbaus, siehe unten) laufen
-Accounts/Login über eine Datenbank, die eigentlichen Nutzdaten aber noch
-dateibasiert im Ordner `data/`:
+Direkt-Download. Jeder Nutzer hat dabei sein **eigenes** Konto (E-Mail/
+Passwort) mit eigenen Einstellungen/API-Keys, eigener Wortliste, eigenen
+Karten und eigenem Job-Verlauf (siehe [Multi-User-Architektur](#multi-user-architektur-umbau-in-arbeit)
+unten) – Accounts/Einstellungen/Karten/Jobs liegen in einer Datenbank
+(SQLite lokal, Postgres in Produktion), nur die generierten PDFs/APKGs
+selbst sowie API-Caches bleiben dateibasiert unter `data/`:
 
 ```
 data/
-├── settings.json          # API-Token, DeepL-/Gemini-Key (+ zuletzt genutzte Optionen)
-├── known.json             # manuell als „bekannt" markierte IDs (Text-Modus/Wortliste)
-├── known_meta.json        # Anzeige-Metadaten dazu (Zeichen/Bedeutung/…), für die Wortliste
-├── customcards/<id>.json  # frei erstellte Karten
-├── kanacards/<id>.json    # Dictionary-Karten (Wort/Bedeutung/Beispielsatz)
-├── output/<id>.pdf        # erzeugte PDFs
-├── output/<id>.apkg       # erzeugte Anki-Pakete
-├── jobs/<id>.json         # Job-Status/Metadaten
-└── .cache/                # WaniKani-API-, JMdict- und Gemini-Cache
+├── shiori.db          # SQLite-Fallback ohne DATABASE_URL (nur Demo/Entwicklung)
+├── output/<id>.pdf    # erzeugte PDFs
+├── output/<id>.apkg   # erzeugte Anki-Pakete
+└── .cache/            # WaniKani-API-, JMdict- und Gemini-Cache (geteilt, nutzerunabhängig)
 ```
 
 ![Web-Frontend](previews/webui.png)
@@ -598,19 +596,23 @@ data/
 ### Mit Docker starten (empfohlen)
 
 ```bash
-docker compose up --build      # baut das Image inkl. WeasyPrint-System-Libs
-# → Frontend auf http://localhost:8000
+export WKCARDS_SECRET_KEY=$(python3 -c "from crypto import generate_master_key; print(generate_master_key())")
+export WKCARDS_SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+docker compose up --build      # baut das Image, startet zusätzlich einen Postgres-Service
+# → Frontend auf http://localhost:9020
 ```
 
 Der Host-Ordner `./data` ist als Volume eingehängt (`./data:/data`), sodass
-Einstellungen und PDFs einen Neustart überdauern. Danach im Browser oben rechts
-auf ⚙ klicken, den **WaniKani API-Token** eintragen und speichern.
+PDFs/APKGs und API-Caches einen Neustart überdauern; Accounts/Einstellungen
+liegen im `db`-Postgres-Service (eigenes Volume). Im Browser zunächst ein
+Konto registrieren (E-Mail/Passwort), danach oben rechts auf ⚙ klicken, den
+**WaniKani API-Token** eintragen und speichern.
 
 ### Ohne Docker (lokal)
 
 ```bash
 pip install -r requirements.txt -r requirements-web.txt
-python webapp.py               # http://localhost:8000  (Entwicklungsserver)
+python webapp.py               # http://localhost:8000  (Entwicklungsserver, SQLite-Fallback)
 # produktiv:
 gunicorn -b 0.0.0.0:8000 -w 2 --timeout 600 webapp:app
 ```
@@ -680,23 +682,76 @@ zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
 | `WKCARDS_SECRET_KEY` | Fernet-Master-Key zum Ver-/Entschlüsseln gespeicherter API-Keys (`crypto.py`). |
 | `WKCARDS_SESSION_SECRET` | Flasks Session-Signing-Key (`SECRET_KEY`) – bewusst **eine andere** Variable als `WKCARDS_SECRET_KEY`: unterschiedliche Rotationsanforderungen/Formate. |
 
-**Noch NICHT umgesetzt (Phase 2 und später, siehe Roadmap):** die
-bestehenden Endpunkte (`/api/resolve`, `/api/render`, `/api/text-annotate*`,
-Wortliste, Custom-/Kana-Cards, Jobs) laufen weiterhin auf den globalen
-JSON-Dateien unter `data/` – **nicht** pro Nutzer getrennt und **nicht**
-hinter `@login_required`. Wer sich anmeldet, bekommt also aktuell noch
-denselben globalen Datenbestand zu sehen wie jeder andere Account. Geplante
-nächste Schritte:
+**Aktueller Stand – Phase 2 (Datenmigration & Autorisierung), umgesetzt:**
 
-1. **Datenmigration & Autorisierung** – jeder bestehende Endpunkt bekommt
-   `current_user`-Scoping (jede Query nach `user_id` gefiltert) + Tests, die
-   gezielt prüfen, dass Nutzer A **nicht** auf Daten von Nutzer B zugreifen
-   kann (IDOR-Schutz) – bei einer öffentlichen SaaS der wichtigste neue
-   Testbereich überhaupt.
-2. **Jobs/Dateien SaaS-tauglich machen** – `threading.Thread`-Rendering durch
+- Alle bisherigen Datei-Speicher (`settings.json`, `known.json`/
+  `known_meta.json`, `customcards/*.json`, `kanacards/*.json`, `jobs/*.json`)
+  sind auf die Postgres/SQLite-Tabellen aus `models.py` umgezogen, jede
+  Zeile trägt einen `user_id` und jede Lese-Funktion filtert danach
+  (`load_settings()`, `load_known()`, `list_customs()`, `list_kana()`,
+  `list_jobs()` – alle über `current_user.id`).
+- **Ownership-Checks statt bloßem Scoping**: für Zugriffe per ID (Job/
+  Custom-/Kana-Card) gibt es eigene `*_owned()`-Funktionen
+  (`read_job_owned()`, `read_custom_owned()`, `read_kana_owned()`), die
+  `None` liefern, wenn die ID entweder nicht existiert ODER einem anderen
+  Nutzer gehört – **bewusst dieselbe Antwort für beide Fälle** (404 in
+  beiden Fällen), damit kein Endpunkt verrät, ob eine fremde ID überhaupt
+  existiert (IDOR-Schutz). `/api/render` validiert zusätzlich VOR dem
+  Job-Anlegen, dass alle angegebenen `custom_ids`/`kana_ids` dem
+  anfragenden Nutzer gehören – sonst könnte man fremden Karteninhalt in ein
+  eigenes Export hineinrendern lassen.
+- **`KanaCard` bekam einen zusammengesetzten Primärschlüssel** `(user_id, id)`
+  statt `id` allein: die ID ist ein reiner Wort-Hash (`kc.kana_card_id()`),
+  unabhängig vom Nutzer – zwei Nutzer, die dieselbe Vokabel als Karte
+  anlegen, hätten sonst denselben Primärschlüssel gehabt und sich
+  gegenseitig überschrieben (live nachgestellt und gefixt, siehe Tests
+  `test_api_kanacards_same_word_different_users_no_collision`).
+- **Alle zentralen Endpunkte sind jetzt `@login_required`** (Ausnahmen:
+  `/api/auth/*` selbst sowie die statischen Frontend-Dateien). Ohne Login
+  liefert jeder geschützte Endpunkt `401` statt Daten preiszugeben.
+- **Render-Worker im eigenen App-Context**: `_run_render()` läuft weiterhin
+  in einem `threading.Thread` (kein Request-Kontext dort verfügbar), braucht
+  für DB-Zugriffe aber jetzt `with app.app_context():` – Nutzer-Settings
+  werden explizit über den im Job gespeicherten `user_id` geladen
+  (`load_settings_for_user()`), nicht über `current_user`.
+- **Minimaler Login/Signup-Gate im Frontend** (`web/index.html`/`app.js`):
+  ein Vollbild-Overlay blockiert die App, bis `/api/auth/me` eine
+  eingeloggte Sitzung bestätigt; „Registrieren"/„Anmelden" wechselbar per
+  Klick, „Abmelden" oben rechts im Header.
+- **Bekannte, bewusst nicht behobene Einschränkung**: `_apply_token_env()`
+  setzt den WaniKani-Token weiterhin über eine **prozessglobale**
+  Umgebungsvariable statt ihn durch `kanji_cards.py` explizit
+  durchzureichen (historisch bedingt) – unter echter Nebenläufigkeit
+  mehrerer gleichzeitiger Nutzer-Requests im selben Worker ein
+  Race-Condition-Risiko. Der vollständige Fix erfordert, `kanji_cards.py`s
+  öffentliche Funktionen (u. a. `resolve_level()`, `annotate_text()`,
+  `resolve_subject_deck()`) auf einen explizit durchgereichten Token
+  umzustellen statt auf `WANIKANI_API_TOKEN` zu lesen – als eigener,
+  in sich abgeschlossener Schritt vorgesehen, nicht Teil dieses Umbaus.
+
+**Testbarkeit**: `tests/conftest.py` stellt dafür die Fixtures `db_session`
+(frische Tabellen pro Test), `client` (Testclient mit frisch registriertem
+Nutzer) und `logged_in_user` (nur `current_user`, ohne echten HTTP-Request)
+bereit. Bemerkenswerte Falle dabei: Flask reaktiviert bei einem bereits
+aktiven App-Context **denselben** `g`, wenn eine WSGI-Anfrage über den
+Testclient läuft (`flask.ctx.RequestContext.push()`) – hält ein Test also
+absichtlich einen App-Context offen (nötig für Modell-Queries im Testkörper
+ohne Umweg über einen Request) UND simuliert zwei verschiedene Nutzer über
+zwei Testclients, bleibt der zuerst eingeloggte Nutzer in `g` hängen. Behoben
+über ein `before_request`-Sicherheitsnetz in `webapp.py`
+(`_reset_login_cache()`), das `g._login_user` vor jedem Request verwirft –
+in Produktion ein No-Op (dort bekommt jeder Request ohnehin einen frischen
+Context), in Tests aber notwendig für korrekte Multi-Tenant-Isolationstests.
+
+**Geplante nächste Schritte (Phase 3 und später):**
+
+1. **Jobs/Dateien SaaS-tauglich machen** – `threading.Thread`-Rendering durch
    eine echte Queue (Celery/RQ + Redis) ablösen, generierte PDFs/APKGs von
    lokalem Disk in Object Storage (S3/MinIO, signierte Download-URLs,
    Auto-Löschung nach X Tagen) verschieben.
+2. **WaniKani-Token nicht mehr prozessglobal durchreichen** (siehe bekannte
+   Einschränkung oben) – `kanji_cards.py`s WaniKani-Client-Erzeugung auf
+   einen explizit übergebenen Token statt `WANIKANI_API_TOKEN` umstellen.
 3. **Schutzmechanismen** – Rate-Limiting (`Flask-Limiter`) pro Nutzer/IP,
    Limit an gleichzeitigen Render-Jobs pro Nutzer.
 4. **Betrieb & Recht** – strukturiertes Logging mit `user_id`-Kontext,

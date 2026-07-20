@@ -107,7 +107,24 @@ def test_kana_card_requires_explicit_id(db_session):
     db_session.session.add(card)
     db_session.session.commit()
 
-    assert db_session.session.get(KanaCard, "kana_abcdef").word == "しあい"
+    assert db_session.session.get(KanaCard, (user.id, "kana_abcdef")).word == "しあい"
+
+
+def test_kana_card_same_id_allowed_for_different_users(db_session):
+    """Zusammengesetzter Primärschlüssel (user_id, id): zwei Nutzer, die
+    dasselbe Wort als Karte anlegen, bekommen je eine eigene Zeile statt
+    sich gegenseitig zu überschreiben (siehe KanaCard-Docstring)."""
+    u1 = User(email="k1@example.com"); u1.set_password("x")
+    u2 = User(email="k2@example.com"); u2.set_password("x")
+    db_session.session.add_all([u1, u2])
+    db_session.session.flush()
+
+    db_session.session.add(KanaCard(id="kana_shared", user_id=u1.id, word="家", meaning="Alice"))
+    db_session.session.add(KanaCard(id="kana_shared", user_id=u2.id, word="家", meaning="Bob"))
+    db_session.session.commit()  # darf NICHT scheitern - unterschiedliche Nutzer
+
+    assert db_session.session.get(KanaCard, (u1.id, "kana_shared")).meaning == "Alice"
+    assert db_session.session.get(KanaCard, (u2.id, "kana_shared")).meaning == "Bob"
 
 
 def test_job_stores_params_as_json(db_session):

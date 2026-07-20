@@ -23,11 +23,35 @@
           <span class="conn-dot off" id="connDeepl" title="DeepL: nicht verbunden"><span class="dot"></span>DeepL</span>
           <span class="conn-dot off" id="connGemini" title="Gemini: nicht verbunden"><span class="dot"></span>Gemini</span>
         </div>
+        <span id="accountEmail" class="muted hidden"></span>
+        <button id="logoutBtn" class="btn small hidden" title="Abmelden">Abmelden</button>
         <button id="settingsToggle" class="icon-btn" title="Einstellungen">
           <span class="gear">⚙</span>
         </button>
       </div>
     </header>
+
+    <!-- Anmeldung (blockiert die App, bis eingeloggt) -->
+    <div id="authOverlay" class="modal-overlay">
+      <section class="modal-panel" style="max-width:380px">
+        <div class="modal-head">
+          <h2 id="authTitle">Anmelden</h2>
+        </div>
+        <label class="field">
+          <span class="label">E-Mail</span>
+          <input id="authEmail" type="email" autocomplete="username" placeholder="du@beispiel.de">
+        </label>
+        <label class="field">
+          <span class="label">Passwort</span>
+          <input id="authPassword" type="password" autocomplete="current-password" placeholder="mindestens 8 Zeichen">
+        </label>
+        <div class="row gap">
+          <button id="authSubmit" class="btn primary">Anmelden</button>
+          <button id="authToggleMode" class="btn small" type="button">Noch kein Konto? Registrieren</button>
+        </div>
+        <div id="authStatus" class="status" style="margin-top:8px"></div>
+      </section>
+    </div>
 
     <!-- Einstellungen (Modal) -->
     <div id="settingsOverlay" class="modal-overlay hidden">

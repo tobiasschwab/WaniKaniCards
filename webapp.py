@@ -4,22 +4,26 @@
 Ablauf: Quelle *auflisten* (Level, Suche oder Komposition) → Elemente in einer
 Tabelle *auswählen* → ausgewählte Karten als **ein PDF** rendern.
 
-**Übergangszustand Multi-User-Umbau (Phase 1):** Login/Accounts laufen über
-eine Datenbank (SQLite lokal, Postgres in Produktion – siehe `models.py`,
-`auth.py`, README-Abschnitt "Multi-User-Architektur"). Die eigentlichen
-Nutzdaten (Einstellungen inkl. API-Token, bekannte Wörter, eigene/Dictionary-
-Karten, Job-Verlauf, PDFs) liegen in dieser Phase NOCH als Dateien unter
-``WKCARDS_DATA`` (Default: ``./data``) – global, nicht pro Nutzer getrennt.
-Das Auftrennen dieser Endpunkte auf pro-Nutzer-Datenbank-Zeilen ist Phase 2
-und noch nicht umgesetzt; bis dahin ist die App bezüglich dieser Daten
-weiterhin faktisch Single-Tenant, auch wenn sich mehrere Accounts anmelden
-können.
+**Multi-User-Umbau (Phase 2):** Accounts, Einstellungen (inkl. API-Token),
+bekannte Wörter, eigene/Dictionary-Karten und der Job-Verlauf liegen in der
+Datenbank (SQLite lokal, Postgres in Produktion – siehe `models.py`) und sind
+pro Nutzer getrennt (`current_user.id`-Scoping + Ownership-Checks, siehe
+README-Abschnitt "Multi-User-Architektur"). Generierte PDFs/APKGs liegen
+weiterhin als Dateien unter ``WKCARDS_DATA`` (Default: ``./data``), aber
+jeder Zugriff prüft vorher das zugehörige `Job`-Datenbank-Objekt auf
+Eigentümerschaft.
+
+**Bekannte Einschränkung:** `_apply_token_env()` setzt den WaniKani-Token
+weiterhin über eine **prozessglobale** Umgebungsvariable statt ihn explizit
+durch `kanji_cards.py` durchzureichen (historisch bedingt, aus der
+Single-Tenant-Zeit). Unter echter Nebenläufigkeit (mehrere gleichzeitige
+Requests verschiedener Nutzer im selben Worker-Prozess/Thread) ist das ein
+Race-Condition-Risiko – als Fast-Follow vorgesehen, siehe README-Roadmap.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import logging
 import os
 import re
@@ -30,9 +34,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+from flask import Flask, abort, g, jsonify, request, send_file, send_from_directory
+from flask_login import current_user, login_required
 
 import anki_export as ae
+import crypto
 import kanji_cards as kc
 import models
 import pdf_import
@@ -46,16 +52,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
-SETTINGS_FILE = DATA_DIR / "settings.json"
-KNOWN_FILE = DATA_DIR / "known.json"
-KNOWN_META_FILE = DATA_DIR / "known_meta.json"
+# Einstellungen/bekannte Wörter/eigene-/Dictionary-Karten/Jobs liegen seit
+# Phase 2 des Multi-User-Umbaus in der Datenbank (siehe models.py) statt als
+# Dateien - nur die generierten PDFs/APKGs selbst bleiben dateibasiert
+# (Binärdaten, für die eine Objekt-Storage-Anbindung sinnvoller ist als eine
+# DB-Spalte, siehe README-Roadmap "Jobs/Dateien SaaS-tauglich machen").
 OUTPUT_DIR = DATA_DIR / "output"
-JOBS_DIR = DATA_DIR / "jobs"
-CUSTOM_DIR = DATA_DIR / "customcards"
-KANA_DIR = DATA_DIR / "kanacards"
 WEB_DIR = HERE / "web"
 
-for _d in (DATA_DIR, OUTPUT_DIR, JOBS_DIR, CUSTOM_DIR, KANA_DIR):
+for _d in (DATA_DIR, OUTPUT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 _export_lock = threading.Lock()
@@ -137,6 +142,28 @@ def _unauthorized() -> Any:
 
 app.register_blueprint(auth_bp)
 
+
+@app.before_request
+def _reset_login_cache() -> None:
+    """Flask-Logins Pro-Request-Cache (`g._login_user`) vor jedem Request
+    zurücksetzen, damit `current_user` garantiert aus DIESEM Request-Cookie
+    neu aufgelöst wird. Nötig, weil Flask einen bereits aktiven App-Context
+    derselben App wiederverwendet (inkl. `g`) statt bei jedem Request einen
+    frischen zu erzeugen (siehe `flask.ctx.RequestContext.push()`) – das
+    betrifft besonders Tests, die (z. B. für Multi-Tenant-Checks) mehrere
+    Test-Clients innerhalb desselben offen gehaltenen App-Contexts benutzen
+    (siehe tests/conftest.py `db_session`). In Produktion ein No-Op, da dort
+    ohnehin jeder Request einen eigenen, frischen Context bekommt."""
+    g.pop("_login_user", None)
+
+
+@app.errorhandler(crypto.SecretCryptoError)
+def _handle_secret_crypto_error(exc: crypto.SecretCryptoError) -> Any:
+    """Klare JSON-Fehlermeldung statt einer nackten 500 – z. B. wenn
+    WKCARDS_SECRET_KEY im Multi-User-Betrieb fehlt (siehe crypto.py)."""
+    logger.error("Secrets-Verschlüsselung fehlgeschlagen: %s", exc)
+    return jsonify({"error": "Serverkonfigurationsfehler (Secrets-Verschlüsselung). Bitte den Betreiber informieren."}), 500
+
 # Tabellen anlegen, falls sie noch nicht existieren – nur ein Komfort-
 # Fallback für SQLite/lokale Entwicklung ohne eingerichtetes Alembic. In
 # Produktion (Postgres) übernimmt `alembic upgrade head` das Schema-
@@ -147,80 +174,129 @@ if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:"):
         db.create_all()
 
 
-# ---------- Einstellungen ---------------------------------------------------- #
+# ---------- Einstellungen (pro Nutzer, Postgres/SQLite statt settings.json) - #
+
+def _get_or_create_user_settings(user_id: int) -> models.UserSettings:
+    settings = db.session.get(models.UserSettings, user_id)
+    if settings is None:
+        settings = models.UserSettings(user_id=user_id)
+        db.session.add(settings)
+        db.session.commit()
+    return settings
+
+
+def _settings_to_dict(s: models.UserSettings) -> dict[str, Any]:
+    """`UserSettings`-Zeile in dieselbe Dict-Form wie die alte settings.json
+    bringen, damit der Rest des Moduls unverändert bleibt. Secrets werden
+    hier entschlüsselt (siehe crypto.py) – NIE im Klartext in der DB."""
+    return {
+        "token": crypto.decrypt_secret(s.wanikani_token_enc) or "",
+        "username": s.username or "",
+        "deepl_key": crypto.decrypt_secret(s.deepl_key_enc) or "",
+        "gemini_key": crypto.decrypt_secret(s.gemini_key_enc) or "",
+        "gemini_model": s.gemini_model or kc.gemini_client.DEFAULT_MODEL,
+        "target_lang": s.target_lang or "DE",
+        "defaults": {**DEFAULT_SETTINGS["defaults"], **(s.defaults or {})},
+    }
+
+
+def load_settings_for_user(user_id: int) -> dict[str, Any]:
+    """Einstellungen eines bestimmten Nutzers – für Code-Pfade ohne aktiven
+    Request-Kontext (z. B. der Render-Worker-Thread, der `current_user` nicht
+    kennt, aber den `user_id` des Jobs)."""
+    return _settings_to_dict(_get_or_create_user_settings(user_id))
+
 
 def load_settings() -> dict[str, Any]:
-    if SETTINGS_FILE.is_file():
-        try:
-            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {}
-    else:
-        data = {}
-    merged = {**DEFAULT_SETTINGS, **data}
-    merged["defaults"] = {**DEFAULT_SETTINGS["defaults"], **(data.get("defaults") or {})}
-    return merged
+    """Einstellungen des aktuell eingeloggten Nutzers (nur innerhalb eines
+    Requests aufrufbar, braucht `current_user`)."""
+    return load_settings_for_user(current_user.id)
 
 
 def save_settings(data: dict[str, Any]) -> None:
-    SETTINGS_FILE.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    s = _get_or_create_user_settings(current_user.id)
+    if "token" in data:
+        s.wanikani_token_enc = crypto.encrypt_secret(data["token"])
+    if "username" in data:
+        s.username = data["username"]
+    if "deepl_key" in data:
+        s.deepl_key_enc = crypto.encrypt_secret(data["deepl_key"])
+    if "gemini_key" in data:
+        s.gemini_key_enc = crypto.encrypt_secret(data["gemini_key"])
+    if "gemini_model" in data:
+        s.gemini_model = data["gemini_model"]
+    if "target_lang" in data:
+        s.target_lang = data["target_lang"]
+    if "defaults" in data:
+        s.defaults = data["defaults"]
+    db.session.commit()
+
+
+def _coerce_known_id(raw: str) -> int | str:
+    """WaniKani-Subject-IDs sind rein numerisch -> int; Dictionary-Wörter
+    (`kana_…`/`manual_…`) bleiben str."""
+    return int(raw) if raw.isdigit() else raw
 
 
 def load_known() -> set[int | str]:
-    """IDs, die manuell als „bekannt" markiert wurden (Text-Modus) – unabhängig
-    vom Export-/Karten-Verlauf, z. B. für Wörter, die man von woanders schon
-    kann. WaniKani-Subject-IDs bleiben int, Dictionary-Wörter (`kana_…`) sind
-    str – beide zusammen in derselben Datei, da beide „bekannt" bedeuten."""
-    if not KNOWN_FILE.is_file():
-        return set()
-    try:
-        data = json.loads(KNOWN_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
-    ids = data.get("ids") if isinstance(data, dict) else None
-    out: set[int | str] = set()
-    for i in ids or []:
-        if isinstance(i, bool):
-            continue
-        if isinstance(i, int) or (isinstance(i, str) and i):
-            out.add(i)
-    return out
-
-
-def save_known(ids: set[int | str]) -> None:
-    KNOWN_FILE.write_text(
-        json.dumps({"ids": sorted(ids, key=str)}, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    """IDs, die der eingeloggte Nutzer manuell als „bekannt" markiert hat –
+    unabhängig vom Export-/Karten-Verlauf, z. B. für Wörter, die man von
+    woanders schon kann. WaniKani-Subject-IDs kommen als int zurück,
+    Dictionary-/manuelle Wörter (`kana_…`/`manual_…`) als str."""
+    rows = models.KnownWord.query.filter_by(user_id=current_user.id).all()
+    return {_coerce_known_id(r.word_id) for r in rows}
 
 
 def load_known_meta() -> dict[str, dict[str, Any]]:
-    """Anzeige-Metadaten (characters/meaning/kind/level/source) zu manuell
-    bekannt markierten IDs – nötig für die Wortliste, u. a. weil rein manuelle
-    Einträge (`manual_…`) gar keine Karte/keinen WaniKani-Subject haben, aus
-    dem sich die Anzeige sonst herleiten ließe."""
-    if not KNOWN_META_FILE.is_file():
-        return {}
-    try:
-        data = json.loads(KNOWN_META_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    """Anzeige-Metadaten (characters/meaning/kind/level/source) zu den
+    eigenen manuell bekannt markierten Wörtern – nötig für die Wortliste,
+    u. a. weil rein manuelle Einträge (`manual_…`) gar keine Karte/keinen
+    WaniKani-Subject haben, aus dem sich die Anzeige sonst herleiten ließe."""
+    rows = models.KnownWord.query.filter_by(user_id=current_user.id).all()
+    return {
+        r.word_id: {
+            "characters": r.characters, "meaning": r.meaning,
+            "kind": r.kind, "level": r.level, "source": r.source,
+        }
+        for r in rows
+    }
 
 
-def save_known_meta(meta: dict[str, dict[str, Any]]) -> None:
-    KNOWN_META_FILE.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def _upsert_known_word(word_id: str, fields: dict[str, Any]) -> None:
+    """Einzelnes bekanntes Wort anlegen/aktualisieren (Zeile pro Nutzer+Wort,
+    siehe `KnownWord.uq_known_word_per_user`) – ersetzt das bisherige
+    Lade-alles/Mutiere/Speichere-alles-Muster der Datei-Version."""
+    row = models.KnownWord.query.filter_by(user_id=current_user.id, word_id=word_id).first()
+    if row is None:
+        row = models.KnownWord(user_id=current_user.id, word_id=word_id)
+        db.session.add(row)
+    for k, v in fields.items():
+        setattr(row, k, v)
+    db.session.commit()
+
+
+def _remove_known_word(word_id: str) -> None:
+    models.KnownWord.query.filter_by(user_id=current_user.id, word_id=word_id).delete()
+    db.session.commit()
 
 
 def _mask(token: str) -> str:
     return (("•" * max(0, len(token) - 4)) + token[-4:]) if token else ""
 
 
-def _apply_token_env() -> str:
-    token = load_settings().get("token", "")
+def _apply_token_env(settings: dict[str, Any] | None = None) -> str:
+    """WaniKani-Token in die Prozessumgebung übernehmen (siehe `WaniKaniClient`/
+    `_make_client()` in kanji_cards.py, die den Token darüber statt als
+    Parameter beziehen). `settings` optional übergeben, wenn schon geladen
+    (z. B. `_run_render()` im Worker-Thread ohne `current_user`) - sonst wird
+    `load_settings()` des eingeloggten Nutzers verwendet.
+
+    ACHTUNG (siehe Modul-Docstring): das ist eine PROZESSGLOBALE Variable,
+    kein Request-lokaler Zustand - unter echter Nebenläufigkeit mehrerer
+    Nutzer im selben Worker ein Race-Condition-Risiko, als Fast-Follow
+    vorgesehen."""
+    s = settings if settings is not None else load_settings()
+    token = s.get("token", "")
     os.environ["WANIKANI_API_TOKEN"] = token or ""
     return token
 
@@ -246,48 +322,85 @@ def _fetch_username(token: str) -> str:
         return ""
 
 
-# ---------- Jobs (ein JSON pro Job) ----------------------------------------- #
+# ---------- Jobs (pro Nutzer, Postgres/SQLite statt jobs/*.json) ------------ #
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _job_path(job_id: str) -> Path:
-    return JOBS_DIR / f"{job_id}.json"
+def _job_to_dict(row: models.Job) -> dict[str, Any]:
+    """`Job`-Zeile in dieselbe Dict-Form wie das alte jobs/<id>.json bringen,
+    damit `_run_render()`/die API-Endpunkte unverändert bleiben."""
+    return {
+        "id": row.id,
+        "user_id": row.user_id,
+        "title": row.title,
+        "params": row.params or {},
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+        "filename": row.filename,
+        "n_cards": row.n_cards,
+        "error": row.error,
+    }
 
 
-def write_job(job: dict[str, Any]) -> None:
-    _job_path(job["id"]).write_text(
-        json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def write_job(job: dict[str, Any], *, user_id: int | None = None) -> None:
+    """Job-Zeile anlegen (erster Aufruf, braucht `user_id`) oder aktualisieren
+    (Status/Ergebnis, Zeile existiert schon - z. B. aus `_run_render()`, das
+    `current_user` im Worker-Thread nicht kennt und deshalb keinen `user_id`
+    mitgeben muss)."""
+    row = db.session.get(models.Job, job["id"])
+    if row is None:
+        if user_id is None:
+            raise ValueError("write_job(): user_id ist beim erstmaligen Anlegen eines Jobs erforderlich.")
+        row = models.Job(id=job["id"], user_id=user_id)
+        db.session.add(row)
+    row.title = job.get("title", "")
+    row.params = job.get("params") or {}
+    row.status = job.get("status", "queued")
+    row.filename = job.get("filename")
+    row.n_cards = job.get("n_cards")
+    row.error = job.get("error")
+    if job.get("started_at"):
+        row.started_at = datetime.fromisoformat(job["started_at"])
+    if job.get("finished_at"):
+        row.finished_at = datetime.fromisoformat(job["finished_at"])
+    db.session.commit()
 
 
 def read_job(job_id: str) -> dict[str, Any] | None:
-    p = _job_path(job_id)
-    if not p.is_file():
+    """OHNE Ownership-Check – nur für interne, vertrauenswürdige Aufrufer
+    (den Render-Worker-Thread selbst, der `current_user` nicht kennt). Für
+    HTTP-Endpunkte immer `read_job_owned()` verwenden."""
+    row = db.session.get(models.Job, job_id)
+    return _job_to_dict(row) if row else None
+
+
+def read_job_owned(job_id: str) -> dict[str, Any] | None:
+    """Wie `read_job()`, aber nur wenn der Job dem eingeloggten Nutzer gehört
+    – sonst `None`, bewusst identisch zur Antwort für „existiert nicht",
+    damit kein HTTP-Endpunkt verrät, ob eine fremde Job-ID existiert (IDOR-
+    Schutz, siehe README "Multi-User-Architektur")."""
+    row = db.session.get(models.Job, job_id)
+    if row is None or row.user_id != current_user.id:
         return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return _job_to_dict(row)
 
 
 def list_jobs() -> list[dict[str, Any]]:
-    jobs = []
-    for p in JOBS_DIR.glob("*.json"):
-        try:
-            jobs.append(json.loads(p.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError):
-            continue
-    jobs.sort(key=lambda j: j.get("created_at", ""), reverse=True)
-    return jobs
+    """Jobs des eingeloggten Nutzers, neueste zuerst."""
+    rows = models.Job.query.filter_by(user_id=current_user.id).order_by(models.Job.created_at.desc()).all()
+    return [_job_to_dict(r) for r in rows]
 
 
 def _already_exported_ids() -> set[int]:
-    """Subject-IDs, die schon einmal erfolgreich exportiert wurden (PDF oder Anki).
+    """Subject-IDs, die der eingeloggte Nutzer schon einmal erfolgreich
+    exportiert hat (PDF oder Anki).
 
-    Liest den Job-Verlauf statt einer eigenen Datenbank – ein Job ist bereits
-    die vollständige Aufzeichnung, was wann gerendert wurde.
+    Liest den eigenen Job-Verlauf statt einer separaten Tabelle – ein Job ist
+    bereits die vollständige Aufzeichnung, was wann gerendert wurde.
     """
     ids: set[int] = set()
     for job in list_jobs():
@@ -312,38 +425,52 @@ def _mark_exported(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return cards
 
 
-# ---------- Eigene Karten (customcards/) ------------------------------------ #
+# ---------- Eigene Karten (pro Nutzer, Postgres/SQLite statt customcards/) -- #
 
-def _custom_path(cid: str) -> Path:
-    safe = "".join(c for c in cid if c.isalnum())
-    return CUSTOM_DIR / f"{safe}.json"
-
-
-def read_custom(cid: str) -> dict[str, Any] | None:
-    p = _custom_path(cid)
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+def _custom_card_to_dict(row: models.CustomCard) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "front_html": row.front_html,
+        "back_html": row.back_html,
+        "tags": row.tags or [],
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
 
 
-def write_custom(card: dict[str, Any]) -> None:
-    _custom_path(card["id"]).write_text(
-        json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def read_custom_for_user(user_id: int, cid: str) -> dict[str, Any] | None:
+    """Explizit nach `user_id` gefiltert – für den Render-Worker-Thread (kennt
+    `current_user` nicht, aber den `user_id` des Jobs) UND als Basis für
+    `read_custom_owned()`."""
+    row = models.CustomCard.query.filter_by(id=cid, user_id=user_id).first()
+    return _custom_card_to_dict(row) if row else None
+
+
+def read_custom_owned(cid: str) -> dict[str, Any] | None:
+    """Wie `read_custom_for_user()`, aber für den eingeloggten Nutzer –
+    `None` sowohl wenn die Karte nicht existiert als auch wenn sie einem
+    anderen Nutzer gehört (IDOR-Schutz, siehe `read_job_owned()`)."""
+    return read_custom_for_user(current_user.id, cid)
+
+
+def write_custom(card: dict[str, Any], *, user_id: int) -> None:
+    """Neu anlegen oder aktualisieren. Der Aufrufer (`api_save_customcard()`)
+    hat Ownership bei einer bestehenden ID bereits per `read_custom_owned()`
+    geprüft, bevor diese Funktion aufgerufen wird."""
+    row = db.session.get(models.CustomCard, card["id"])
+    if row is None:
+        row = models.CustomCard(id=card["id"], user_id=user_id)
+        db.session.add(row)
+    row.front_html = card.get("front_html", "")
+    row.back_html = card.get("back_html", "")
+    row.tags = card.get("tags") or []
+    db.session.commit()
 
 
 def list_customs() -> list[dict[str, Any]]:
-    out = []
-    for p in CUSTOM_DIR.glob("*.json"):
-        try:
-            out.append(json.loads(p.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError):
-            continue
-    out.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
-    return out
+    rows = models.CustomCard.query.filter_by(user_id=current_user.id).order_by(
+        models.CustomCard.updated_at.desc()
+    ).all()
+    return [_custom_card_to_dict(r) for r in rows]
 
 
 def _strip_html(html: str) -> str:
@@ -367,38 +494,71 @@ def _custom_descriptor(card: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# ---------- Dictionary-Karten (kanacards/) – Text-Modus, kein WaniKani-Treffer #
+# ---------- Dictionary-Karten (pro Nutzer, Postgres/SQLite statt kanacards/) #
+#
+# Zusammengesetzter Schlüssel (user_id, id): die ID selbst ist ein reiner
+# Wort-Hash (kc.kana_card_id()), nutzerunabhängig – zwei Nutzer, die dasselbe
+# Wort als Karte anlegen, brauchen trotzdem je eine eigene Zeile (siehe
+# models.KanaCard-Docstring).
 
-def _kana_path(kid: str) -> Path:
-    safe = "".join(c for c in kid if c.isalnum() or c == "_")
-    return KANA_DIR / f"{safe}.json"
+def _kana_card_to_dict(row: models.KanaCard) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "word": row.word,
+        "kanji_hint": row.kanji_hint,
+        "reading": row.reading,
+        "meaning": row.meaning,
+        "meaning_extra": row.meaning_extra,
+        "sentence_ja": row.sentence_ja,
+        "sentence_translation": row.sentence_translation,
+        "sentence_audio_url": row.sentence_audio_url,
+        "source": row.source,
+        "tags": row.tags or [],
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
 
 
-def read_kana(kid: str) -> dict[str, Any] | None:
-    p = _kana_path(kid)
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+def _get_kana_row(user_id: int, kid: str) -> "models.KanaCard | None":
+    return models.KanaCard.query.filter_by(user_id=user_id, id=kid).first()
 
 
-def write_kana(card: dict[str, Any]) -> None:
-    _kana_path(card["id"]).write_text(
-        json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def read_kana_for_user(user_id: int, kid: str) -> dict[str, Any] | None:
+    """Explizit nach `user_id` gefiltert – für den Render-Worker-Thread (kennt
+    `current_user` nicht, aber den `user_id` des Jobs) UND als Basis für
+    `read_kana_owned()`."""
+    row = _get_kana_row(user_id, kid)
+    return _kana_card_to_dict(row) if row else None
+
+
+def read_kana_owned(kid: str) -> dict[str, Any] | None:
+    """Wie `read_kana_for_user()`, aber für den eingeloggten Nutzer (IDOR-
+    Schutz, siehe `read_job_owned()`)."""
+    return read_kana_for_user(current_user.id, kid)
+
+
+def write_kana(card: dict[str, Any], *, user_id: int) -> None:
+    row = _get_kana_row(user_id, card["id"])
+    if row is None:
+        row = models.KanaCard(id=card["id"], user_id=user_id)
+        db.session.add(row)
+    row.word = card.get("word", "")
+    row.kanji_hint = card.get("kanji_hint")
+    row.reading = card.get("reading")
+    row.meaning = card.get("meaning", "")
+    row.meaning_extra = card.get("meaning_extra")
+    row.sentence_ja = card.get("sentence_ja")
+    row.sentence_translation = card.get("sentence_translation")
+    row.sentence_audio_url = card.get("sentence_audio_url")
+    row.source = card.get("source", "dictionary")
+    row.tags = card.get("tags") or []
+    db.session.commit()
 
 
 def list_kana() -> list[dict[str, Any]]:
-    out = []
-    for p in KANA_DIR.glob("*.json"):
-        try:
-            out.append(json.loads(p.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError):
-            continue
-    out.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
-    return out
+    rows = models.KanaCard.query.filter_by(user_id=current_user.id).order_by(
+        models.KanaCard.updated_at.desc()
+    ).all()
+    return [_kana_card_to_dict(r) for r in rows]
 
 
 def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
@@ -418,10 +578,12 @@ def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
 
 # ---------- Render-Worker ---------------------------------------------------- #
 
-def _build_mixed_deck(p: dict[str, Any]) -> list[Any]:
+def _build_mixed_deck(p: dict[str, Any], user_id: int) -> list[Any]:
     """Kombinierten Stapel aus WaniKani-Subjects, eigenen und Dictionary-
     Karten bauen – alle drei Quellen können in einem Export landen (z. B.
-    Text-Modus: WaniKani-Vokabel + Dictionary-Wort zusammen ausgewählt)."""
+    Text-Modus: WaniKani-Vokabel + Dictionary-Wort zusammen ausgewählt).
+    `user_id` explizit statt `current_user`, da auch vom Render-Worker-Thread
+    (kein Request-Kontext) aus aufgerufen."""
     deck: list[Any] = []
     if p.get("subject_ids"):
         deck.extend(
@@ -434,74 +596,82 @@ def _build_mixed_deck(p: dict[str, Any]) -> list[Any]:
             )
         )
     if p.get("custom_ids"):
-        datas = [read_custom(cid) for cid in p["custom_ids"]]
+        datas = [read_custom_for_user(user_id, cid) for cid in p["custom_ids"]]
         deck.extend(kc.build_custom_card(d) for d in datas if d)
     if p.get("kana_ids"):
-        datas = [read_kana(kid) for kid in p["kana_ids"]]
+        datas = [read_kana_for_user(user_id, kid) for kid in p["kana_ids"]]
         deck.extend(kc.build_kana_card_from_dict(d) for d in datas if d)
     return deck
 
 
 def _run_render(job_id: str) -> None:
-    job = read_job(job_id)
-    if job is None:
-        return
-    p = job["params"]
-    with _export_lock:
-        job = read_job(job_id) or job
-        job["status"] = "running"
-        job["started_at"] = _now()
-        write_job(job)
-
-        anki = p.get("format") == "anki"
-        out_path = OUTPUT_DIR / (f"{job_id}.apkg" if anki else f"{job_id}.pdf")
-        try:
-            # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-/
-            # Dictionary-Karten, kein Demo-Modus) gerendert werden.
-            needs_token = bool(p.get("subject_ids")) and not p.get("sample")
-            if needs_token and not _apply_token_env():
-                raise kc.WaniKaniError(
-                    "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
-                )
-            _apply_token_env()
-
-            deck = _build_mixed_deck(p)
-            if not deck:
-                raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
-
-            if anki:
-                deck_name = job.get("title") or "Shiori"
-                _, n = ae.export_deck(deck, out_path, deck_name=deck_name)
-            else:
-                username = load_settings().get("username", "")
-                if not p.get("sample") and not username:
-                    username = ""  # kein Token → kein Name
-                kc.render_deck(
-                    deck,
-                    out_path,
-                    layout=p.get("layout", "a6"),
-                    paper=p.get("paper", "a4"),
-                    duplex=p.get("duplex", "long-edge"),
-                    cut_marks=p.get("cut_marks", True),
-                    hole=p.get("hole", False),
-                    username=username,
-                )
-                n = len(deck)
-            job["status"] = "done"
-            job["n_cards"] = n
-            job["filename"] = out_path.name
-        except kc.WaniKaniError as exc:
-            job["status"], job["error"] = "error", str(exc)
-        except Exception as exc:  # noqa: BLE001
-            job["status"], job["error"] = "error", f"Unerwarteter Fehler: {exc}"
-        finally:
-            job["finished_at"] = _now()
+    """Läuft in einem eigenen Thread OHNE Flask-Request-Kontext – braucht
+    deshalb `app.app_context()` für DB-Zugriffe (`current_user` ist hier
+    nicht verfügbar, alle Lookups laufen über den im Job gespeicherten
+    `user_id` statt über den eingeloggten Nutzer)."""
+    with app.app_context():
+        job = read_job(job_id)
+        if job is None:
+            return
+        user_id = job["user_id"]
+        p = job["params"]
+        with _export_lock:
+            job = read_job(job_id) or job
+            job["status"] = "running"
+            job["started_at"] = _now()
             write_job(job)
+
+            anki = p.get("format") == "anki"
+            out_path = OUTPUT_DIR / (f"{job_id}.apkg" if anki else f"{job_id}.pdf")
+            try:
+                settings = load_settings_for_user(user_id)
+                # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-/
+                # Dictionary-Karten, kein Demo-Modus) gerendert werden.
+                needs_token = bool(p.get("subject_ids")) and not p.get("sample")
+                if needs_token and not settings.get("token"):
+                    raise kc.WaniKaniError(
+                        "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
+                    )
+                _apply_token_env(settings)
+
+                deck = _build_mixed_deck(p, user_id)
+                if not deck:
+                    raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
+
+                if anki:
+                    deck_name = job.get("title") or "Shiori"
+                    _, n = ae.export_deck(deck, out_path, deck_name=deck_name)
+                else:
+                    username = settings.get("username", "")
+                    if not p.get("sample") and not username:
+                        username = ""  # kein Token → kein Name
+                    kc.render_deck(
+                        deck,
+                        out_path,
+                        layout=p.get("layout", "a6"),
+                        paper=p.get("paper", "a4"),
+                        duplex=p.get("duplex", "long-edge"),
+                        cut_marks=p.get("cut_marks", True),
+                        hole=p.get("hole", False),
+                        username=username,
+                    )
+                    n = len(deck)
+                job["status"] = "done"
+                job["n_cards"] = n
+                job["filename"] = out_path.name
+            except kc.WaniKaniError as exc:
+                job["status"], job["error"] = "error", str(exc)
+            except Exception as exc:  # noqa: BLE001
+                job["status"], job["error"] = "error", f"Unerwarteter Fehler: {exc}"
+            finally:
+                job["finished_at"] = _now()
+                write_job(job)
 
 
 # ---------- API: Konfig & Einstellungen ------------------------------------- #
 
 @app.get("/api/config")
+@login_required
 def api_config() -> Any:
     return jsonify(
         {
@@ -516,6 +686,7 @@ def api_config() -> Any:
 
 
 @app.get("/api/settings")
+@login_required
 def api_get_settings() -> Any:
     s = load_settings()
     token = s.get("token", "")
@@ -539,6 +710,7 @@ def api_get_settings() -> Any:
 
 
 @app.post("/api/settings")
+@login_required
 def api_post_settings() -> Any:
     body = request.get_json(silent=True) or {}
     s = load_settings()
@@ -560,6 +732,7 @@ def api_post_settings() -> Any:
 
 
 @app.post("/api/gemini/models")
+@login_required
 def api_gemini_models() -> Any:
     """Verfügbare Gemini-Modelle live per API abrufen (ListModels), statt eine
     hartcodierte Liste zu pflegen – akzeptiert optional einen noch nicht
@@ -577,6 +750,7 @@ def api_gemini_models() -> Any:
 
 
 @app.post("/api/gemini/tts")
+@login_required
 def api_gemini_tts() -> Any:
     """Text (Original-Satz im KI-Modus) per Gemini vorlesen lassen – gibt
     eine data-URI zurück, die sich sowohl direkt im Browser abspielen als
@@ -598,6 +772,7 @@ def api_gemini_tts() -> Any:
 
 
 @app.post("/api/gemini/generate-image")
+@login_required
 def api_gemini_generate_image() -> Any:
     """Bildkarten-Feature: ein einfaches Clipart-Bild für eine Vokabel per
     Gemini generieren lassen (siehe `gemini_client.generate_image()`) – gibt
@@ -622,6 +797,7 @@ def api_gemini_generate_image() -> Any:
 
 
 @app.post("/api/test-token")
+@login_required
 def api_test_token() -> Any:
     token = (request.get_json(silent=True) or {}).get("token") or load_settings().get(
         "token", ""
@@ -643,6 +819,7 @@ def api_test_token() -> Any:
 # ---------- API: Auflisten (resolve) ---------------------------------------- #
 
 @app.post("/api/resolve")
+@login_required
 def api_resolve() -> Any:
     """Quelle in eine Kartenliste (Tabelle) auflösen.
 
@@ -674,6 +851,7 @@ def api_resolve() -> Any:
 
 
 @app.post("/api/card-detail")
+@login_required
 def api_card_detail() -> Any:
     """Volle Karten-Felder (alle Dataclass-Felder) für die gegebenen Subject-
     IDs liefern – Grundlage für den „Felder manuell anpassen"-Dialog in der
@@ -696,6 +874,7 @@ def api_card_detail() -> Any:
 
 
 @app.post("/api/translate")
+@login_required
 def api_translate() -> Any:
     """Einen einzelnen Text (z. B. eine WaniKani-Bedeutung/Merkhilfe auf
     Englisch) per DeepL in die in den Einstellungen hinterlegte Zielsprache
@@ -723,6 +902,7 @@ def api_translate() -> Any:
 # ---------- API: Text-Modus (lemmatisieren, annotieren, bekannt markieren) -- #
 
 @app.post("/api/text-annotate")
+@login_required
 def api_text_annotate() -> Any:
     """Text lemmatisieren und zeilenweise annotieren (kein Auto-Hinzufügen).
 
@@ -786,6 +966,7 @@ def api_text_annotate() -> Any:
 
 
 @app.post("/api/text-annotate-ai")
+@login_required
 def api_text_annotate_ai() -> Any:
     """Text per Gemini satzweise analysieren (eigener „KI"-Modus, siehe
     `kc.annotate_text_ai()`): pro Satz Original, deutsche Übersetzung,
@@ -848,6 +1029,7 @@ def api_text_annotate_ai() -> Any:
 
 
 @app.post("/api/text-extract")
+@login_required
 def api_text_extract() -> Any:
     """Text aus einer hochgeladenen PDF-Datei oder einem Bild extrahieren
     (siehe `pdf_import.py`) – liefert reinen Text zurück, der dann genauso
@@ -887,46 +1069,31 @@ def api_text_extract() -> Any:
     return jsonify({"text": text})
 
 
-def _coerce_known_id(raw: str) -> int | str:
-    """WaniKani-Subject-IDs sind rein numerisch -> int; Dictionary-Wörter
-    (`kana_…`) bleiben str."""
-    return int(raw) if raw.isdigit() else raw
-
-
 _KNOWN_META_FIELDS = ("characters", "meaning", "kind", "level", "source")
 
 
 @app.post("/api/known/<string:word_id>")
+@login_required
 def api_mark_known(word_id: str) -> Any:
     coerced = _coerce_known_id(word_id)
-    ids = load_known()
-    ids.add(coerced)
-    save_known(ids)
     body = request.get_json(silent=True) or {}
     fields = {k: body[k] for k in _KNOWN_META_FIELDS if k in body}
-    if fields:
-        meta = load_known_meta()
-        meta[str(coerced)] = {**meta.get(str(coerced), {}), **fields}
-        save_known_meta(meta)
+    _upsert_known_word(str(coerced), fields)
     return jsonify({"ok": True, "id": coerced, "known": True})
 
 
 @app.delete("/api/known/<string:word_id>")
+@login_required
 def api_unmark_known(word_id: str) -> Any:
     coerced = _coerce_known_id(word_id)
-    ids = load_known()
-    ids.discard(coerced)
-    save_known(ids)
-    meta = load_known_meta()
-    if str(coerced) in meta:
-        del meta[str(coerced)]
-        save_known_meta(meta)
+    _remove_known_word(str(coerced))
     return jsonify({"ok": True, "id": coerced, "known": False})
 
 
 # ---------- API: Wortliste (alle bekannten Wörter, gefiltert/entfernbar) ---- #
 
 @app.get("/api/wortliste")
+@login_required
 def api_wortliste() -> Any:
     """Vereinigte Liste aller bekannten Wörter: WaniKani (exportiert oder
     manuell markiert), Dictionary (Karte erstellt oder manuell markiert) und
@@ -1014,6 +1181,7 @@ def api_wortliste() -> Any:
 
 
 @app.post("/api/wortliste")
+@login_required
 def api_wortliste_add_manual() -> Any:
     """Rein manuellen Eintrag (ohne WaniKani-Subject/Dictionary-Treffer) zur
     Wortliste hinzufügen – z. B. ein Wort, das man von woanders schon kann."""
@@ -1023,12 +1191,9 @@ def api_wortliste_add_manual() -> Any:
     if not characters:
         return jsonify({"error": "Bitte ein Wort angeben."}), 400
     wid = "manual_" + hashlib.sha1(characters.encode("utf-8")).hexdigest()[:16]
-    ids = load_known()
-    ids.add(wid)
-    save_known(ids)
-    meta = load_known_meta()
-    meta[wid] = {"characters": characters, "meaning": meaning, "kind": "Manuell", "level": None, "source": "manual"}
-    save_known_meta(meta)
+    _upsert_known_word(
+        wid, {"characters": characters, "meaning": meaning, "kind": "Manuell", "level": None, "source": "manual"},
+    )
     return jsonify(
         {
             "id": wid,
@@ -1046,6 +1211,7 @@ def api_wortliste_add_manual() -> Any:
 # ---------- API: Rendern (by ids) ------------------------------------------- #
 
 @app.post("/api/render")
+@login_required
 def api_render() -> Any:
     body = request.get_json(silent=True) or {}
     subject_ids = body.get("subject_ids") or []
@@ -1059,6 +1225,17 @@ def api_render() -> Any:
     layout = body.get("layout", "a6")
     if fmt == "pdf" and layout not in kc.LAYOUTS:
         return jsonify({"error": "Ungültiges Layout."}), 400
+
+    # Ownership vor dem Rendern prüfen (IDOR-Schutz): sonst könnte ein Nutzer
+    # eine fremde custom_id/kana_id angeben und deren Inhalt in sein EIGENES
+    # Export mitrendern lassen. WaniKani-Subjects brauchen das nicht (öffentliche
+    # WaniKani-Daten, kein privater Nutzer-Inhalt).
+    for cid in custom_ids:
+        if read_custom_owned(str(cid)) is None:
+            return jsonify({"error": f"Eigene Karte „{cid}“ nicht gefunden."}), 404
+    for kid in kana_ids:
+        if read_kana_owned(str(kid)) is None:
+            return jsonify({"error": f"Dictionary-Karte „{kid}“ nicht gefunden."}), 404
 
     sentence_overrides = body.get("sentence_overrides")
     field_overrides = body.get("field_overrides")
@@ -1088,7 +1265,7 @@ def api_render() -> Any:
         "status": "queued",
         "created_at": _now(),
     }
-    write_job(job)
+    write_job(job, user_id=current_user.id)
     threading.Thread(target=_run_render, args=(job_id,), daemon=True).start()
     return jsonify(job), 202
 
@@ -1096,49 +1273,63 @@ def api_render() -> Any:
 # ---------- API: Jobs -------------------------------------------------------- #
 
 @app.get("/api/customcards")
+@login_required
 def api_customcards() -> Any:
     return jsonify([_custom_descriptor(c) for c in list_customs()])
 
 
 @app.get("/api/customcards/<cid>")
+@login_required
 def api_customcard(cid: str) -> Any:
-    card = read_custom(cid)
+    card = read_custom_owned(cid)
     if card is None:
         abort(404)
     return jsonify(card)
 
 
 @app.post("/api/customcards")
+@login_required
 def api_save_customcard() -> Any:
     body = request.get_json(silent=True) or {}
-    cid = body.get("id") or uuid.uuid4().hex[:12]
+    cid = body.get("id")
+    if cid:
+        # Bearbeiten einer bestehenden Karte: nur wenn sie dem eingeloggten
+        # Nutzer gehört - sonst würde ein untergeschobenes Fremd-Id die Karte
+        # eines anderen Nutzers überschreiben (IDOR).
+        if read_custom_owned(str(cid)) is None:
+            return jsonify({"error": "Karte nicht gefunden."}), 404
+    else:
+        cid = uuid.uuid4().hex[:12]
     card = {
         "id": cid,
         "front_html": str(body.get("front_html", "")),
         "back_html": str(body.get("back_html", "")),
         "tags": [str(t).strip() for t in (body.get("tags") or []) if str(t).strip()],
-        "updated_at": _now(),
     }
-    write_custom(card)
-    return jsonify(card)
+    write_custom(card, user_id=current_user.id)
+    return jsonify(read_custom_owned(cid))
 
 
 @app.delete("/api/customcards/<cid>")
+@login_required
 def api_delete_customcard(cid: str) -> Any:
-    if read_custom(cid) is None:
+    if read_custom_owned(cid) is None:
         abort(404)
-    _custom_path(cid).unlink(missing_ok=True)
+    models.CustomCard.query.filter_by(id=cid, user_id=current_user.id).delete()
+    db.session.commit()
     return jsonify({"ok": True})
 
 
 # ---------- API: Dictionary-Karten (kanacards) ------------------------------- #
 
 @app.get("/api/kanacards")
+@login_required
 def api_kanacards() -> Any:
     return jsonify([_kana_descriptor(c) for c in list_kana()])
 
 
 @app.post("/api/kanacards")
+@login_required
 def api_create_kanacard() -> Any:
     """Wort (aus dem Text-Modus, ohne WaniKani-Treffer) als Dictionary- oder
     KI-Karte anlegen.
@@ -1186,46 +1377,52 @@ def api_create_kanacard() -> Any:
         "sentence_audio_url": card_obj.sentence_audio_url,
         "source": card_obj.source,
         "tags": card_obj.tags,
-        "updated_at": _now(),
     }
-    write_kana(record)
-    return jsonify(_kana_descriptor(record))
+    write_kana(record, user_id=current_user.id)
+    return jsonify(_kana_descriptor(read_kana_owned(record["id"])))
 
 
 @app.delete("/api/kanacards/<kid>")
+@login_required
 def api_delete_kanacard(kid: str) -> Any:
-    if read_kana(kid) is None:
+    if read_kana_owned(kid) is None:
         abort(404)
-    _kana_path(kid).unlink(missing_ok=True)
+    models.KanaCard.query.filter_by(id=kid, user_id=current_user.id).delete()
+    db.session.commit()
     return jsonify({"ok": True})
 
 
 @app.get("/api/jobs")
+@login_required
 def api_jobs() -> Any:
     return jsonify(list_jobs())
 
 
 @app.get("/api/jobs/<job_id>")
+@login_required
 def api_job(job_id: str) -> Any:
-    job = read_job(job_id)
+    job = read_job_owned(job_id)
     if job is None:
         abort(404)
     return jsonify(job)
 
 
 @app.delete("/api/jobs/<job_id>")
+@login_required
 def api_delete_job(job_id: str) -> Any:
-    if read_job(job_id) is None:
+    if read_job_owned(job_id) is None:
         abort(404)
     (OUTPUT_DIR / f"{job_id}.pdf").unlink(missing_ok=True)
     (OUTPUT_DIR / f"{job_id}.apkg").unlink(missing_ok=True)
-    _job_path(job_id).unlink(missing_ok=True)
+    models.Job.query.filter_by(id=job_id, user_id=current_user.id).delete()
+    db.session.commit()
     return jsonify({"ok": True})
 
 
 @app.get("/api/jobs/<job_id>/pdf")
+@login_required
 def api_job_pdf(job_id: str) -> Any:
-    job = read_job(job_id)
+    job = read_job_owned(job_id)
     if job is None or job.get("status") != "done":
         abort(404)
     pdf = OUTPUT_DIR / f"{job_id}.pdf"
@@ -1243,8 +1440,9 @@ def api_job_pdf(job_id: str) -> Any:
 
 
 @app.get("/api/jobs/<job_id>/apkg")
+@login_required
 def api_job_apkg(job_id: str) -> Any:
-    job = read_job(job_id)
+    job = read_job_owned(job_id)
     if job is None or job.get("status") != "done":
         abort(404)
     apkg = OUTPUT_DIR / f"{job_id}.apkg"
