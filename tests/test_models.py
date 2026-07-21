@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from models import CustomCard, Job, KanaCard, KnownWord, User, UserSettings
+from models import CustomCard, Job, KanaCard, KnownWord, ReviewState, User, UserSettings
 
 
 def test_user_password_hash_roundtrip(db_session):
@@ -139,3 +139,56 @@ def test_job_stores_params_as_json(db_session):
     fetched = db_session.session.get(Job, job.id)
     assert fetched.params == {"subject_ids": [1, 2, 3]}
     assert fetched.status == "queued"
+
+
+def test_review_state_composite_pk_allows_two_item_types_per_card(db_session):
+    """Ein WaniKani-Kanji bekommt zwei unabhängige Zeilen (meaning/reading,
+    siehe ReviewState-Docstring) - beide müssen nebeneinander existieren
+    können, ohne sich zu überschreiben."""
+    import srs
+
+    user = User(email="h@example.com"); user.set_password("x")
+    db_session.session.add(user)
+    db_session.session.flush()
+
+    state = srs.new_review_state()
+    meaning_row = ReviewState(
+        user_id=user.id, target_lang="ja", card_type="wanikani", card_id="440", item_type="meaning",
+        fsrs_state=state["fsrs_state"], due_at=state["due_at"],
+    )
+    reading_row = ReviewState(
+        user_id=user.id, target_lang="ja", card_type="wanikani", card_id="440", item_type="reading",
+        fsrs_state=state["fsrs_state"], due_at=state["due_at"],
+    )
+    db_session.session.add_all([meaning_row, reading_row])
+    db_session.session.commit()
+
+    rows = ReviewState.query.filter_by(user_id=user.id, card_id="440").all()
+    assert {r.item_type for r in rows} == {"meaning", "reading"}
+
+
+def test_review_state_isolated_by_target_lang(db_session):
+    """Dieselbe card_id in zwei Zielsprachen (z. B. Custom-Karten-IDs sind
+    pro Sprache eigenständig, siehe README "Multi-Language-Architektur")
+    braucht getrennte Lernstände."""
+    import srs
+
+    user = User(email="i@example.com"); user.set_password("x")
+    db_session.session.add(user)
+    db_session.session.flush()
+
+    state = srs.new_review_state()
+    db_session.session.add(ReviewState(
+        user_id=user.id, target_lang="ja", card_type="custom", card_id="c1", item_type="front",
+        fsrs_state=state["fsrs_state"], due_at=state["due_at"], reps=3,
+    ))
+    db_session.session.add(ReviewState(
+        user_id=user.id, target_lang="es", card_type="custom", card_id="c1", item_type="front",
+        fsrs_state=state["fsrs_state"], due_at=state["due_at"], reps=0,
+    ))
+    db_session.session.commit()
+
+    ja_row = db_session.session.get(ReviewState, (user.id, "ja", "custom", "c1", "front"))
+    es_row = db_session.session.get(ReviewState, (user.id, "es", "custom", "c1", "front"))
+    assert ja_row.reps == 3
+    assert es_row.reps == 0

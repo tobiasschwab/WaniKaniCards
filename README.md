@@ -950,6 +950,42 @@ in sich geschlossener Task, der keinen bestehenden Code anfasst; i18n für
 dynamisch erzeugte JS-Strings (Toasts/Fehlermeldungen); weitere UI-Sprachen
 über zusätzliche `i18n/<code>.json`-Dateien.
 
+## Vokabeltrainer (SRS, Fundament – Phase 1)
+
+Shiori exportiert Karten bisher nur als PDF oder Anki-Paket. Geplant ist
+eine dritte Option: Karten direkt **in Shiori selbst** mit Spaced Repetition
+lernen (Auswahl-Tabelle → „Zum Lernen hinzufügen" statt/zusätzlich zu
+„PDF erzeugen"/„Anki exportieren"). Aktuell umgesetzt ist nur das
+**Datenmodell-Fundament**, noch ohne Endpunkte/UI:
+
+- `models.ReviewState`: ein SRS-Lernstand pro `(user_id, target_lang,
+  card_type, card_id, item_type)` – zeigt per `card_type`+`card_id` auf eine
+  der drei bestehenden, heterogenen Kartenquellen (WaniKani-Subject-ID,
+  `CustomCard.id`, `KanaCard.id`) statt Karteninhalte zu duplizieren.
+  `item_type` bildet WaniKanis Verhalten nach: ein Kanji/eine Vokabel
+  bekommt zwei unabhängige Zeilen (`meaning` + `reading`, getrennter
+  Fortschritt pro Prüfrichtung), eine Custom-/Dictionary-Karte nur eine
+  (`front` bzw. `meaning`).
+- `srs.py`: dünner Wrapper um die [`fsrs`](https://pypi.org/project/fsrs/)-
+  Bibliothek (Free Spaced Repetition Scheduler, seit Anki 23.10 dessen
+  Standard-Algorithmus, Nachfolger von SM-2) – die eigentliche Scheduling-
+  Mathematik kommt vollständig aus der Bibliothek, nicht selbst
+  nachgebaut. `new_review_state()` erzeugt eine sofort fällige neue Karte,
+  `review(state, rating)` verarbeitet eine Bewertung (`"again"`/`"hard"`/
+  `"good"`/`"easy"`, wie bei Anki) und liefert den aktualisierten Zustand.
+- Geplanter Prüf-Flow (noch nicht gebaut): Freitext-Eingabe (Bedeutung/
+  Lesung, WanaKana-Eingabehilfe fürs Japanische) wird automatisch geprüft
+  (Fuzzy-Match) und schlägt eine Bewertung vor – der Nutzer bestätigt oder
+  überschreibt sie manuell, bevor sie ins FSRS-Scheduling einfließt.
+  Kombiniert damit WaniKanis strenge Eingabe-Prüfung mit Ankis
+  Selbsteinschätzungs-Flexibilität.
+
+**Noch offen** (spätere Phasen): `POST /api/srs/add` (Karten aus der
+Auswahl in die Lernwarteschlange aufnehmen), `GET /api/srs/queue` +
+`POST /api/srs/answer` (die eigentliche Review-Session), ein Review-Screen
+im Frontend, sowie ein Statistik-Dashboard mit Tageslimits (neue Karten/Tag,
+Reviews/Tag, wie bei Anki).
+
 ## Architektur
 
 Ein Skript (`kanji_cards.py`), klar in Funktionen getrennt:

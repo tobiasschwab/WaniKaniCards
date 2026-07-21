@@ -219,3 +219,46 @@ class Job(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
     started_at = db.Column(db.DateTime(timezone=True), nullable=True)
     finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class ReviewState(db.Model):
+    """Ein SRS-Lernstand (FSRS, siehe srs.py) für EINE Prüfrichtung EINER
+    Karte – Vokabeltrainer-Fundament, unabhängig vom PDF-/Anki-Export
+    (siehe README-Roadmap "SRS-Vokabeltrainer"). Statt einer eigenen
+    Karten-Tabelle zeigt jede Zeile per `(card_type, card_id)` auf eine der
+    drei bestehenden, heterogenen Kartenquellen (WaniKani-Subject-ID,
+    CustomCard.id, KanaCard.id) – keine Datenduplizierung.
+
+    `item_type` bildet WaniKanis eigenes Verhalten nach: ein Kanji/eine
+    Vokabel bekommt ZWEI unabhängige Zeilen ("meaning" + "reading"), eine
+    Custom-/Dictionary-Karte nur eine ("front" bzw. "meaning") – jede
+    Prüfrichtung hat ihren eigenen Fortschritt, nicht nur die Karte als
+    Ganzes.
+
+    `fsrs_state` ist die serialisierte `fsrs.Card` (siehe `srs.py`,
+    `Card.to_dict()`/`from_dict()`) – die eigentliche Scheduling-Mathematik
+    kommt vollständig aus der `fsrs`-Bibliothek, nicht selbst nachgebaut.
+    `due_at` ist zusätzlich eine EIGENE, indizierte Spalte (redundant zum
+    `due`-Feld in `fsrs_state`), damit die Warteschlangen-Abfrage
+    ("welche Karten sind fällig") nicht jede Zeile deserialisieren muss."""
+
+    __tablename__ = "review_states"
+    __table_args__ = (
+        db.PrimaryKeyConstraint("user_id", "target_lang", "card_type", "card_id", "item_type"),
+        db.Index("ix_review_states_due", "user_id", "target_lang", "due_at"),
+    )
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    target_lang = db.Column(db.String(10), nullable=False)
+    card_type = db.Column(db.String(16), nullable=False)  # "wanikani" | "custom" | "kana"
+    card_id = db.Column(db.String(64), nullable=False)
+    item_type = db.Column(db.String(16), nullable=False)  # "meaning" | "reading" | "front"
+    fsrs_state = db.Column(db.JSON, nullable=False, default=dict)
+    due_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+    last_reviewed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    # Eigene Zähler (die fsrs-Bibliothek selbst hält das nicht dauerhaft im
+    # Card-Objekt) - fürs künftige Statistik-Dashboard (Phase 4), schon
+    # jetzt mitgeführt, da beim Review ohnehin bekannt.
+    reps = db.Column(db.Integer, nullable=False, default=0)
+    lapses = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
