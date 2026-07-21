@@ -237,7 +237,7 @@ def test_api_text_annotate_ai_passes_settings_key_and_model(client, monkeypatch)
 
     seen = {}
 
-    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None, **kwargs):
         seen["gemini_key"] = gemini_key
         seen["gemini_model"] = gemini_model
         return []
@@ -259,7 +259,7 @@ def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(client, monkey
 
     seen = {}
 
-    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None, **kwargs):
         seen["gemini_model"] = gemini_model
         return []
 
@@ -276,9 +276,9 @@ def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(client, mo
 
     import kanji_cards as kc
 
-    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None):
+    def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None, **kwargs):
         return [{
-            "sentence": "x", "translation_de": "Übersetzung", "grammar_notes": "Notiz", "error": None,
+            "sentence": "x", "translation": "Übersetzung", "grammar_notes": "Notiz", "error": None,
             "segments": [
                 {"type": "word", "source": "ai", "text": "急に", "lemma": "急に", "sentence": "x",
                  "id": kc.ai_kana_card_id("急に"), "kind": "KI", "meaning": "plötzlich",
@@ -291,7 +291,7 @@ def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(client, mo
     r = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
     data = r.get_json()
     row = data["rows"][0]
-    assert row["translation_de"] == "Übersetzung"
+    assert row["translation"] == "Übersetzung"
     assert row["grammar_notes"] == "Notiz"
     seg = row["segments"][0]
     assert seg["status"] == "unknown"
@@ -324,11 +324,14 @@ def test_api_settings_get_set_gemini_key_and_model(client):
 
 def test_api_settings_secrets_stored_encrypted_not_plaintext(client):
     client.post("/api/settings", json={"token": "supersecrettoken", "deepl_key": "mydeeplkey"})
-    row = models.UserSettings.query.filter_by(user_id=client.test_user_id).first()
-    assert row.wanikani_token_enc is not None
-    assert "supersecrettoken" not in row.wanikani_token_enc
-    assert row.deepl_key_enc is not None
-    assert "mydeeplkey" not in row.deepl_key_enc
+    settings_row = models.UserSettings.query.filter_by(user_id=client.test_user_id).first()
+    secrets_row = models.UserLanguageSecrets.query.filter_by(
+        user_id=client.test_user_id, target_lang=settings_row.active_target_lang,
+    ).first()
+    assert secrets_row.wanikani_token_enc is not None
+    assert "supersecrettoken" not in secrets_row.wanikani_token_enc
+    assert settings_row.deepl_key_enc is not None
+    assert "mydeeplkey" not in settings_row.deepl_key_enc
 
 
 def test_api_settings_get_set_target_lang(client):
@@ -496,7 +499,7 @@ def test_api_create_kanacard_ai_stores_sentence_audio_url(client):
     })
     assert r.status_code == 200
     kid = r.get_json()["id"]
-    stored = webapp.read_kana_for_user(client.test_user_id, kid)
+    stored = webapp.read_kana_for_user(client.test_user_id, kid, "ja")
     assert stored["sentence_audio_url"] == "data:audio/wav;base64,AAAA"
 
 
@@ -511,7 +514,7 @@ def test_api_create_kanacard_persists_and_returns_descriptor(client, monkeypatch
     assert desc["meaning"] == "match; game"
     assert desc["kind"] == "Dict"
 
-    stored = webapp.read_kana_for_user(client.test_user_id, desc["id"])
+    stored = webapp.read_kana_for_user(client.test_user_id, desc["id"], "ja")
     assert stored["word"] == "しあい"
     assert stored["kanji_hint"] == "試合"
     assert stored["sentence_ja"] == "しあいがはじまりました。"
@@ -541,7 +544,7 @@ def test_api_kanacards_list_and_delete(client, monkeypatch):
 
     r = client.delete(f"/api/kanacards/{created['id']}")
     assert r.status_code == 200
-    assert webapp.read_kana_for_user(client.test_user_id, created["id"]) is None
+    assert webapp.read_kana_for_user(client.test_user_id, created["id"], "ja") is None
 
     assert client.delete(f"/api/kanacards/{created['id']}").status_code == 404
 

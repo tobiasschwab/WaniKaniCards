@@ -47,6 +47,12 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     is_admin = db.Column(db.Boolean, nullable=False, default=False)
+    # Muttersprache (ISO 639-1, z. B. "de"/"en") – Basis für Übersetzungen/
+    # Bedeutungen UND (siehe web/i18n/) die Oberflächensprache. Getrennt von
+    # `UserSettings.active_target_lang` (der gerade gelernten Sprache):
+    # Muttersprache ändert sich praktisch nie, die Zielsprache wird bewusst
+    # häufig gewechselt (siehe README "Multi-Language-Architektur").
+    native_lang = db.Column(db.String(10), nullable=False, default="de")
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
 
     settings = db.relationship(
@@ -76,17 +82,41 @@ class UserSettings(db.Model):
     __tablename__ = "user_settings"
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
-    username = db.Column(db.String(255), nullable=False, default="")
-    wanikani_token_enc = db.Column(db.Text, nullable=True)
     deepl_key_enc = db.Column(db.Text, nullable=True)
     gemini_key_enc = db.Column(db.Text, nullable=True)
     gemini_model = db.Column(db.String(100), nullable=False, default="gemini-flash-latest")
     target_lang = db.Column(db.String(10), nullable=False, default="DE")
+    # Aktuell gewählte LERNsprache (ISO 639-1, z. B. "ja"/"en"/"es") - der
+    # Nutzer hat genau eine aktive Zielsprache zur Zeit, kann aber jederzeit
+    # wechseln (siehe README "Multi-Language-Architektur"). Nicht zu
+    # verwechseln mit `target_lang` oben (DeepL-Ausgabesprachcode) oder
+    # `User.native_lang` (Muttersprache). Bestimmt u. a., welches
+    # `languages.LanguagePack` aktiv ist und filtert KnownWord/CustomCard/
+    # KanaCard/Job nach `target_lang`.
+    active_target_lang = db.Column(db.String(10), nullable=False, default="ja")
     # Level/Format/Layout/Paper/Duplex/CutMarks/Hole – dieselbe Struktur wie
     # bisher settings["defaults"].
     defaults = db.Column(db.JSON, nullable=False, default=dict)
 
     user = db.relationship("User", back_populates="settings")
+
+
+class UserLanguageSecrets(db.Model):
+    """Pro-Nutzer-UND-Zielsprache-Secrets – aktuell nur der WaniKani-Token +
+    Username, weil WaniKani ausschließlich für Japanisch relevant ist (siehe
+    `languages.japanese.JapanesePack`). Bewusst eine EIGENE Tabelle statt
+    Spalten auf `UserSettings`: Letztere ist pro Nutzer global (ein Gemini-/
+    DeepL-Key gilt für alle Zielsprachen), während der WaniKani-Token nur für
+    genau die Zielsprache "ja" einen Sinn ergibt. Künftige sprachspezifische
+    Secrets (z. B. ein anderer Content-Provider für eine andere Sprache)
+    landen als weitere Spalten hier, nicht auf `UserSettings`."""
+
+    __tablename__ = "user_language_secrets"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    target_lang = db.Column(db.String(10), primary_key=True)
+    wanikani_token_enc = db.Column(db.Text, nullable=True)
+    wanikani_username = db.Column(db.String(255), nullable=False, default="")
 
 
 class KnownWord(db.Model):
@@ -96,11 +126,14 @@ class KnownWord(db.Model):
 
     __tablename__ = "known_words"
     __table_args__ = (
-        db.UniqueConstraint("user_id", "word_id", name="uq_known_word_per_user"),
+        db.UniqueConstraint("user_id", "target_lang", "word_id", name="uq_known_word_per_user"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    # Zu welcher Zielsprache dieses Wort gehört (siehe README "Multi-Language-
+    # Architektur") - Bestandsdaten wurden per Migration auf "ja" befüllt.
+    target_lang = db.Column(db.String(10), nullable=False, default="ja", index=True)
     word_id = db.Column(db.String(64), nullable=False)
     characters = db.Column(db.String(255), nullable=False, default="")
     meaning = db.Column(db.String(255), nullable=False, default="")
@@ -117,6 +150,7 @@ class CustomCard(db.Model):
 
     id = db.Column(db.String(32), primary_key=True, default=_new_id)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    target_lang = db.Column(db.String(10), nullable=False, default="ja", index=True)
     front_html = db.Column(db.Text, nullable=False, default="")
     back_html = db.Column(db.Text, nullable=False, default="")
     tags = db.Column(db.JSON, nullable=False, default=list)
@@ -138,7 +172,7 @@ class KanaCard(db.Model):
     gegenseitig die Karte überschreiben."""
 
     __tablename__ = "kana_cards"
-    __table_args__ = (db.PrimaryKeyConstraint("user_id", "id"),)
+    __table_args__ = (db.PrimaryKeyConstraint("user_id", "target_lang", "id"),)
 
     # Bewusst KEIN default=_new_id: die ID ist ein stabiler Hash des Worts
     # (kc.kana_card_id()), damit derselbe Text-Fund für DENSELBEN Nutzer immer
@@ -146,11 +180,18 @@ class KanaCard(db.Model):
     # ID bleibt Aufgabe der Endpunkt-Schicht, nicht des Modells.
     id = db.Column(db.String(64), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    # Teil des Primärschlüssels (nicht nur ein Filter-Feld): derselbe
+    # Wort-Hash könnte über verschiedene Zielsprachen hinweg kollidieren.
+    target_lang = db.Column(db.String(10), nullable=False, default="ja")
     word = db.Column(db.String(255), nullable=False, default="")
     kanji_hint = db.Column(db.String(255), nullable=True)
     reading = db.Column(db.String(255), nullable=True)
     meaning = db.Column(db.String(255), nullable=False, default="")
     meaning_extra = db.Column(db.String(255), nullable=True)
+    # Name historisch aus der Japanisch-only-Zeit ("ja"), wird seit dem
+    # Multi-Language-Umbau generisch als "Beispielsatz in der Zielsprache"
+    # genutzt (auch für Nicht-Japanisch-Sprachen) - Umbenennen der Spalte
+    # selbst hätte nur kosmetischen Wert, aber Migrationsaufwand.
     sentence_ja = db.Column(db.Text, nullable=True)
     sentence_translation = db.Column(db.Text, nullable=True)
     sentence_audio_url = db.Column(db.Text, nullable=True)
@@ -168,6 +209,7 @@ class Job(db.Model):
 
     id = db.Column(db.String(32), primary_key=True, default=_new_id)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    target_lang = db.Column(db.String(10), nullable=False, default="ja", index=True)
     title = db.Column(db.String(255), nullable=False, default="")
     status = db.Column(db.String(32), nullable=False, default="queued")
     params = db.Column(db.JSON, nullable=False, default=dict)

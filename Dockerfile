@@ -31,6 +31,7 @@ COPY templates/ ./templates/
 COPY fonts/ ./fonts/
 COPY vendor/ ./vendor/
 COPY web/ ./web/
+COPY languages/ ./languages/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY docker-entrypoint.sh ./

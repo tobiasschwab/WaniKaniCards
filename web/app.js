@@ -25,8 +25,10 @@ async function checkAuthAndInit() {
     me = { authenticated: false };
   }
   if (me.authenticated) {
+    await setUiLanguage(me.native_lang);
     onAuthenticated(me.email);
   } else {
+    await setUiLanguage("de"); // vor dem Login noch keine Muttersprache bekannt
     $("#authOverlay").classList.remove("hidden");
   }
 }
@@ -37,16 +39,16 @@ function onAuthenticated(email) {
   $("#accountEmail").classList.remove("hidden");
   $("#logoutBtn").classList.remove("hidden");
   loadSettings().catch(() => {});
+  loadLanguages().catch(() => {});
   loadHistory();
   restoreKiStateFromStorage();
 }
 
 function setAuthMode(mode) {
   authMode = mode;
-  $("#authTitle").textContent = mode === "signup" ? "Konto erstellen" : "Anmelden";
-  $("#authSubmit").textContent = mode === "signup" ? "Registrieren" : "Anmelden";
-  $("#authToggleMode").textContent = mode === "signup"
-    ? "Schon ein Konto? Anmelden" : "Noch kein Konto? Registrieren";
+  $("#authTitle").textContent = t(mode === "signup" ? "auth.signup.title" : "auth.login.title");
+  $("#authSubmit").textContent = t(mode === "signup" ? "auth.signup.submit" : "auth.login.submit");
+  $("#authToggleMode").textContent = t(mode === "signup" ? "auth.signup.toggle" : "auth.login.toggle");
   $("#authStatus").textContent = "";
 }
 
@@ -240,6 +242,86 @@ async function loadSettings() {
   applyLayoutState();
   applyFormatState();
 }
+// UI-Chrome-Sprachen, für die es tatsächlich eine i18n/*.json gibt (siehe
+// i18n.js) - unabhängig von den Zielsprachen (SUPPORTED_TARGET_LANGS in
+// languages/registry.py), die viel zahlreicher sind, weil sie keine
+// eigene UI-Übersetzung brauchen (nur Karteninhalte).
+const _UI_LANGS = [
+  { code: "de", label: "Deutsch" },
+  { code: "en", label: "English" },
+];
+
+async function loadLanguages() {
+  const data = await api("/api/languages");
+  const nativeSel = $("#nativeLangSelect");
+  nativeSel.innerHTML = "";
+  for (const { code, label } of _UI_LANGS) {
+    const opt = document.createElement("option");
+    opt.value = code; opt.textContent = label;
+    nativeSel.appendChild(opt);
+  }
+  nativeSel.value = data.native_lang || "de";
+
+  const targetSel = $("#activeTargetLangSelect");
+  targetSel.innerHTML = "";
+  for (const { code, display_name } of data.supported_target_langs || []) {
+    const opt = document.createElement("option");
+    opt.value = code; opt.textContent = display_name;
+    targetSel.appendChild(opt);
+  }
+  targetSel.value = data.active_target_lang || "ja";
+
+  _applyLanguageCapabilities(data.active_capabilities || {});
+  return data;
+}
+
+// Modi, die eine externe Lernstufen-Quelle wie WaniKani brauchen (siehe
+// languages/base.py has_content_provider), für Zielsprachen ohne
+// spezialisierten LanguagePack ausblenden - "Frei erstellen"/"Aus Text"/
+// "Wortliste" funktionieren dagegen für jede Sprache.
+function _applyLanguageCapabilities(caps) {
+  const hasContentProvider = !!caps.has_content_provider;
+  for (const v of ["level", "compose"]) {
+    const btn = document.querySelector(`#modeTabs button[data-v="${v}"]`);
+    if (btn) btn.classList.toggle("hidden", !hasContentProvider);
+  }
+  // Falls der aktuell aktive Tab durch den Sprachwechsel weggefallen ist,
+  // auf "Frei erstellen" zurückfallen (immer verfügbar).
+  const active = $("#modeTabs").dataset.value;
+  if (!hasContentProvider && (active === "level" || active === "compose")) {
+    segSet("modeTabs", "custom");
+    $("#modeLevel").classList.add("hidden");
+    $("#modeCompose").classList.add("hidden");
+    $("#modeCustom").classList.remove("hidden");
+  }
+}
+
+async function onLanguageSelectChanged() {
+  const st = $("#languagesStatus");
+  st.textContent = "";
+  try {
+    const body = {
+      native_lang: $("#nativeLangSelect").value,
+      active_target_lang: $("#activeTargetLangSelect").value,
+    };
+    await api("/api/settings/language", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    await setUiLanguage(body.native_lang);
+    const data = await loadLanguages();
+    _applyLanguageCapabilities(data.active_capabilities || {});
+    // Sprachwechsel = neuer "Kurs" - Karten-/Wort-/Job-Listen sind serverseitig
+    // nach der neuen Zielsprache gefiltert, clientseitige Caches müssen daher
+    // neu geladen werden statt die alten (jetzt falschen) Daten weiter anzuzeigen.
+    loadHistory();
+    if (segValue("modeTabs") === "custom") loadCustoms();
+    if (segValue("modeTabs") === "wortliste") loadWortliste();
+    toast("Gespeichert");
+  } catch (e) {
+    st.textContent = e.message; st.className = "status err";
+  }
+}
+
 async function saveDefaults() {
   const defaults = {
     level: parseInt($("#level").value, 10) || 1, types: chipcheckValues("type"),
@@ -732,7 +814,7 @@ function _recomputeKiStats(rows) {
 function _kiRowsForStorage(rows) {
   return rows.map((row) => ({
     sentence: row.sentence,
-    translation_de: row.translation_de,
+    translation: row.translation,
     grammar_notes: row.grammar_notes,
     error: row.error,
     segments: (row.segments || []).map(({ _row, _hlKey, ...rest }) => rest),
@@ -1020,7 +1102,7 @@ function renderKiTable(rows) {
 
     const deCell = document.createElement("div");
     deCell.className = "ki-cell" + (kiBlurEnabled ? " ki-blur" : ""); deCell.dataset.label = "Deutsch";
-    deCell.textContent = row.translation_de || "";
+    deCell.textContent = row.translation || "";
 
     const vocabCell = document.createElement("div");
     vocabCell.className = "ki-cell ki-components" + (kiBlurEnabled ? " ki-blur" : ""); vocabCell.dataset.label = "Vokabeln";
@@ -1552,6 +1634,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  $("#nativeLangSelect").addEventListener("change", onLanguageSelectChanged);
+  $("#activeTargetLangSelect").addEventListener("change", onLanguageSelectChanged);
   $("#settingsToggle").addEventListener("click", () => $("#settingsOverlay").classList.remove("hidden"));
   $("#settingsClose").addEventListener("click", () => $("#settingsOverlay").classList.add("hidden"));
   $("#fieldEditClose").addEventListener("click", () => $("#fieldEditOverlay").classList.add("hidden"));

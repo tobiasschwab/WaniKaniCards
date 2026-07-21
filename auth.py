@@ -36,6 +36,12 @@ def signup():
     body = request.get_json(silent=True) or {}
     email = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
+    # Optional bei der Registrierung mitgegeben (siehe web/index.html
+    # Onboarding); ohne Angabe bleiben die Modell-Defaults ("de"/"ja") -
+    # Muttersprache/Zielsprache lassen sich danach jederzeit in den
+    # Einstellungen ändern (siehe /api/settings/language).
+    native_lang = str(body.get("native_lang") or "de").strip().lower()[:10]
+    active_target_lang = str(body.get("active_target_lang") or "ja").strip().lower()[:10]
 
     if not _EMAIL_RE.match(email):
         return jsonify({"error": "Ungültige E-Mail-Adresse."}), 400
@@ -44,11 +50,11 @@ def signup():
     if User.query.filter_by(email=email).first() is not None:
         return jsonify({"error": "Für diese E-Mail-Adresse existiert bereits ein Konto."}), 409
 
-    user = User(email=email)
+    user = User(email=email, native_lang=native_lang)
     user.set_password(password)
     db.session.add(user)
     db.session.flush()  # user.id wird für die FK unten gebraucht
-    db.session.add(UserSettings(user_id=user.id))
+    db.session.add(UserSettings(user_id=user.id, active_target_lang=active_target_lang))
     db.session.commit()
 
     login_user(user)
@@ -85,4 +91,10 @@ def me():
     entscheiden, ob Login-Formular oder App gezeigt wird."""
     if not current_user.is_authenticated:
         return jsonify({"authenticated": False})
-    return jsonify({"authenticated": True, "email": current_user.email})
+    settings = current_user.settings
+    return jsonify({
+        "authenticated": True,
+        "email": current_user.email,
+        "native_lang": current_user.native_lang,
+        "active_target_lang": settings.active_target_lang if settings else "ja",
+    })

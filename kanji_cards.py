@@ -1618,9 +1618,15 @@ def annotate_text_ai(
     use_cache: bool = True,
     sample: bool = False,
     token: str | None = None,
+    target_lang: str = "ja",
+    target_lang_name: str = "Japanisch",
+    native_lang_name: str = "Deutsch",
+    has_reading: bool = True,
 ) -> list[dict[str, Any]]:
     """Text per Gemini satzweise analysieren – eigener „KI"-Modus (siehe
-    `annotate_text()` für den Gemini-freien „Aus Text"-Modus).
+    `annotate_text()` für den Gemini-freien „Aus Text"-Modus, der NUR für
+    Japanisch verfügbar ist, siehe `languages.base.LanguagePack.has_offline_tokenizer`).
+    Dieser Modus funktioniert dagegen für jede Zielsprache.
 
     Anders als `annotate_text()` gibt es hier **keinen** Fallback auf Janome:
     Das ist ein bewusst separater Modus, der genau die von Gemini geliefer-
@@ -1630,7 +1636,16 @@ def annotate_text_ai(
     dieser Satz ein `"error"` statt Segmenten – kein harter Abbruch für den
     restlichen Text.
 
-    Rückgabe: eine Liste von Zeilen `{"sentence", "translation_de",
+    `target_lang` steuert, ob zusätzlich gegen WaniKani abgeglichen wird
+    (nur bei "ja" sinnvoll – WaniKani kennt nur Japanisch). Für andere
+    Zielsprachen fällt jedes erkannte Inhaltswort automatisch auf den
+    `source: "ai"`-Zweig zurück (siehe unten), der bereits sprachunabhängig
+    ist: die Bedeutung/Lesung/Funktion kommt direkt von Gemini, kein
+    JMdict/WaniKani-Abgleich nötig (siehe README "Multi-Language-
+    Architektur", Entscheidung 3 - Gemini als universeller Wörterbuch-
+    Fallback).
+
+    Rückgabe: eine Liste von Zeilen `{"sentence", "translation",
     "grammar_notes", "error", "segments"}`:
     - `segments`: wie bei `annotate_text()`, plus `source: "ai"` für Wörter,
       die weder WaniKani noch JMdict kennen, aber die Gemini selbst mit
@@ -1649,6 +1664,7 @@ def annotate_text_ai(
         try:
             results = gemini_client.analyze_sentences(
                 unique_sentences, gemini_key, model=gemini_model, use_cache=use_cache,
+                target_lang_name=target_lang_name, native_lang_name=native_lang_name, has_reading=has_reading,
             )
         except Exception:  # nie hart abbrechen – jeder Satz bekommt stattdessen einen Fehler
             logger.exception("KI-Analyse fehlgeschlagen.")
@@ -1691,8 +1707,12 @@ def annotate_text_ai(
             if is_content_word and lemma and lemma != "*":
                 all_lemmas.setdefault(lemma, None)
 
+    # WaniKani-Abgleich nur für Japanisch - für andere Zielsprachen bleibt
+    # `hits_by_chars` leer, jedes Inhaltswort landet dadurch automatisch im
+    # sprachunabhängigen `source: "ai"`-Zweig weiter unten (Gemini liefert
+    # Bedeutung/Lesung/Funktion direkt mit, kein externer Abgleich nötig).
     hits_by_chars: dict[str, list[dict[str, Any]]] = {}
-    if all_lemmas:
+    if all_lemmas and target_lang == "ja":
         if sample:
             for s in _sample_registry().values():
                 chars = strip_markup(s.get("data", {}).get("characters"))
@@ -1719,7 +1739,7 @@ def annotate_text_ai(
         reconciled = parsed_by_sentence.get(sentence)
         row: dict[str, Any] = {
             "sentence": sentence,
-            "translation_de": (result or {}).get("translation_de") or None,
+            "translation": (result or {}).get("translation") or None,
             "grammar_notes": (result or {}).get("grammar_notes") or None,
             "error": None,
             "segments": [],
@@ -1763,7 +1783,7 @@ def annotate_text_ai(
                     }
                 )
                 continue
-            if _is_kana_only(surface):
+            if target_lang == "ja" and _is_kana_only(surface):
                 entry = dictionary.lookup_reading(lemma)
                 if entry and entry.get("meaning"):
                     if buf:

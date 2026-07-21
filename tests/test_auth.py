@@ -21,7 +21,10 @@ def test_signup_creates_user_and_settings_and_logs_in(db_session):
     assert UserSettings.query.filter_by(user_id=user.id).first() is not None
 
     me = client.get("/api/auth/me").get_json()
-    assert me == {"authenticated": True, "email": "new@example.com"}
+    assert me == {
+        "authenticated": True, "email": "new@example.com",
+        "native_lang": "de", "active_target_lang": "ja",
+    }
 
 
 def test_signup_rejects_invalid_email(db_session):

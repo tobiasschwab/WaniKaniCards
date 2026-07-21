@@ -25,9 +25,9 @@ class _FakeResp:
 
 def _batch_body(items: list[tuple[str, list, str, str]]) -> dict:
     """Baut eine Fake-Gemini-Antwort im Batch-Schema: `items` sind
-    (satz, tokens, grammar_notes, translation_de)-Tupel."""
+    (satz, tokens, grammar_notes, translation)-Tupel."""
     sentences = [
-        {"sentence": s, "tokens": tokens, "grammar_notes": notes, "translation_de": trans}
+        {"sentence": s, "tokens": tokens, "grammar_notes": notes, "translation": trans}
         for s, tokens, notes, trans in items
     ]
     return {
@@ -74,7 +74,7 @@ def test_analyze_sentence_returns_parsed_result(tmp_path, monkeypatch):
     assert result is not None
     assert result["tokens"] == tokens
     assert result["grammar_notes"] == "Notiz"
-    assert result["translation_de"] == "Übersetzung"
+    assert result["translation"] == "Übersetzung"
 
 
 def test_analyze_sentence_sends_key_and_schema(tmp_path, monkeypatch):
@@ -167,7 +167,7 @@ def test_analyze_sentences_sends_single_request_for_multiple_sentences(tmp_path,
     results = gc.analyze_sentences(["大きい山です。", "小さい猫です。"], "key", session=session, use_cache=False)
     assert len(session.calls) == 1  # EIN Request für beide Sätze
     assert results["大きい山です。"]["grammar_notes"] == "N1"
-    assert results["小さい猫です。"]["translation_de"] == "T2"
+    assert results["小さい猫です。"]["translation"] == "T2"
 
 
 def test_analyze_sentences_deduplicates_repeated_sentences(tmp_path, monkeypatch):
@@ -194,7 +194,7 @@ def test_analyze_sentences_marks_missing_sentence_as_none(tmp_path, monkeypatch)
 def test_analyze_sentences_uses_per_sentence_cache_and_only_fetches_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(gc, "CACHE_DIR", tmp_path / "gemini")
     cached_tokens = [{"surface": "既存", "dictionary_form": "既存", "function": "Nomen"}]
-    gc._write_cache("既存の文。", "gemini-flash-latest", {"tokens": cached_tokens, "grammar_notes": "", "translation_de": ""})
+    gc._write_cache("既存の文。", "gemini-flash-latest:Japanisch", {"tokens": cached_tokens, "grammar_notes": "", "translation": ""})
 
     items = [("新しい文。", [{"surface": "新", "dictionary_form": "新しい", "function": "Adjektiv"}], "", "")]
     session = _FakeSession({"key": _FakeResp(json_data=_batch_body(items))})

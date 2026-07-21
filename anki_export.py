@@ -806,22 +806,28 @@ def _deck_id(name: str) -> int:
     return 1_607_000_000_000 + (zlib.crc32(name.encode("utf-8")) % 1_000_000_000)
 
 
-# Feste Deck-Struktur in Anki (Anki verschachtelt Decks über "::" im Namen):
-# Japanisch
+# Deck-Struktur in Anki (Anki verschachtelt Decks über "::" im Namen):
+# <Zielsprache>
 #   WaniKani
 #     Level <N>    – je eine Karte mit bekanntem WaniKani-Level (Kanji/
 #                    Radical/Vokabel-Karten tragen ihr Level selbst).
 #   sonstige       – alles ohne WaniKani-Level: Frei-/Dictionary-Karten.
-_ROOT_DECK = "Japanisch"
+#
+# Der Root-Deck-Name war früher fest "Japanisch" - seit dem Multi-Language-
+# Umbau kommt er als Parameter (siehe `export_deck(root_deck_name=...)`),
+# damit ein Export in einer anderen Zielsprache nicht trotzdem unter
+# "Japanisch" in Anki landet. Default bleibt "Japanisch" für Aufrufer, die
+# (noch) keinen expliziten Namen mitgeben (z. B. ältere Tests).
+_DEFAULT_ROOT_DECK = "Japanisch"
 
 
-def _deck_path_for(card: Any) -> str:
-    """Anki-Deck-Pfad für eine Karte bestimmen (feste Japanisch/WaniKani/
-    Level-N-/sonstige-Struktur, siehe oben)."""
+def _deck_path_for(card: Any, root_deck_name: str = _DEFAULT_ROOT_DECK) -> str:
+    """Anki-Deck-Pfad für eine Karte bestimmen (feste WaniKani/Level-N-/
+    sonstige-Struktur unter der Zielsprache als Wurzel, siehe oben)."""
     level = getattr(card, "level", None)
     if level is not None:
-        return f"{_ROOT_DECK}::WaniKani::Level {level}"
-    return f"{_ROOT_DECK}::sonstige"
+        return f"{root_deck_name}::WaniKani::Level {level}"
+    return f"{root_deck_name}::sonstige"
 
 
 # --------------------------------------------------------------------------- #
@@ -833,14 +839,17 @@ def export_deck(
     output: str | Path,
     *,
     deck_name: str = "Shiori",
+    root_deck_name: str = _DEFAULT_ROOT_DECK,
 ) -> tuple[Path, int]:
     """Card-/RadicalCard-/VocabCard-/CustomCard-Objekte als .apkg exportieren.
 
-    Landet immer in der festen Deck-Struktur `Japanisch::WaniKani::Level N`
-    (Karten mit bekanntem WaniKani-Level) bzw. `Japanisch::sonstige` (Frei-/
-    Dictionary-Karten ohne Level) – `deck_name` bestimmt dabei NICHT mehr den
-    Deck-Namen (Parameter bleibt aus Kompatibilitätsgründen bestehen, hat
-    aber keine Wirkung mehr).
+    Landet immer in der festen Deck-Struktur `<root_deck_name>::WaniKani::Level N`
+    (Karten mit bekanntem WaniKani-Level) bzw. `<root_deck_name>::sonstige`
+    (Frei-/Dictionary-Karten ohne Level) – `root_deck_name` ist normalerweise
+    der Anzeigename der Zielsprache (siehe `languages.base.LanguagePack.display_name()`),
+    Default "Japanisch" für Aufrufer ohne explizite Angabe. `deck_name`
+    bestimmt dabei NICHT den Deck-Namen (Parameter bleibt aus
+    Kompatibilitätsgründen bestehen, hat aber keine Wirkung mehr).
     """
     genanki = _require_genanki()
     models = _build_models(genanki)
@@ -851,7 +860,7 @@ def export_deck(
         note = _note_for(genanki, models, card)
         if note is None:
             continue
-        path = _deck_path_for(card)
+        path = _deck_path_for(card, root_deck_name)
         if path not in decks:
             decks[path] = genanki.Deck(_deck_id(path), path)
         decks[path].add_note(note)

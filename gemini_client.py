@@ -95,30 +95,6 @@ _TOKENS_SCHEMA = {
     },
 }
 
-_TOKEN_INSTRUCTIONS = """Zerlege JEDEN Satz in JEDES einzelne Wort, Partikel und Grammatikelement –
-OHNE etwas auszulassen. Das schließt Satzzeichen (｡ 。 、 ! ? …) am Ende oder
-mitten im Satz ausdrücklich mit ein, jedes als eigenes Token. Die
-surface-Felder aller Tokens eines Satzes müssen, aneinandergereiht, exakt
-wieder den kompletten Original-Satz ergeben (Zeichen für Zeichen, nichts
-fehlt). Gib zu jedem Token: surface (Schreibweise wie im Satz),
-dictionary_form (Grundform/Wörterbuchform, z. B. bei Verben die
-Present-Wörterbuchform; bei Satzzeichen einfach dasselbe Zeichen), reading
-(Lesung der dictionary_form in Hiragana; bei Satzzeichen leer lassen),
-function (kurze grammatikalische Funktion/Bedeutung, auf Deutsch; bei
-Satzzeichen z. B. "Satzzeichen"), meaning (kurze deutsche Kern-Bedeutung der
-dictionary_form, wie in einem Wörterbuch, z. B. "gehen" oder "Schule"; bei
-reinen Partikeln/Satzzeichen leer lassen), is_content_word (true für echte
-Vokabeln zum Lernen: Nomen, Verben, Adjektive, Adverbien – false für
-Partikel (は/が/を/に/で/も/の/…), Kopula (です/だ), Hilfsverben, Konjunktionen
-und Satzzeichen. Wichtig: is_content_word richtet sich NACH DER FUNKTION
-IM SATZ, nicht nach der reinen Lautung – z. B. ist die Themen-Partikel "は"
-(gesprochen "wa") immer false, auch wenn dieselbe Kana-Folge in einem
-Wörterbuch zufällig als eigenständiges Wort (z. B. "Flügel") auftauchen
-könnte; das Wörterbuch würde hier die falsche, zum Satz nicht passende
-Bedeutung liefern). Erkläre außerdem kurz die wichtigsten
-Grammatik-Besonderheiten des Satzes (grammar_notes, auf Deutsch) und gib
-eine natürliche, flüssige deutsche Übersetzung an (translation_de)."""
-
 _BATCH_RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -130,23 +106,66 @@ _BATCH_RESPONSE_SCHEMA = {
                     "sentence": {"type": "STRING"},
                     "tokens": _TOKENS_SCHEMA,
                     "grammar_notes": {"type": "STRING"},
-                    "translation_de": {"type": "STRING"},
+                    "translation": {"type": "STRING"},
                 },
-                "required": ["sentence", "tokens", "grammar_notes", "translation_de"],
+                "required": ["sentence", "tokens", "grammar_notes", "translation"],
             },
         },
     },
     "required": ["sentences"],
 }
 
-_BATCH_PROMPT_TEMPLATE = f"""Du bist ein professioneller Japanisch-Lehrer. Analysiere JEDEN der folgenden, durchnummerierten japanischen Sätze einzeln für mich, in genau dieser Reihenfolge. Gehe für jeden Satz strikt Schritt für Schritt vor:
 
-{_TOKEN_INSTRUCTIONS}
+def _token_instructions(target_lang_name: str, native_lang_name: str, has_reading: bool) -> str:
+    """Token-Analyse-Anweisung, parametrisiert nach Ziel-/Muttersprache (siehe
+    README "Multi-Language-Architektur") - der ausführliche Japanisch-
+    Partikel-Beispieltext (は/が/を/…) bleibt bewusst NUR für Japanisch
+    erhalten (`has_reading=True`, aktuell gleichbedeutend mit "hat Furigana/
+    Lesungen", siehe `languages.base.LanguagePack.has_furigana`): er
+    illustriert eine Fallunterscheidung, die nur bei Sprachen mit eigenem
+    Lesungssystem (Kana-Homographe) tatsächlich auftritt. Für andere Sprachen
+    bleibt die Kernanweisung (Wortgrenzen/Grundform/Funktion/Bedeutung)
+    unverändert, nur ohne dieses sprachspezifische Beispiel und ohne
+    Lesungsfeld."""
+    reading_instruction = (
+        f"reading (Lesung der dictionary_form in Hiragana, da {target_lang_name}; "
+        "bei Satzzeichen leer lassen), "
+    ) if has_reading else "reading (leer lassen, diese Sprache hat kein gesondertes Lesungssystem), "
+    content_word_note = (
+        ' Wichtig: is_content_word richtet sich NACH DER FUNKTION IM SATZ, nicht nach der '
+        'reinen Lautung – z. B. ist die Themen-Partikel "は" (gesprochen "wa") immer false, '
+        'auch wenn dieselbe Kana-Folge in einem Wörterbuch zufällig als eigenständiges Wort '
+        '(z. B. "Flügel") auftauchen könnte; das Wörterbuch würde hier die falsche, zum Satz '
+        "nicht passende Bedeutung liefern."
+    ) if has_reading else ""
+    return f"""Zerlege JEDEN Satz in JEDES einzelne Wort, Partikel und Grammatikelement –
+OHNE etwas auszulassen. Das schließt Satzzeichen (｡ 。 、 ! ? …) am Ende oder
+mitten im Satz ausdrücklich mit ein, jedes als eigenes Token. Die
+surface-Felder aller Tokens eines Satzes müssen, aneinandergereiht, exakt
+wieder den kompletten Original-Satz ergeben (Zeichen für Zeichen, nichts
+fehlt). Gib zu jedem Token: surface (Schreibweise wie im Satz),
+dictionary_form (Grundform/Wörterbuchform, z. B. bei Verben die
+Present-Wörterbuchform; bei Satzzeichen einfach dasselbe Zeichen), {reading_instruction}function (kurze grammatikalische Funktion/Bedeutung, auf {native_lang_name}; bei
+Satzzeichen z. B. "Satzzeichen"), meaning (kurze {native_lang_name}e Kern-Bedeutung der
+dictionary_form, wie in einem Wörterbuch, z. B. "gehen" oder "Schule"; bei
+reinen Partikeln/Satzzeichen leer lassen), is_content_word (true für echte
+Vokabeln zum Lernen: Nomen, Verben, Adjektive, Adverbien – false für
+Partikel, Kopula, Hilfsverben, Konjunktionen und Satzzeichen.{content_word_note} Erkläre
+außerdem kurz die wichtigsten Grammatik-Besonderheiten des Satzes
+(grammar_notes, auf {native_lang_name}) und gib eine natürliche, flüssige
+{native_lang_name}e Übersetzung an (translation)."""
 
-Gib "sentences" als Array zurück – für JEDEN unten aufgeführten Satz genau ein Objekt, mit "sentence" (der Original-Satz, exakt wie unten angegeben, unverändert), "tokens", "grammar_notes", "translation_de". Kein Satz darf ausgelassen werden.
+
+def _batch_prompt(sentences_numbered: str, target_lang_name: str, native_lang_name: str, has_reading: bool) -> str:
+    instructions = _token_instructions(target_lang_name, native_lang_name, has_reading)
+    return f"""Du bist ein professioneller {target_lang_name}-Lehrer. Analysiere JEDEN der folgenden, durchnummerierten {target_lang_name.lower()}en Sätze einzeln für mich, in genau dieser Reihenfolge. Gehe für jeden Satz strikt Schritt für Schritt vor:
+
+{instructions}
+
+Gib "sentences" als Array zurück – für JEDEN unten aufgeführten Satz genau ein Objekt, mit "sentence" (der Original-Satz, exakt wie unten angegeben, unverändert), "tokens", "grammar_notes", "translation". Kein Satz darf ausgelassen werden.
 
 Sätze:
-{{sentences}}"""
+{sentences_numbered}"""
 
 # Wie viele Sätze maximal in einem einzigen Request landen – ein Sicherheits-
 # Deckel gegen extrem lange Texte, nicht weil Gemini das nicht könnte
@@ -294,19 +313,26 @@ def analyze_sentence(
     model: str = DEFAULT_MODEL,
     session: requests.Session | None = None,
     use_cache: bool = True,
+    target_lang_name: str = "Japanisch",
+    native_lang_name: str = "Deutsch",
+    has_reading: bool = True,
 ) -> dict[str, Any] | None:
-    """Einen einzelnen japanischen Satz per Gemini analysieren (ein Request).
+    """Einen einzelnen Satz der Zielsprache per Gemini analysieren (ein
+    Request).
 
     Für mehrere Sätze `analyze_sentences()` verwenden (ein Batch-Request statt
     vieler Einzel-Requests). Gibt bei fehlendem Text/Key, Netzwerkfehler,
     Rate-Limit/Quota oder kaputter/unerwarteter Antwort `None` zurück statt
     eine Exception zu werfen – der Aufrufer fällt dann für diesen Satz auf
-    Janome zurück.
+    Janome zurück (nur bei Japanisch möglich, siehe `kanji_cards.annotate_text()`).
     """
     sentence = sentence.strip()
     if not sentence or not api_key:
         return None
-    return analyze_sentences([sentence], api_key, model=model, session=session, use_cache=use_cache).get(sentence)
+    return analyze_sentences(
+        [sentence], api_key, model=model, session=session, use_cache=use_cache,
+        target_lang_name=target_lang_name, native_lang_name=native_lang_name, has_reading=has_reading,
+    ).get(sentence)
 
 
 def analyze_sentences(
@@ -316,23 +342,38 @@ def analyze_sentences(
     model: str = DEFAULT_MODEL,
     session: requests.Session | None = None,
     use_cache: bool = True,
+    target_lang_name: str = "Japanisch",
+    native_lang_name: str = "Deutsch",
+    has_reading: bool = True,
 ) -> dict[str, dict[str, Any] | None]:
     """Mehrere Sätze in möglichst wenigen Gemini-Requests analysieren lassen
     (ein Batch-Request pro bis zu `_BATCH_CHUNK_SIZE` noch nicht gecachten
     Sätzen, statt einem Request pro Satz).
 
+    `target_lang_name`/`native_lang_name` sind die ausgeschriebenen Namen
+    (z. B. "Japanisch"/"Englisch") für den Prompt-Text - siehe README
+    "Multi-Language-Architektur". `has_reading` steuert, ob nach einer
+    Hiragana-Lesung gefragt wird (nur bei Sprachen mit eigenem
+    Lesungssystem sinnvoll, siehe `languages.base.LanguagePack.has_furigana`).
+
     Gibt ein dict `{satz: ergebnis_oder_None}` zurück – für jeden übergebenen,
     nicht-leeren Satz garantiert ein Eintrag. `None` bei allem, was fehl-
-    schlägt (Aufrufer fällt für genau diesen Satz auf Janome zurück).
-    """
+    schlägt (Aufrufer fällt für genau diesen Satz auf Janome zurück, sofern
+    verfügbar)."""
     unique = list(dict.fromkeys(s.strip() for s in sentences if s and s.strip()))
     results: dict[str, dict[str, Any] | None] = {}
     if not unique or not api_key:
         return dict.fromkeys(unique)
 
+    # Cache-Key schließt die Zielsprache ein: derselbe Satztext könnte in
+    # zwei Zielsprachen unterschiedlich analysiert werden (z. B. ein rein
+    # lateinisches Wort, das sowohl als Englisch- als auch als
+    # Spanisch-Satz vorkäme) - ohne das würde ein Sprachwechsel u. U. eine
+    # falsche, gecachte Analyse einer anderen Sprache zurückliefern.
+    cache_model_key = f"{model}:{target_lang_name}"
     todo: list[str] = []
     for s in unique:
-        cached = _read_cache(s, model) if use_cache else None
+        cached = _read_cache(s, cache_model_key) if use_cache else None
         if cached is not None:
             results[s] = cached
         else:
@@ -343,21 +384,26 @@ def analyze_sentences(
     session = session or requests.Session()
     for i in range(0, len(todo), _BATCH_CHUNK_SIZE):
         chunk = todo[i : i + _BATCH_CHUNK_SIZE]
-        chunk_results = _analyze_batch(chunk, api_key, model=model, session=session)
+        chunk_results = _analyze_batch(
+            chunk, api_key, model=model, session=session,
+            target_lang_name=target_lang_name, native_lang_name=native_lang_name, has_reading=has_reading,
+        )
         for s in chunk:
             result = chunk_results.get(s)
             results[s] = result
             if result is not None and use_cache:
-                _write_cache(s, model, result)
+                _write_cache(s, cache_model_key, result)
     return results
 
 
 def _analyze_batch(
-    sentences: list[str], api_key: str, *, model: str, session: requests.Session
+    sentences: list[str], api_key: str, *, model: str, session: requests.Session,
+    target_lang_name: str = "Japanisch", native_lang_name: str = "Deutsch", has_reading: bool = True,
 ) -> dict[str, dict[str, Any] | None]:
     numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, start=1))
+    prompt = _batch_prompt(numbered, target_lang_name, native_lang_name, has_reading)
     body = {
-        "contents": [{"parts": [{"text": _BATCH_PROMPT_TEMPLATE.format(sentences=numbered)}]}],
+        "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": _BATCH_RESPONSE_SCHEMA,
@@ -391,7 +437,7 @@ def _analyze_batch(
             by_sentence[sentence] = {
                 "tokens": tokens,
                 "grammar_notes": item.get("grammar_notes") or "",
-                "translation_de": item.get("translation_de") or "",
+                "translation": item.get("translation") or "",
             }
     missing = [s for s, r in by_sentence.items() if r is None]
     if missing:
@@ -538,16 +584,26 @@ def synthesize_speech(
 
 _OCR_CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini_ocr"
 
-_OCR_PROMPT = """Transkribiere GENAU den japanischen (und ggf. deutschen/englischen) Text in diesem Bild.
-Gib NUR den reinen Text zurück, Zeile für Zeile wie im Bild angeordnet -
-keine Übersetzung, keine Erklärung, keine Markdown-Formatierung, keine
-Anführungszeichen drumherum. Furigana (kleine Lesehilfen über oder neben
-Kanji) NICHT mit ausgeben, nur den eigentlichen Haupttext. Ist kein
-lesbarer Text im Bild, gib einen leeren String zurück."""
+def _ocr_prompt(target_lang_name: str, has_furigana: bool) -> str:
+    """OCR-Prompt, parametrisiert nach Zielsprache (siehe README
+    "Multi-Language-Architektur") - der Furigana-Hinweis ist nur bei
+    Sprachen mit Furigana relevant (aktuell nur Japanisch, siehe
+    `languages.base.LanguagePack.has_furigana`)."""
+    furigana_note = (
+        " Furigana (kleine Lesehilfen über oder neben Kanji) NICHT mit ausgeben, nur den"
+        " eigentlichen Haupttext."
+    ) if has_furigana else ""
+    return (
+        f"Transkribiere GENAU den {target_lang_name.lower()}en (und ggf. deutschen/englischen) "
+        "Text in diesem Bild. Gib NUR den reinen Text zurück, Zeile für Zeile wie im Bild "
+        "angeordnet - keine Übersetzung, keine Erklärung, keine Markdown-Formatierung, keine "
+        f"Anführungszeichen drumherum.{furigana_note} Ist kein lesbarer Text im Bild, gib einen "
+        "leeren String zurück."
+    )
 
 
-def _ocr_cache_path(image_bytes: bytes, model: str) -> Path:
-    key = hashlib.sha1(model.encode("utf-8") + b"\0" + image_bytes).hexdigest()
+def _ocr_cache_path(image_bytes: bytes, model: str, target_lang_name: str = "Japanisch") -> Path:
+    key = hashlib.sha1(model.encode("utf-8") + b"\0" + target_lang_name.encode("utf-8") + b"\0" + image_bytes).hexdigest()
     return _OCR_CACHE_DIR / f"{key}.txt"
 
 
@@ -559,6 +615,8 @@ def transcribe_image(
     model: str = DEFAULT_MODEL,
     session: requests.Session | None = None,
     use_cache: bool = True,
+    target_lang_name: str = "Japanisch",
+    has_furigana: bool = True,
 ) -> str | None:
     """Text aus einem Bild transkribieren (OCR per Gemini) – für PDF-Seiten
     ohne Textlayer oder direkt hochgeladene Bilder (siehe `pdf_import.py`).
@@ -571,7 +629,7 @@ def transcribe_image(
     if not image_bytes or not api_key:
         return None
 
-    cache_file = _ocr_cache_path(image_bytes, model) if use_cache else None
+    cache_file = _ocr_cache_path(image_bytes, model, target_lang_name) if use_cache else None
     if cache_file and cache_file.is_file():
         try:
             return cache_file.read_text(encoding="utf-8")
@@ -582,7 +640,7 @@ def transcribe_image(
     b64 = base64.b64encode(image_bytes).decode("ascii")
     body = {
         "contents": [{"parts": [
-            {"text": _OCR_PROMPT},
+            {"text": _ocr_prompt(target_lang_name, has_furigana)},
             {"inlineData": {"mimeType": mime_type, "data": b64}},
         ]}],
     }

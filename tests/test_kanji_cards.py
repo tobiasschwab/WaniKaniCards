@@ -820,10 +820,10 @@ def test_annotate_text_wanikani_match_wins_over_dictionary_fallback(monkeypatch)
 # annotate_text_ai: KI-Modus (Gemini, Satz-Tabelle, kein Janome-Fallback)
 # --------------------------------------------------------------------------- #
 
-def _fake_gemini(tokens, grammar_notes="Notiz", translation_de="Übersetzung"):
-    def _analyze_sentences(sentences, api_key, *, model=gemini_client.DEFAULT_MODEL, session=None, use_cache=True):
+def _fake_gemini(tokens, grammar_notes="Notiz", translation="Übersetzung"):
+    def _analyze_sentences(sentences, api_key, *, model=gemini_client.DEFAULT_MODEL, session=None, use_cache=True, **kwargs):
         return {
-            s: {"tokens": tokens, "grammar_notes": grammar_notes, "translation_de": translation_de}
+            s: {"tokens": tokens, "grammar_notes": grammar_notes, "translation": translation}
             for s in sentences
         }
     return _analyze_sentences
@@ -889,7 +889,7 @@ def test_annotate_text_ai_marks_wanikani_and_dictionary_and_ai_sources(monkeypat
     assert len(rows) == 1
     row = rows[0]
     assert row["error"] is None
-    assert row["translation_de"] == "Übersetzung"
+    assert row["translation"] == "Übersetzung"
     assert row["grammar_notes"] == "Notiz"
     assert "".join(
         s["text"] for s in row["segments"]
@@ -966,7 +966,7 @@ def test_annotate_text_ai_calls_gemini_once_with_all_unique_sentences(monkeypatc
     # drei Einzel-Aufrufe (das war der eigentliche Rate-Limit-Bug).
     calls = []
 
-    def fake_analyze_sentences(sentences, api_key, *, model="gemini-flash-latest", session=None, use_cache=True):
+    def fake_analyze_sentences(sentences, api_key, *, model="gemini-flash-latest", session=None, use_cache=True, **kwargs):
         calls.append(list(sentences))
         return dict.fromkeys(sentences)
 

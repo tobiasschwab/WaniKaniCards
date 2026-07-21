@@ -829,6 +829,108 @@ rq worker renders --url redis://localhost:6379/0
 Mit Docker startet `docker compose up` automatisch einen `redis`- und einen
 `worker`-Service mit (siehe `docker-compose.yml`).
 
+## Multi-Language-Architektur
+
+Shiori war ursprünglich ein reines Japanisch-Lernwerkzeug – WaniKani, Kanji,
+Onyomi/Kunyomi-Lesungen, Janome-Tokenisierung und JMdict waren fest in jede
+Schicht eingebaut. Der Umbau macht daraus ein **Multi-Language-Tool**: jeder
+Nutzer hat eine **Muttersprache** (`User.native_lang`, steuert u. a. die
+UI-Sprache) und genau eine **aktive Zielsprache** (`UserSettings.active_target_lang`,
+der gerade gelernte "Kurs") – umschaltbar über den Sprachwechsler in den
+Einstellungen, ohne dass Fortschritt/Karten verloren gehen (siehe unten,
+"Datenmodell").
+
+**Grundprinzip: `LanguagePack`.** Alles, was sich zwischen Zielsprachen
+unterscheidet (externe Lernstufen-Quelle wie WaniKani, Lesungsfelder,
+Furigana, Offline-Tokenizer, Wörterbuch-Backend, Anki-Deck-Struktur), steckt
+hinter einem gemeinsamen Interface (`languages/base.py: LanguagePack`).
+Japanisch (`languages/japanese.py`) ist der einzige **vollausgestattete**
+Pack – er deklariert nur die Capability-Flags (`has_content_provider=True`,
+`reading_labels=["Onyomi","Kunyomi"]`, `has_furigana=True`,
+`has_offline_tokenizer=True`, `has_kana_input=True`); die eigentliche Logik
+bleibt bewusst **unverändert** in `kanji_cards.py`/`dictionary.py` (kein
+riskanter Rewrite der ~2300 Zeilen WaniKani-/Janome-Integration). Jede
+andere Zielsprache bekommt automatisch den `GenericPack`
+(`languages/generic.py`, alle Flags auf `False`) über `languages/registry.py:
+get_pack(code)`.
+
+**Was funktioniert wo:**
+
+| Modus | Japanisch (`JapanesePack`) | andere Sprachen (`GenericPack`) |
+|---|---|---|
+| Level-Stapel / Suche (WaniKani) | ✅ | ❌ (Endpunkt liefert 400, siehe `_require_content_provider()`) |
+| Aus Text (Janome, offline) | ✅ | ❌ (kein Offline-Tokenizer) |
+| Mit KI (Gemini-Satzanalyse) | ✅ | ✅ (Prompts sind auf Ziel-/Muttersprache parametrisiert, siehe unten) |
+| Frei erstellen / Wortliste | ✅ | ✅ |
+| Wörterbuch-Lookup für Dictionary-Karten | JMdict | Gemini als universeller Fallback (Entscheidung: kein zweites JMdict-Analogon pro Sprache pflegen) |
+
+**Datenmodell:** `KnownWord`/`CustomCard`/`KanaCard`/`Job` haben eine neue
+`target_lang`-Spalte – Fortschritt/Karten/Job-Verlauf sind pro Zielsprache
+getrennt (ein Sprachwechsel zeigt also eine andere, aber vollständig
+erhaltene Ansicht, kein Datenverlust). `KanaCard`s Primärschlüssel wurde um
+`target_lang` erweitert (`(user_id, target_lang, id)`), weil der Wort-Hash
+sonst über Sprachen hinweg kollidieren könnte. Der WaniKani-Token wandert
+von `UserSettings` (pro Nutzer global) in eine neue Tabelle
+`UserLanguageSecrets` (pro Nutzer **und** Zielsprache) – er ergibt nur für
+`target_lang="ja"` einen Sinn, DeepL-/Gemini-Keys bleiben dagegen global
+(Provider-übergreifend nutzbar). Migration `c7691d3fd577` legt die neuen
+Spalten an und befüllt Bestandsdaten mit `target_lang="ja"`.
+
+**Gemini-Prompts parametrisiert statt hartcodiert:** `gemini_client.py`
+nahm Japanisch→Deutsch fest an (Antwortfeld hieß `translation_de`,
+Prompt-Text erwähnte "Japanisch"/"Hiragana" wörtlich). Jetzt nehmen
+`analyze_sentences()`/`transcribe_image()` `target_lang_name`/
+`native_lang_name`/`has_reading`(bzw. `has_furigana`) als Parameter, das
+Antwortfeld heißt generisch `translation`. Der Japanisch-spezifische
+Partikel-Beispieltext (は/が/を/…) bleibt nur bei `has_reading=True`
+erhalten – für andere Sprachen eine gekürzte, aber inhaltlich identische
+Anweisung. `kanji_cards.annotate_text_ai()` bekam einen `target_lang`-
+Parameter: der WaniKani-/JMdict-Abgleich läuft nur bei `"ja"`, für andere
+Sprachen fällt jedes erkannte Inhaltswort automatisch auf den bereits
+sprachunabhängigen `source: "ai"`-Zweig zurück (Bedeutung/Lesung/Funktion
+kommen direkt von Gemini, kein externes Wörterbuch nötig – das ist
+zugleich die Umsetzung von Entscheidung 3 unten).
+
+**Anki-Export generalisiert:** Der Root-Deck-Name war fest `"Japanisch"`
+(`anki_export._ROOT_DECK`) – jetzt ein Parameter `root_deck_name`
+(`export_deck(..., root_deck_name=...)`), den `webapp.py` aus
+`get_pack(target_lang).display_name("de")` befüllt. Ein Export in einer
+anderen Zielsprache landet dadurch z. B. unter `Englisch::sonstige` statt
+fälschlich unter `Japanisch::…`.
+
+**Frontend-i18n:** `web/i18n.js` + `web/i18n/{de,en}.json` übersetzen die
+UI-Chrome (Header, Login, Einstellungen, Moduswahl) nach der Muttersprache
+– bewusst **getrennt** von der Zielsprache (Karteninhalte bleiben in der
+gelernten Sprache, nur Menüs/Buttons wechseln). Deckt aktuell die
+wichtigste, am häufigsten sichtbare Chrome ab (`data-i18n`-Attribute),
+nicht jeden dynamisch erzeugten String – eine Erweiterung um weitere
+Sprachen/Strings ist rein additiv (neue `i18n/<code>.json` + Attribute).
+Der Sprachwechsler (Einstellungen → „Sprachen") ruft `GET /api/languages`
+(Capabilities + verfügbare Zielsprachen) und `POST /api/settings/language`
+auf; die Level-Stapel-/Suche-Tabs blenden sich automatisch aus, wenn die
+aktive Zielsprache keinen `has_content_provider`-Pack hat (mit Fallback auf
+„Frei erstellen").
+
+**Offene Entscheidungen (Defaults gesetzt, bei Bedarf ändern):**
+
+1. **UI-Chrome-Sprache**: an `native_lang` gekoppelt (aktuell `de`/`en`
+   übersetzt), nicht an die Zielsprache – ein Nutzer, der Japanisch lernt,
+   soll nicht zwangsläufig eine japanische Oberfläche bekommen.
+2. **Ein aktiver "Kurs"**: genau eine `active_target_lang` gleichzeitig,
+   umschaltbar ohne Datenverlust (kein Multi-Kurs-Dashboard mit mehreren
+   gleichzeitig sichtbaren Sprachen).
+3. **Gemini als universeller Wörterbuch-Fallback**: für Sprachen ohne
+   eigenes Wörterbuch-Backend (alle außer Japanisch) übernimmt Gemini die
+   Bedeutungs-/Lesungs-Ermittlung im KI-Textmodus – braucht also zwingend
+   einen hinterlegten Gemini-Key, um für diese Sprachen nutzbar zu sein.
+
+**Nächste mögliche Schritte** (nicht Teil dieses Umbaus, da erst bei
+Bedarf): ein zweiter vollausgestatteter `LanguagePack` (z. B. Chinesisch
+mit Pinyin-Lesungen/jieba-Tokenizer/CC-CEDICT) – dank der Abstraktion ein
+in sich geschlossener Task, der keinen bestehenden Code anfasst; vollständige
+i18n-Abdeckung weiterer UI-Strings; weitere UI-Sprachen über zusätzliche
+`i18n/<code>.json`-Dateien.
+
 ## Architektur
 
 Ein Skript (`kanji_cards.py`), klar in Funktionen getrennt:

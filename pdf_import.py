@@ -40,13 +40,6 @@ _OCR_RENDER_DPI = 200
 # aus fehlerhafter Text-Extraktion zählt nicht als "hat Text".
 _MIN_TEXT_CHARS = 3
 
-_OCR_PROMPT = """Transkribiere GENAU den japanischen (und ggf. deutschen/englischen) Text in diesem Bild.
-Gib NUR den reinen Text zurück, Zeile für Zeile wie im Bild angeordnet -
-keine Übersetzung, keine Erklärung, keine Markdown-Formatierung, keine
-Anführungszeichen drumherum. Furigana (kleine Lesehilfen über oder neben
-Kanji) NICHT mit ausgeben, nur den eigentlichen Haupttext. Ist kein
-lesbarer Text im Bild, gib einen leeren String zurück."""
-
 _IMAGE_MIME_BY_EXT = {
     "png": "image/png",
     "jpg": "image/jpeg",
@@ -98,6 +91,8 @@ def extract_image_text(
     gemini_key: str | None,
     gemini_model: str = gemini_client.DEFAULT_MODEL,
     use_cache: bool = True,
+    target_lang_name: str = "Japanisch",
+    has_furigana: bool = True,
 ) -> str:
     """Ein einzelnes Bild per Gemini transkribieren lassen. Braucht immer
     einen Gemini-Key (Bilder haben per Definition keinen Textlayer)."""
@@ -107,6 +102,7 @@ def extract_image_text(
         )
     text = gemini_client.transcribe_image(
         data, gemini_key, mime_type=mime_type, model=gemini_model, use_cache=use_cache,
+        target_lang_name=target_lang_name, has_furigana=has_furigana,
     )
     if text is None:
         raise ExtractionError("Texterkennung im Bild fehlgeschlagen (Netzwerk, Quota oder ungültiger Key).")
@@ -119,6 +115,8 @@ def extract_pdf_text(
     gemini_key: str | None,
     gemini_model: str = gemini_client.DEFAULT_MODEL,
     use_cache: bool = True,
+    target_lang_name: str = "Japanisch",
+    has_furigana: bool = True,
 ) -> str:
     """Text aus einer PDF-Datei extrahieren, Seite für Seite.
 
@@ -153,6 +151,7 @@ def extract_pdf_text(
         png_bytes = pix.tobytes("png")
         ocr_text = gemini_client.transcribe_image(
             png_bytes, gemini_key, mime_type="image/png", model=gemini_model, use_cache=use_cache,
+            target_lang_name=target_lang_name, has_furigana=has_furigana,
         )
         if ocr_text:
             pages_text.append(ocr_text.strip())
@@ -170,13 +169,19 @@ def extract_text_from_upload(
     gemini_key: str | None,
     gemini_model: str = gemini_client.DEFAULT_MODEL,
     use_cache: bool = True,
+    target_lang_name: str = "Japanisch",
+    has_furigana: bool = True,
 ) -> str:
     """Zentrale Dispatch-Funktion: PDF oder Bild anhand Dateiname/Content-Type
     erkennen und passend extrahieren."""
     kind = _guess_kind(filename, content_type)
     if kind == "pdf":
-        return extract_pdf_text(data, gemini_key=gemini_key, gemini_model=gemini_model, use_cache=use_cache)
+        return extract_pdf_text(
+            data, gemini_key=gemini_key, gemini_model=gemini_model, use_cache=use_cache,
+            target_lang_name=target_lang_name, has_furigana=has_furigana,
+        )
     mime_type = _image_mime_type(filename, content_type)
     return extract_image_text(
         data, mime_type=mime_type, gemini_key=gemini_key, gemini_model=gemini_model, use_cache=use_cache,
+        target_lang_name=target_lang_name, has_furigana=has_furigana,
     )

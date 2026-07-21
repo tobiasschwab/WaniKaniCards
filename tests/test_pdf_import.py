@@ -89,7 +89,7 @@ def test_extract_pdf_text_ocrs_page_without_textlayer_when_key_given(monkeypatch
     data = _make_blank_pdf_page()
     calls = []
 
-    def fake_transcribe(image_bytes, api_key, *, mime_type="image/png", model=None, session=None, use_cache=True):
+    def fake_transcribe(image_bytes, api_key, *, mime_type="image/png", model=None, session=None, use_cache=True, **kwargs):
         calls.append((api_key, mime_type))
         return "OCR-Ergebnis"
 

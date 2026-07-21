@@ -51,6 +51,7 @@ import pdf_import
 import storage
 from auth import bp as auth_bp
 from extensions import db, login_manager
+from languages.registry import SUPPORTED_TARGET_LANGS, get_pack
 
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
 # im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
@@ -97,13 +98,14 @@ for _d in (DATA_DIR, OUTPUT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "token": "",
-    "username": "",
     "deepl_key": "",
     "gemini_key": "",
     "gemini_model": kc.gemini_client.DEFAULT_MODEL,
     # Zielsprache für DeepL-Übersetzungen (Beispielsätze UND der neue
     # Felder-Übersetzen-Dialog) – DeepL-Sprachcode, z. B. "DE"/"EN"/"FR".
+    # NICHT zu verwechseln mit der gelernten Sprache (`active_target_lang`,
+    # siehe unten) - dieselbe Terminologie wird hier historisch für zwei
+    # unterschiedliche Dinge verwendet.
     "target_lang": "DE",
     "defaults": {
         "level": 1,
@@ -246,40 +248,69 @@ def _get_or_create_user_settings(user_id: int) -> models.UserSettings:
     return settings
 
 
-def _settings_to_dict(s: models.UserSettings) -> dict[str, Any]:
-    """`UserSettings`-Zeile in dieselbe Dict-Form wie die alte settings.json
-    bringen, damit der Rest des Moduls unverändert bleibt. Secrets werden
+def _get_or_create_language_secrets(user_id: int, target_lang: str) -> models.UserLanguageSecrets:
+    """WaniKani-Token/-Username sind pro Nutzer UND Zielsprache gespeichert
+    (siehe models.UserLanguageSecrets-Docstring: nur für "ja" heute relevant,
+    aber schon so modelliert, dass eine künftige zweite Sprache mit eigenem
+    Content-Provider dieselbe Tabelle nutzen könnte)."""
+    row = db.session.get(models.UserLanguageSecrets, (user_id, target_lang))
+    if row is None:
+        row = models.UserLanguageSecrets(user_id=user_id, target_lang=target_lang)
+        db.session.add(row)
+        db.session.commit()
+    return row
+
+
+def _settings_to_dict(
+    s: models.UserSettings, secrets: models.UserLanguageSecrets, native_lang: str,
+) -> dict[str, Any]:
+    """`UserSettings`+`UserLanguageSecrets`-Zeilen in ein flaches Dict bringen
+    (historisch dieselbe Form wie die alte settings.json). Secrets werden
     hier entschlüsselt (siehe crypto.py) – NIE im Klartext in der DB."""
     return {
-        "token": crypto.decrypt_secret(s.wanikani_token_enc) or "",
-        "username": s.username or "",
+        "token": crypto.decrypt_secret(secrets.wanikani_token_enc) or "",
+        "username": secrets.wanikani_username or "",
         "deepl_key": crypto.decrypt_secret(s.deepl_key_enc) or "",
         "gemini_key": crypto.decrypt_secret(s.gemini_key_enc) or "",
         "gemini_model": s.gemini_model or kc.gemini_client.DEFAULT_MODEL,
         "target_lang": s.target_lang or "DE",
+        "native_lang": native_lang,
+        "active_target_lang": s.active_target_lang or "ja",
         "defaults": {**DEFAULT_SETTINGS["defaults"], **(s.defaults or {})},
     }
 
 
-def load_settings_for_user(user_id: int) -> dict[str, Any]:
+def load_settings_for_user(user_id: int, target_lang: str | None = None) -> dict[str, Any]:
     """Einstellungen eines bestimmten Nutzers – für Code-Pfade ohne aktiven
-    Request-Kontext (z. B. der Render-Worker-Thread, der `current_user` nicht
-    kennt, aber den `user_id` des Jobs)."""
-    return _settings_to_dict(_get_or_create_user_settings(user_id))
+    Request-Kontext (z. B. der Render-Worker, der `current_user` nicht kennt,
+    aber den `user_id` UND `target_lang` des Jobs). `token`/`username` werden
+    für die angegebene Zielsprache geladen (Default: die AKTUELL aktive
+    Zielsprache des Nutzers) - ein Job trägt seine eigene `target_lang`,
+    unabhängig davon, ob der Nutzer inzwischen die Sprache gewechselt hat."""
+    user = db.session.get(models.User, user_id)
+    s = _get_or_create_user_settings(user_id)
+    lang = target_lang or s.active_target_lang or "ja"
+    secrets = _get_or_create_language_secrets(user_id, lang)
+    return _settings_to_dict(s, secrets, user.native_lang if user else "de")
 
 
 def load_settings() -> dict[str, Any]:
-    """Einstellungen des aktuell eingeloggten Nutzers (nur innerhalb eines
-    Requests aufrufbar, braucht `current_user`)."""
+    """Einstellungen des aktuell eingeloggten Nutzers für seine AKTUELL
+    aktive Zielsprache (nur innerhalb eines Requests aufrufbar, braucht
+    `current_user`)."""
     return load_settings_for_user(current_user.id)
 
 
 def save_settings(data: dict[str, Any]) -> None:
+    """Speichert immer für die aktuell aktive Zielsprache (`token`/
+    `username`) bzw. nutzerglobal (DeepL-/Gemini-Key, Defaults)."""
     s = _get_or_create_user_settings(current_user.id)
-    if "token" in data:
-        s.wanikani_token_enc = crypto.encrypt_secret(data["token"])
-    if "username" in data:
-        s.username = data["username"]
+    if "token" in data or "username" in data:
+        secrets = _get_or_create_language_secrets(current_user.id, s.active_target_lang or "ja")
+        if "token" in data:
+            secrets.wanikani_token_enc = crypto.encrypt_secret(data["token"])
+        if "username" in data:
+            secrets.wanikani_username = data["username"]
     if "deepl_key" in data:
         s.deepl_key_enc = crypto.encrypt_secret(data["deepl_key"])
     if "gemini_key" in data:
@@ -293,6 +324,36 @@ def save_settings(data: dict[str, Any]) -> None:
     db.session.commit()
 
 
+def _current_target_lang() -> str:
+    """Aktuell aktive Lernsprache des eingeloggten Nutzers - scoped
+    KnownWord/CustomCard/KanaCard/Job (siehe README "Multi-Language-
+    Architektur")."""
+    return _get_or_create_user_settings(current_user.id).active_target_lang or "ja"
+
+
+def _current_pack():
+    """`LanguagePack` der aktuell aktiven Zielsprache - Capability-Flags wie
+    `has_content_provider`/`has_offline_tokenizer` entscheiden, welche Modi
+    für diese Sprache überhaupt sinnvoll sind (siehe languages/base.py)."""
+    return get_pack(_current_target_lang())
+
+
+def set_active_language(*, native_lang: str | None = None, active_target_lang: str | None = None) -> dict[str, Any]:
+    """Muttersprache und/oder aktive Zielsprache des eingeloggten Nutzers
+    ändern (Sprachwechsler im Frontend) - beide sind unabhängig wechselbar."""
+    if native_lang is not None:
+        current_user.native_lang = native_lang
+        db.session.add(current_user)
+    if active_target_lang is not None:
+        s = _get_or_create_user_settings(current_user.id)
+        s.active_target_lang = active_target_lang
+    db.session.commit()
+    return {
+        "native_lang": current_user.native_lang,
+        "active_target_lang": _current_target_lang(),
+    }
+
+
 def _coerce_known_id(raw: str) -> int | str:
     """WaniKani-Subject-IDs sind rein numerisch -> int; Dictionary-Wörter
     (`kana_…`/`manual_…`) bleiben str."""
@@ -300,20 +361,26 @@ def _coerce_known_id(raw: str) -> int | str:
 
 
 def load_known() -> set[int | str]:
-    """IDs, die der eingeloggte Nutzer manuell als „bekannt" markiert hat –
-    unabhängig vom Export-/Karten-Verlauf, z. B. für Wörter, die man von
-    woanders schon kann. WaniKani-Subject-IDs kommen als int zurück,
-    Dictionary-/manuelle Wörter (`kana_…`/`manual_…`) als str."""
-    rows = models.KnownWord.query.filter_by(user_id=current_user.id).all()
+    """IDs, die der eingeloggte Nutzer FÜR DIE AKTUELL AKTIVE Zielsprache
+    manuell als „bekannt" markiert hat – unabhängig vom Export-/Karten-
+    Verlauf, z. B. für Wörter, die man von woanders schon kann.
+    WaniKani-Subject-IDs kommen als int zurück, Dictionary-/manuelle Wörter
+    (`kana_…`/`manual_…`) als str."""
+    rows = models.KnownWord.query.filter_by(
+        user_id=current_user.id, target_lang=_current_target_lang(),
+    ).all()
     return {_coerce_known_id(r.word_id) for r in rows}
 
 
 def load_known_meta() -> dict[str, dict[str, Any]]:
     """Anzeige-Metadaten (characters/meaning/kind/level/source) zu den
-    eigenen manuell bekannt markierten Wörtern – nötig für die Wortliste,
-    u. a. weil rein manuelle Einträge (`manual_…`) gar keine Karte/keinen
-    WaniKani-Subject haben, aus dem sich die Anzeige sonst herleiten ließe."""
-    rows = models.KnownWord.query.filter_by(user_id=current_user.id).all()
+    eigenen manuell bekannt markierten Wörtern der aktuell aktiven
+    Zielsprache – nötig für die Wortliste, u. a. weil rein manuelle
+    Einträge (`manual_…`) gar keine Karte/keinen WaniKani-Subject haben, aus
+    dem sich die Anzeige sonst herleiten ließe."""
+    rows = models.KnownWord.query.filter_by(
+        user_id=current_user.id, target_lang=_current_target_lang(),
+    ).all()
     return {
         r.word_id: {
             "characters": r.characters, "meaning": r.meaning,
@@ -324,12 +391,15 @@ def load_known_meta() -> dict[str, dict[str, Any]]:
 
 
 def _upsert_known_word(word_id: str, fields: dict[str, Any]) -> None:
-    """Einzelnes bekanntes Wort anlegen/aktualisieren (Zeile pro Nutzer+Wort,
-    siehe `KnownWord.uq_known_word_per_user`) – ersetzt das bisherige
-    Lade-alles/Mutiere/Speichere-alles-Muster der Datei-Version."""
-    row = models.KnownWord.query.filter_by(user_id=current_user.id, word_id=word_id).first()
+    """Einzelnes bekanntes Wort anlegen/aktualisieren (Zeile pro Nutzer+
+    Zielsprache+Wort, siehe `KnownWord.uq_known_word_per_user`) – ersetzt das
+    bisherige Lade-alles/Mutiere/Speichere-alles-Muster der Datei-Version."""
+    lang = _current_target_lang()
+    row = models.KnownWord.query.filter_by(
+        user_id=current_user.id, target_lang=lang, word_id=word_id,
+    ).first()
     if row is None:
-        row = models.KnownWord(user_id=current_user.id, word_id=word_id)
+        row = models.KnownWord(user_id=current_user.id, target_lang=lang, word_id=word_id)
         db.session.add(row)
     for k, v in fields.items():
         setattr(row, k, v)
@@ -337,7 +407,9 @@ def _upsert_known_word(word_id: str, fields: dict[str, Any]) -> None:
 
 
 def _remove_known_word(word_id: str) -> None:
-    models.KnownWord.query.filter_by(user_id=current_user.id, word_id=word_id).delete()
+    models.KnownWord.query.filter_by(
+        user_id=current_user.id, target_lang=_current_target_lang(), word_id=word_id,
+    ).delete()
     db.session.commit()
 
 
@@ -378,6 +450,7 @@ def _job_to_dict(row: models.Job) -> dict[str, Any]:
     return {
         "id": row.id,
         "user_id": row.user_id,
+        "target_lang": row.target_lang,
         "title": row.title,
         "params": row.params or {},
         "status": row.status,
@@ -399,7 +472,7 @@ def write_job(job: dict[str, Any], *, user_id: int | None = None) -> None:
     if row is None:
         if user_id is None:
             raise ValueError("write_job(): user_id ist beim erstmaligen Anlegen eines Jobs erforderlich.")
-        row = models.Job(id=job["id"], user_id=user_id)
+        row = models.Job(id=job["id"], user_id=user_id, target_lang=job.get("target_lang", "ja"))
         db.session.add(row)
     row.title = job.get("title", "")
     row.params = job.get("params") or {}
@@ -434,8 +507,14 @@ def read_job_owned(job_id: str) -> dict[str, Any] | None:
 
 
 def list_jobs() -> list[dict[str, Any]]:
-    """Jobs des eingeloggten Nutzers, neueste zuerst."""
-    rows = models.Job.query.filter_by(user_id=current_user.id).order_by(models.Job.created_at.desc()).all()
+    """Jobs des eingeloggten Nutzers FÜR DIE AKTUELL AKTIVE Zielsprache,
+    neueste zuerst - Job-Verlauf/„bereits exportiert"-Status sind pro
+    Sprache getrennt (siehe README "Multi-Language-Architektur"), sonst
+    würde z. B. ein Sprachwechsel scheinbar fremde Exporte in der eigenen
+    Historie zeigen."""
+    rows = models.Job.query.filter_by(
+        user_id=current_user.id, target_lang=_current_target_lang(),
+    ).order_by(models.Job.created_at.desc()).all()
     return [_job_to_dict(r) for r in rows]
 
 
@@ -496,13 +575,15 @@ def read_custom_owned(cid: str) -> dict[str, Any] | None:
     return read_custom_for_user(current_user.id, cid)
 
 
-def write_custom(card: dict[str, Any], *, user_id: int) -> None:
+def write_custom(card: dict[str, Any], *, user_id: int, target_lang: str | None = None) -> None:
     """Neu anlegen oder aktualisieren. Der Aufrufer (`api_save_customcard()`)
     hat Ownership bei einer bestehenden ID bereits per `read_custom_owned()`
-    geprüft, bevor diese Funktion aufgerufen wird."""
+    geprüft, bevor diese Funktion aufgerufen wird. `target_lang` nur beim
+    erstmaligen Anlegen relevant (Default: die aktuell aktive Zielsprache) -
+    eine bestehende Karte wechselt beim Bearbeiten nicht die Sprache."""
     row = db.session.get(models.CustomCard, card["id"])
     if row is None:
-        row = models.CustomCard(id=card["id"], user_id=user_id)
+        row = models.CustomCard(id=card["id"], user_id=user_id, target_lang=target_lang or "ja")
         db.session.add(row)
     row.front_html = card.get("front_html", "")
     row.back_html = card.get("back_html", "")
@@ -511,9 +592,11 @@ def write_custom(card: dict[str, Any], *, user_id: int) -> None:
 
 
 def list_customs() -> list[dict[str, Any]]:
-    rows = models.CustomCard.query.filter_by(user_id=current_user.id).order_by(
-        models.CustomCard.updated_at.desc()
-    ).all()
+    """Eigene Karten der aktuell aktiven Zielsprache - "Frei erstellen" ist
+    für jede Sprache nutzbar, der Verlauf bleibt aber pro Sprache getrennt."""
+    rows = models.CustomCard.query.filter_by(
+        user_id=current_user.id, target_lang=_current_target_lang(),
+    ).order_by(models.CustomCard.updated_at.desc()).all()
     return [_custom_card_to_dict(r) for r in rows]
 
 
@@ -562,28 +645,30 @@ def _kana_card_to_dict(row: models.KanaCard) -> dict[str, Any]:
     }
 
 
-def _get_kana_row(user_id: int, kid: str) -> "models.KanaCard | None":
-    return models.KanaCard.query.filter_by(user_id=user_id, id=kid).first()
+def _get_kana_row(user_id: int, target_lang: str, kid: str) -> "models.KanaCard | None":
+    return models.KanaCard.query.filter_by(user_id=user_id, target_lang=target_lang, id=kid).first()
 
 
-def read_kana_for_user(user_id: int, kid: str) -> dict[str, Any] | None:
-    """Explizit nach `user_id` gefiltert – für den Render-Worker-Thread (kennt
-    `current_user` nicht, aber den `user_id` des Jobs) UND als Basis für
-    `read_kana_owned()`."""
-    row = _get_kana_row(user_id, kid)
+def read_kana_for_user(user_id: int, kid: str, target_lang: str) -> dict[str, Any] | None:
+    """Explizit nach `user_id`+`target_lang` gefiltert (Teil des
+    zusammengesetzten Primärschlüssels seit dem Multi-Language-Umbau) – für
+    den Render-Worker (kennt `current_user` nicht, aber `user_id`/
+    `target_lang` des Jobs) UND als Basis für `read_kana_owned()`."""
+    row = _get_kana_row(user_id, target_lang, kid)
     return _kana_card_to_dict(row) if row else None
 
 
 def read_kana_owned(kid: str) -> dict[str, Any] | None:
-    """Wie `read_kana_for_user()`, aber für den eingeloggten Nutzer (IDOR-
-    Schutz, siehe `read_job_owned()`)."""
-    return read_kana_for_user(current_user.id, kid)
+    """Wie `read_kana_for_user()`, aber für den eingeloggten Nutzer in dessen
+    aktuell aktiver Zielsprache (IDOR-Schutz, siehe `read_job_owned()`)."""
+    return read_kana_for_user(current_user.id, kid, _current_target_lang())
 
 
-def write_kana(card: dict[str, Any], *, user_id: int) -> None:
-    row = _get_kana_row(user_id, card["id"])
+def write_kana(card: dict[str, Any], *, user_id: int, target_lang: str | None = None) -> None:
+    lang = target_lang or "ja"
+    row = _get_kana_row(user_id, lang, card["id"])
     if row is None:
-        row = models.KanaCard(id=card["id"], user_id=user_id)
+        row = models.KanaCard(id=card["id"], user_id=user_id, target_lang=lang)
         db.session.add(row)
     row.word = card.get("word", "")
     row.kanji_hint = card.get("kanji_hint")
@@ -599,9 +684,10 @@ def write_kana(card: dict[str, Any], *, user_id: int) -> None:
 
 
 def list_kana() -> list[dict[str, Any]]:
-    rows = models.KanaCard.query.filter_by(user_id=current_user.id).order_by(
-        models.KanaCard.updated_at.desc()
-    ).all()
+    """Dictionary-/KI-Karten der aktuell aktiven Zielsprache."""
+    rows = models.KanaCard.query.filter_by(
+        user_id=current_user.id, target_lang=_current_target_lang(),
+    ).order_by(models.KanaCard.updated_at.desc()).all()
     return [_kana_card_to_dict(r) for r in rows]
 
 
@@ -622,13 +708,17 @@ def _kana_descriptor(card: dict[str, Any]) -> dict[str, Any]:
 
 # ---------- Render-Worker ---------------------------------------------------- #
 
-def _build_mixed_deck(p: dict[str, Any], user_id: int, token: str | None = None) -> list[Any]:
+def _build_mixed_deck(
+    p: dict[str, Any], user_id: int, token: str | None = None, target_lang: str = "ja",
+) -> list[Any]:
     """Kombinierten Stapel aus WaniKani-Subjects, eigenen und Dictionary-
     Karten bauen – alle drei Quellen können in einem Export landen (z. B.
     Text-Modus: WaniKani-Vokabel + Dictionary-Wort zusammen ausgewählt).
     `user_id` explizit statt `current_user`, da auch vom Render-Worker-Thread
     (kein Request-Kontext) aus aufgerufen; `token` ebenso explizit an
-    kanji_cards.py durchgereicht statt über die Prozessumgebung."""
+    kanji_cards.py durchgereicht statt über die Prozessumgebung. `target_lang`
+    kommt vom Job (nicht vom evtl. inzwischen gewechselten `current_user`),
+    weil `KanaCard`-Lookups seit dem Multi-Language-Umbau danach scopen."""
     deck: list[Any] = []
     if p.get("subject_ids"):
         deck.extend(
@@ -645,7 +735,7 @@ def _build_mixed_deck(p: dict[str, Any], user_id: int, token: str | None = None)
         datas = [read_custom_for_user(user_id, cid) for cid in p["custom_ids"]]
         deck.extend(kc.build_custom_card(d) for d in datas if d)
     if p.get("kana_ids"):
-        datas = [read_kana_for_user(user_id, kid) for kid in p["kana_ids"]]
+        datas = [read_kana_for_user(user_id, kid, target_lang) for kid in p["kana_ids"]]
         deck.extend(kc.build_kana_card_from_dict(d) for d in datas if d)
     return deck
 
@@ -664,6 +754,7 @@ def _run_render(job_id: str) -> None:
         if job is None:
             return
         user_id = job["user_id"]
+        target_lang = job.get("target_lang", "ja")
         p = job["params"]
         job["status"] = "running"
         job["started_at"] = _now()
@@ -672,7 +763,7 @@ def _run_render(job_id: str) -> None:
         anki = p.get("format") == "anki"
         out_key = f"{job_id}.apkg" if anki else f"{job_id}.pdf"
         try:
-            settings = load_settings_for_user(user_id)
+            settings = load_settings_for_user(user_id, target_lang)
             # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-/
             # Dictionary-Karten, kein Demo-Modus) gerendert werden.
             needs_token = bool(p.get("subject_ids")) and not p.get("sample")
@@ -681,7 +772,7 @@ def _run_render(job_id: str) -> None:
                     "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
                 )
 
-            deck = _build_mixed_deck(p, user_id, token=settings.get("token"))
+            deck = _build_mixed_deck(p, user_id, token=settings.get("token"), target_lang=target_lang)
             if not deck:
                 raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
 
@@ -695,7 +786,8 @@ def _run_render(job_id: str) -> None:
                 tmp_path = Path(tmp_dir) / out_key
                 if anki:
                     deck_name = job.get("title") or "Shiori"
-                    _, n = ae.export_deck(deck, tmp_path, deck_name=deck_name)
+                    root_deck_name = get_pack(target_lang).display_name("de")
+                    _, n = ae.export_deck(deck, tmp_path, deck_name=deck_name, root_deck_name=root_deck_name)
                 else:
                     username = settings.get("username", "")
                     if not p.get("sample") and not username:
@@ -760,6 +852,8 @@ def api_get_settings() -> Any:
             "gemini_models": list(kc.gemini_client.AVAILABLE_MODELS),
             "target_lang": s.get("target_lang", "DE"),
             "target_langs": list(_TARGET_LANGS),
+            "native_lang": s.get("native_lang", "de"),
+            "active_target_lang": s.get("active_target_lang", "ja"),
             "defaults": s["defaults"],
         }
     )
@@ -785,6 +879,46 @@ def api_post_settings() -> Any:
         s["defaults"] = {**s["defaults"], **body["defaults"]}
     save_settings(s)
     return jsonify({"ok": True, "token_set": bool(s.get("token")), "username": s.get("username", "")})
+
+
+# ---------- API: Sprachen (Muttersprache/aktive Zielsprache) ---------------- #
+
+@app.get("/api/languages")
+@login_required
+def api_languages() -> Any:
+    """Verfügbare Zielsprachen + Capabilities des jeweiligen `LanguagePack`
+    (siehe languages/base.py) - treibt den Sprachwechsler und blendet im
+    Frontend Modi ein/aus, die für die aktive Sprache keinen Sinn ergeben
+    (z. B. „Level-Stapel"/„Suche" nur bei `has_content_provider`)."""
+    s = load_settings()
+    return jsonify({
+        "native_lang": s.get("native_lang", "de"),
+        "active_target_lang": s.get("active_target_lang", "ja"),
+        "active_capabilities": _current_pack().capabilities(),
+        "supported_target_langs": [
+            {"code": code, "display_name": get_pack(code).display_name(s.get("native_lang", "de"))}
+            for code in SUPPORTED_TARGET_LANGS
+        ],
+    })
+
+
+@app.post("/api/settings/language")
+@login_required
+def api_post_language() -> Any:
+    """Muttersprache und/oder aktive Zielsprache wechseln (Sprachwechsler) -
+    unabhängig voneinander, beide optional im Body."""
+    body = request.get_json(silent=True) or {}
+    native_lang = body.get("native_lang")
+    active_target_lang = body.get("active_target_lang")
+    if native_lang is not None and not isinstance(native_lang, str):
+        return jsonify({"error": "Ungültige Muttersprache."}), 400
+    if active_target_lang is not None and not isinstance(active_target_lang, str):
+        return jsonify({"error": "Ungültige Zielsprache."}), 400
+    result = set_active_language(
+        native_lang=native_lang.strip().lower()[:10] if native_lang else None,
+        active_target_lang=active_target_lang.strip().lower()[:10] if active_target_lang else None,
+    )
+    return jsonify({"ok": True, **result})
 
 
 @app.post("/api/gemini/models")
@@ -855,9 +989,21 @@ def api_gemini_generate_image() -> Any:
     return jsonify({"image_data_uri": image_data_uri})
 
 
+def _require_content_provider() -> Any | None:
+    """`None`, wenn die aktuell aktive Zielsprache eine externe Lernstufen-
+    Quelle wie WaniKani hat - sonst eine fertige 400-JSON-Response, die der
+    Aufrufer direkt zurückgeben kann. Nur Japanisch hat aktuell einen
+    `LanguagePack` mit `has_content_provider=True` (siehe languages/japanese.py)."""
+    if _current_pack().has_content_provider:
+        return None
+    return jsonify({"error": "Diese Funktion ist nur für Japanisch (WaniKani) verfügbar."}), 400
+
+
 @app.post("/api/test-token")
 @login_required
 def api_test_token() -> Any:
+    if (blocked := _require_content_provider()) is not None:
+        return blocked
     token = (request.get_json(silent=True) or {}).get("token") or load_settings().get(
         "token", ""
     )
@@ -884,6 +1030,8 @@ def api_resolve() -> Any:
 
     body.mode: "level" | "search" | "compose"
     """
+    if (blocked := _require_content_provider()) is not None:
+        return blocked
     body = request.get_json(silent=True) or {}
     mode = body.get("mode")
     sample = bool(body.get("sample"))
@@ -917,6 +1065,8 @@ def api_card_detail() -> Any:
     Kurzfassung (Zeichen/Bedeutung/Level), zum Bearbeiten braucht das
     Frontend aber alle Felder (Lesungen, Beispielvokabel/-satz, Merkhilfen …).
     """
+    if (blocked := _require_content_provider()) is not None:
+        return blocked
     body = request.get_json(silent=True) or {}
     ids = body.get("subject_ids") or []
     sample = bool(body.get("sample"))
@@ -979,7 +1129,13 @@ def api_text_annotate() -> Any:
                  Wort-Popup).
     - `known`  – `manually_known or ready`, treibt die „Prozent bekannt"-Statistik
                  (Vorkommen-basiert, nicht nur eindeutige Wörter).
+
+    Nur verfügbar, wenn die aktive Zielsprache einen Offline-Tokenizer hat
+    (aktuell nur Japanisch/Janome) - für andere Sprachen siehe
+    `/api/text-annotate-ai` (Gemini-gestützt, funktioniert sprachunabhängig).
     """
+    if not _current_pack().has_offline_tokenizer:
+        return jsonify({"error": "Dieser Modus ist nur für Japanisch verfügbar. Bitte „Mit KI“ verwenden."}), 400
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", ""))
     sample = bool(body.get("sample"))
@@ -1047,11 +1203,20 @@ def api_text_annotate_ai() -> Any:
     gemini_model = _resolve_gemini_model(s)
 
     token = None if sample else s.get("token")
+    lang = _current_target_lang()
+    pack = _current_pack()
+    # Ausgeschriebene Sprachnamen für den Gemini-Prompt (siehe
+    # gemini_client._batch_prompt()) - der Prompt-Text selbst ist auf
+    # Deutsch verfasst, die Namen daher immer auf Deutsch ausgeschrieben
+    # (nicht in der jeweiligen Sprache selbst).
+    native_lang_name = get_pack(current_user.native_lang).display_name("de")
     logger.info("text-annotate-ai: %d Zeichen, sample=%s, Modell=%s …", len(text), sample, gemini_model)
     t0 = time.monotonic()
     try:
         rows = kc.annotate_text_ai(
             text, gemini_key=gemini_key, gemini_model=gemini_model, sample=sample, token=token,
+            target_lang=lang, target_lang_name=pack.display_name("de"),
+            native_lang_name=native_lang_name, has_reading=pack.has_furigana,
         )
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
@@ -1110,12 +1275,14 @@ def api_text_extract() -> Any:
     s = load_settings()
     gemini_key = s.get("gemini_key") or None
     gemini_model = _resolve_gemini_model(s)
+    pack = _current_pack()
 
     logger.info("text-extract: %s (%d Bytes) …", file.filename, len(data))
     t0 = time.monotonic()
     try:
         text = pdf_import.extract_text_from_upload(
             data, file.filename, file.mimetype, gemini_key=gemini_key, gemini_model=gemini_model,
+            target_lang_name=pack.display_name("de"), has_furigana=pack.has_furigana,
         )
     except pdf_import.ExtractionError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1336,6 +1503,7 @@ def api_render() -> Any:
         "params": params,
         "status": "queued",
         "created_at": _now(),
+        "target_lang": _current_target_lang(),
     }
     write_job(job, user_id=current_user.id)
     render_queue.enqueue(_run_render, job_id, job_timeout=600)
@@ -1378,7 +1546,7 @@ def api_save_customcard() -> Any:
         "back_html": str(body.get("back_html", "")),
         "tags": [str(t).strip() for t in (body.get("tags") or []) if str(t).strip()],
     }
-    write_custom(card, user_id=current_user.id)
+    write_custom(card, user_id=current_user.id, target_lang=_current_target_lang())
     return jsonify(read_custom_owned(cid))
 
 
@@ -1450,7 +1618,7 @@ def api_create_kanacard() -> Any:
         "source": card_obj.source,
         "tags": card_obj.tags,
     }
-    write_kana(record, user_id=current_user.id)
+    write_kana(record, user_id=current_user.id, target_lang=_current_target_lang())
     return jsonify(_kana_descriptor(read_kana_owned(record["id"])))
 
 

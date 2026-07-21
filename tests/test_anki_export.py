@@ -436,6 +436,14 @@ def test_deck_path_for_custom_card_is_sonstige():
     assert ae._deck_path_for(custom) == "Japanisch::sonstige"
 
 
+def test_deck_path_for_respects_explicit_root_deck_name():
+    """Multi-Language-Umbau: der Root-Deck-Name kommt vom `LanguagePack` der
+    jeweiligen Zielsprache statt fest "Japanisch" zu sein (siehe webapp.py
+    `_run_render()`)."""
+    assert ae._deck_path_for(Card_(kanji="大", level=5), "Englisch") == "Englisch::WaniKani::Level 5"
+    assert ae._deck_path_for(Card_(kanji="大", level=None), "Spanisch") == "Spanisch::sonstige"
+
+
 def test_export_deck_groups_notes_by_wanikani_level(tmp_path):
     lvl1 = Card_(kanji="一", subject_id=1, level=1)
     lvl5 = Card_(kanji="五", subject_id=5, level=5)

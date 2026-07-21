@@ -14,7 +14,7 @@
         <div class="brand-mark">栞</div>
         <div>
           <h1>Shiori</h1>
-          <p class="tagline">Japanisch lesen, merken, üben – mit WaniKani, Wörterbuch &amp; KI-Grammatik</p>
+          <p class="tagline" data-i18n="app.tagline">Sprachen lesen, merken, üben – mit WaniKani, Wörterbuch &amp; KI-Grammatik</p>
         </div>
       </div>
       <div class="header-actions">
@@ -24,8 +24,8 @@
           <span class="conn-dot off" id="connGemini" title="Gemini: nicht verbunden"><span class="dot"></span>Gemini</span>
         </div>
         <span id="accountEmail" class="muted hidden"></span>
-        <button id="logoutBtn" class="btn small hidden" title="Abmelden">Abmelden</button>
-        <button id="settingsToggle" class="icon-btn" title="Einstellungen">
+        <button id="logoutBtn" class="btn small hidden" data-i18n="header.logout" data-i18n-title="header.logout">Abmelden</button>
+        <button id="settingsToggle" class="icon-btn" data-i18n-title="header.settings" title="Einstellungen">
           <span class="gear">⚙</span>
         </button>
       </div>
@@ -35,19 +35,19 @@
     <div id="authOverlay" class="modal-overlay">
       <section class="modal-panel" style="max-width:380px">
         <div class="modal-head">
-          <h2 id="authTitle">Anmelden</h2>
+          <h2 id="authTitle" data-i18n="auth.login.title">Anmelden</h2>
         </div>
         <label class="field">
-          <span class="label">E-Mail</span>
+          <span class="label" data-i18n="auth.email">E-Mail</span>
           <input id="authEmail" type="email" autocomplete="username" placeholder="du@beispiel.de">
         </label>
         <label class="field">
-          <span class="label">Passwort</span>
+          <span class="label" data-i18n="auth.password">Passwort</span>
           <input id="authPassword" type="password" autocomplete="current-password" placeholder="mindestens 8 Zeichen">
         </label>
         <div class="row gap">
-          <button id="authSubmit" class="btn primary">Anmelden</button>
-          <button id="authToggleMode" class="btn small" type="button">Noch kein Konto? Registrieren</button>
+          <button id="authSubmit" class="btn primary" data-i18n="auth.login.submit">Anmelden</button>
+          <button id="authToggleMode" class="btn small" type="button" data-i18n="auth.login.toggle">Noch kein Konto? Registrieren</button>
         </div>
         <div id="authStatus" class="status" style="margin-top:8px"></div>
       </section>
@@ -57,11 +57,35 @@
     <div id="settingsOverlay" class="modal-overlay hidden">
       <section id="settingsPanel" class="modal-panel">
         <div class="modal-head">
-          <h2>Einstellungen</h2>
-          <button id="settingsClose" class="icon-btn" title="Schließen">✕</button>
+          <h2 data-i18n="settings.title">Einstellungen</h2>
+          <button id="settingsClose" class="icon-btn" data-i18n-title="settings.close" title="Schließen">✕</button>
         </div>
 
         <div class="settings-list">
+          <!-- Sprachen (Muttersprache + aktive Zielsprache) -->
+          <div class="settings-row" data-row="languages">
+            <button type="button" class="settings-row-head">
+              <span class="settings-icon" style="background:#a6763f">🌐</span>
+              <span class="settings-row-text">
+                <span class="settings-row-title" data-i18n="settings.languages.title">Sprachen</span>
+                <span class="settings-row-desc" data-i18n="settings.languages.desc">Muttersprache &amp; Lernsprache</span>
+              </span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="settings-row-body hidden">
+              <label class="field">
+                <span class="label" data-i18n="settings.languages.native_label">Muttersprache</span>
+                <select id="nativeLangSelect" class="select"></select>
+              </label>
+              <label class="field" style="margin-top:10px">
+                <span class="label" data-i18n="settings.languages.target_label">Zielsprache (aktueller Kurs)</span>
+                <select id="activeTargetLangSelect" class="select"></select>
+                <span class="hint" data-i18n="settings.languages.hint">Fortschritt/Karten werden pro Zielsprache getrennt geführt – ein Wechsel verliert nichts, du kannst jederzeit zurückwechseln.</span>
+              </label>
+              <div id="languagesStatus" class="status" style="margin-top:8px"></div>
+            </div>
+          </div>
+
           <!-- WaniKani -->
           <div class="settings-row" data-row="wanikani">
             <button type="button" class="settings-row-head">
@@ -209,18 +233,18 @@
     <section class="panel">
       <div class="tab-groups" id="modeTabs" data-value="level">
         <div class="tab-group sel" data-group="create">
-          <span class="tab-group-label">Karten erstellen</span>
+          <span class="tab-group-label" data-i18n="tabs.group.create">Karten erstellen</span>
           <div class="tab-group-buttons">
-            <button data-v="level" class="active">Level-Stapel</button>
-            <button data-v="compose">Suche</button>
-            <button data-v="text">Aus Text</button>
-            <button data-v="custom">Frei erstellen</button>
+            <button data-v="level" class="active" data-i18n="tabs.level">Level-Stapel</button>
+            <button data-v="compose" data-i18n="tabs.compose">Suche</button>
+            <button data-v="text" data-i18n="tabs.text">Aus Text</button>
+            <button data-v="custom" data-i18n="tabs.custom">Frei erstellen</button>
           </div>
         </div>
         <div class="tab-group" data-group="vocab">
-          <span class="tab-group-label">Wortschatz</span>
+          <span class="tab-group-label" data-i18n="tabs.group.vocab">Wortschatz</span>
           <div class="tab-group-buttons">
-            <button data-v="wortliste">Wortliste</button>
+            <button data-v="wortliste" data-i18n="tabs.wortliste">Wortliste</button>
           </div>
         </div>
       </div>
@@ -521,6 +545,7 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
