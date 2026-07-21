@@ -464,3 +464,13 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .review-card-meta { font-size: 12px; }
 
 .review-ratings kbd { display: inline-block; min-width: 16px; padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; font: 600 11px/1.4 ui-monospace, monospace; opacity: .75; }
+
+.review-heatmap-wrap { margin-top: 16px; overflow-x: auto; }
+.review-heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); gap: 3px; width: max-content; }
+.hm-cell { width: 11px; height: 11px; border-radius: 3px; background: var(--border); }
+.hm-1 { background: color-mix(in srgb, var(--accent) 30%, var(--bg-elev)); }
+.hm-2 { background: color-mix(in srgb, var(--accent) 55%, var(--bg-elev)); }
+.hm-3 { background: color-mix(in srgb, var(--accent) 80%, var(--bg-elev)); }
+.hm-4 { background: var(--accent); }
+.review-heatmap-legend { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11.5px; }
+.review-heatmap-legend .hm-cell { flex: 0 0 auto; }

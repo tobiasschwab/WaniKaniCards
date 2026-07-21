@@ -1634,6 +1634,8 @@ async function loadReviewStats() {
   $("#statNewToday").textContent = stats.new_today;
   $("#statRetention").textContent = stats.retention_7d === null ? "–" : `${stats.retention_7d}%`;
   $("#statTotalCards").textContent = stats.total_cards;
+  $("#statStreak").textContent = stats.streak_days > 0 ? `🔥 ${stats.streak_days}` : "0";
+  renderReviewHeatmap(stats.activity || {});
 
   const stage = stats.by_stage || {};
   const total = Math.max(1, stats.total_cards || 0);
@@ -1647,6 +1649,36 @@ async function loadReviewStats() {
     seg.style.width = `${(n / total) * 100}%`;
     seg.title = `${key}: ${n}`;
     bar.appendChild(seg);
+  }
+}
+
+// Kalender-Heatmap (26 Wochen × 7 Tage, Montag oben) aus `activity`
+// ({"YYYY-MM-DD": anzahl}, UTC-Tage wie im Backend). Die Zellen werden in
+// Datumsreihenfolge ab dem Montag vor 25 Wochen emittiert - mit
+// `grid-auto-flow: column` + 7 Zeilen füllt CSS daraus automatisch
+// Spalte-für-Spalte (= Woche-für-Woche); die laufende Woche endet einfach
+// beim heutigen Tag.
+function renderReviewHeatmap(activity) {
+  const wrap = $("#reviewHeatmapWrap");
+  const grid = $("#reviewHeatmap");
+  const hasActivity = Object.keys(activity).length > 0;
+  wrap.classList.toggle("hidden", !hasActivity);
+  if (!hasActivity) return;
+
+  const DAY = 86400000;
+  const todayUtc = Math.floor(Date.now() / DAY) * DAY;
+  const weekday = (new Date(todayUtc).getUTCDay() + 6) % 7; // 0=Mo … 6=So
+  const start = todayUtc - weekday * DAY - 25 * 7 * DAY;    // Montag vor 25 Wochen
+
+  const level = (n) => (!n ? 0 : n < 10 ? 1 : n < 25 ? 2 : n < 50 ? 3 : 4);
+  grid.innerHTML = "";
+  for (let ts = start; ts <= todayUtc; ts += DAY) {
+    const iso = new Date(ts).toISOString().slice(0, 10);
+    const n = activity[iso] || 0;
+    const cell = document.createElement("span");
+    cell.className = `hm-cell hm-${level(n)}`;
+    cell.title = `${iso}: ${n} ${t("review.heatmap.reviews")}`;
+    grid.appendChild(cell);
   }
 }
 
@@ -2159,6 +2191,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#authSubmit").addEventListener("click", submitAuthForm);
   $("#authPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAuthForm(); });
   $("#logoutBtn").addEventListener("click", doLogout);
+
+  // PWA: Service Worker registrieren (best-effort - ohne SW funktioniert die
+  // App unverändert, nur Installieren/Offline-Fallback entfallen dann).
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
 
   checkAuthAndInit();
 });

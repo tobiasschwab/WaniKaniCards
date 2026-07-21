@@ -1594,6 +1594,65 @@ def test_api_srs_stats_isolated_between_target_languages(client):
 
 
 # --------------------------------------------------------------------------- #
+# Streak + Aktivitäts-Heatmap (/api/srs/stats: streak_days/activity)
+# --------------------------------------------------------------------------- #
+
+def test_compute_streak_counts_consecutive_days_ending_today():
+    from datetime import date
+    import srs_api
+    today = date(2026, 7, 21)
+    days = {"2026-07-21", "2026-07-20", "2026-07-19", "2026-07-16"}  # Lücke am 17./18.
+    assert srs_api._compute_streak(days, today) == 3
+
+
+def test_compute_streak_not_broken_by_missing_today():
+    """Heute (noch) nichts gelernt bricht den Streak nicht - der Tag ist noch
+    nicht vorbei (Duolingo-/WaniKani-Semantik)."""
+    from datetime import date
+    import srs_api
+    today = date(2026, 7, 21)
+    days = {"2026-07-20", "2026-07-19"}
+    assert srs_api._compute_streak(days, today) == 2
+
+
+def test_compute_streak_zero_after_full_missed_day():
+    from datetime import date
+    import srs_api
+    today = date(2026, 7, 21)
+    days = {"2026-07-18", "2026-07-17"}  # vorgestern zuletzt gelernt
+    assert srs_api._compute_streak(days, today) == 0
+
+
+def test_api_srs_stats_includes_streak_and_activity(client):
+    from datetime import datetime, timezone
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good"})
+
+    data = client.get("/api/srs/stats").get_json()
+    assert data["streak_days"] == 1
+    today = datetime.now(timezone.utc).date().isoformat()
+    assert data["activity"] == {today: 1}
+
+
+def test_api_srs_stats_streak_spans_yesterday(client, db_session):
+    from datetime import datetime, timedelta, timezone
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good"})
+    # Einen Log-Eintrag künstlich auf gestern zurückdatieren.
+    log = models.ReviewLog(
+        user_id=client.test_user_id, target_lang="ja", card_type="wanikani",
+        card_id="440", item_type="reading", rating="good", was_new=True,
+        reviewed_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    data = client.get("/api/srs/stats").get_json()
+    assert data["streak_days"] == 2
+    assert len(data["activity"]) == 2
+
+
+# --------------------------------------------------------------------------- #
 # SRS-Karten-Browser + Entfernen (/api/srs/cards, /api/srs/remove)
 # --------------------------------------------------------------------------- #
 
@@ -1670,6 +1729,22 @@ def test_static_files_404_for_missing_file(client):
 def test_vendor_route_serves_wanakana(client):
     r = client.get("/vendor/wanakana.min.js")
     assert r.status_code == 200
+
+
+def test_pwa_manifest_served_with_correct_mimetype(client):
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200
+    assert "manifest" in r.content_type
+    data = r.get_json(force=True)
+    assert data["short_name"] == "Shiori"
+    assert any(i["sizes"] == "512x512" for i in data["icons"])
+
+
+def test_pwa_service_worker_and_icons_served(client):
+    assert client.get("/sw.js").status_code == 200
+    assert client.get("/icon-192.png").status_code == 200
+    assert client.get("/icon-512.png").status_code == 200
+    assert client.get("/apple-touch-icon.png").status_code == 200
 
 
 def test_vendor_route_rejects_path_traversal(client):

@@ -11,7 +11,7 @@ Dritter Export-Weg neben PDF/Anki: Karten direkt in Shiori mit FSRS lernen.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -422,13 +422,48 @@ def api_srs_answer() -> Any:
     return jsonify({"ok": True, "due_at": row.due_at.isoformat(), "reps": row.reps, "lapses": row.lapses})
 
 
+def _daily_review_counts(user_id: int, target_lang: str) -> dict[str, int]:
+    """Reviews pro Kalendertag (UTC, konsistent mit den Tageslimits in
+    `_today_start()`) über die GESAMTE Historie – ein `GROUP BY date(...)`
+    serverseitig statt alle Log-Zeilen zu laden (`date()` existiert in
+    SQLite UND Postgres). SQLite liefert den Tag als 'YYYY-MM-DD'-String,
+    Postgres als `date`-Objekt – deshalb die `str()[:10]`-Normalisierung."""
+    day = db.func.date(models.ReviewLog.reviewed_at)
+    rows = (
+        db.session.query(day, db.func.count())
+        .filter(
+            models.ReviewLog.user_id == user_id,
+            models.ReviewLog.target_lang == target_lang,
+        )
+        .group_by(day)
+        .all()
+    )
+    return {str(d)[:10]: int(n) for d, n in rows}
+
+
+def _compute_streak(active_days: set[str], today: date) -> int:
+    """Anzahl aufeinanderfolgender Lerntage bis heute. Der heutige Tag zählt
+    mit, sobald mindestens ein Review gemacht wurde – ist heute (noch) nichts
+    passiert, bricht der Streak aber nicht ab, solange gestern gelernt wurde
+    (der Tag ist ja noch nicht vorbei; übliche Streak-Semantik, wie bei
+    Duolingo/WaniKani)."""
+    start = today if today.isoformat() in active_days else today - timedelta(days=1)
+    streak = 0
+    day = start
+    while day.isoformat() in active_days:
+        streak += 1
+        day -= timedelta(days=1)
+    return streak
+
+
 @bp.get("/stats")
 @login_required
 def api_srs_stats() -> Any:
     """Statistik-Dashboard für die aktuell aktive Zielsprache: Reviews/neue
     Karten heute, Retention der letzten 7 Tage (Anteil NICHT "again"
-    bewerteter Reviews – Standarddefinition bei Anki/FSRS) und die Anzahl
-    Karten je Lernstufe."""
+    bewerteter Reviews – Standarddefinition bei Anki/FSRS), die Anzahl
+    Karten je Lernstufe, der aktuelle Lern-Streak sowie die Tagesaktivität
+    der letzten ~26 Wochen (Kalender-Heatmap im Frontend)."""
     lang = _current_target_lang()
     now = datetime.now(timezone.utc)
 
@@ -455,12 +490,23 @@ def api_srs_stats() -> Any:
         else:
             by_stage[stage_names.get((s.fsrs_state or {}).get("state"), "learning")] += 1
 
+    daily_counts = _daily_review_counts(current_user.id, lang)
+    today = now.date()
+    streak_days = _compute_streak(set(daily_counts), today)
+    # Nur die letzten ~26 Wochen für die Heatmap mitschicken (ältere Tage
+    # zeigt sie ohnehin nicht); nur Tage MIT Aktivität, das Frontend füllt
+    # die Lücken mit 0-Zellen auf.
+    cutoff = (today - timedelta(days=181)).isoformat()
+    activity = {d: n for d, n in daily_counts.items() if d >= cutoff}
+
     return jsonify({
         "reviews_today": reviews_today,
         "new_today": new_today,
         "retention_7d": retention_7d,
         "by_stage": by_stage,
         "total_cards": len(states),
+        "streak_days": streak_days,
+        "activity": activity,
     })
 
 

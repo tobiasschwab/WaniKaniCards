@@ -1132,6 +1132,25 @@ Lernstände, Verlauf, Job-Ausgabedateien – da die Fremdschlüssel bewusst kein
 `ON DELETE CASCADE` haben, siehe `services.delete_all_user_data`). Beide im
 Einstellungs-Panel unter „Konto".
 
+**Phase 6 (umgesetzt) – Streak, Heatmap & PWA:**
+
+- **Streak + Kalender-Heatmap** im Üben-Dashboard: `/api/srs/stats` liefert
+  zusätzlich `streak_days` (aufeinanderfolgende Lerntage; ein noch review-
+  freier heutiger Tag bricht den Streak nicht, solange gestern gelernt wurde –
+  übliche Duolingo-/WaniKani-Semantik, siehe `srs_api._compute_streak`) und
+  `activity` (Reviews pro UTC-Kalendertag der letzten ~26 Wochen, serverseitig
+  per `GROUP BY date(...)` aggregiert – funktioniert in SQLite UND Postgres).
+  Das Frontend rendert daraus eine GitHub-artige Heatmap (26 Wochen × 7 Tage,
+  Montag oben) mit fünf Intensitätsstufen plus eine „🔥 N"-Streak-Kachel.
+- **PWA**: `web/manifest.webmanifest` (standalone, generierte 栞-Icons in
+  192/512 px + Apple-Touch-Icon, per PyMuPDF aus der gebündelten Noto-Serif-
+  JP erzeugt) und ein minimaler Service Worker (`web/sw.js`) machen Shiori
+  aufs Handy-Homescreen installierbar. Der SW arbeitet bewusst
+  **network-first** mit Cache-Fallback (online immer der frische Stand direkt
+  nach einem Deploy, der Cache dient nur als Offline-Notnagel – vermeidet die
+  klassische „PWA liefert ewig die alte Version"-Falle) und fasst `/api/`-
+  Requests gar nicht an (Sitzungs-/Lernstands-Daten werden nie gecacht).
+
 ## Architektur
 
 Ein Skript (`kanji_cards.py`), klar in Funktionen getrennt:

@@ -6,6 +6,11 @@
   <title>Shiori</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E6%A0%9E%3C/text%3E%3C/svg%3E">
+  <!-- PWA: installierbar aufs Handy-Homescreen (Manifest + Service Worker,
+       Registrierung in app.js). -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#6d3bf5">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
   <div class="app">
@@ -527,8 +532,17 @@
             <div class="review-stat"><span id="statNewToday" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.new_today">Neu heute</span></div>
             <div class="review-stat"><span id="statRetention" class="review-stat-num">–</span><span class="review-stat-label" data-i18n="review.stats.retention">Retention (7 Tage)</span></div>
             <div class="review-stat"><span id="statTotalCards" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.total_cards">Karten insgesamt</span></div>
+            <div class="review-stat"><span id="statStreak" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.streak">Streak (Tage)</span></div>
           </div>
           <div id="reviewStageBar" class="review-stage-bar"></div>
+          <div id="reviewHeatmapWrap" class="review-heatmap-wrap hidden">
+            <div id="reviewHeatmap" class="review-heatmap"></div>
+            <div class="review-heatmap-legend muted">
+              <span data-i18n="review.heatmap.less">weniger</span>
+              <span class="hm-cell hm-0"></span><span class="hm-cell hm-1"></span><span class="hm-cell hm-2"></span><span class="hm-cell hm-3"></span><span class="hm-cell hm-4"></span>
+              <span data-i18n="review.heatmap.more">mehr</span>
+            </div>
+          </div>
           <div class="row gap" style="margin-top:14px">
             <button id="btnReviewManage" class="btn small" data-i18n="review.manage_button">Karten verwalten</button>
           </div>
