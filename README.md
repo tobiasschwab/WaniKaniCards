@@ -1025,8 +1025,32 @@ lernen (Auswahl-Tabelle → „Zum Lernen hinzufügen" statt/zusätzlich zu
   "existiert noch nicht" sehen – gefixt (Rollback + Zeile des Gewinners
   erneut lesen statt crashen), mit Regressionstest.
 
-**Noch offen** (spätere Phase): ein Statistik-Dashboard mit Tageslimits
-(neue Karten/Tag, Reviews/Tag, Retention-Rate, wie bei Anki-Deck-Optionen).
+**Phase 4 (umgesetzt) – Dashboard & Tageslimits:**
+
+- Neue Tabelle `models.ReviewLog`: ein Eintrag pro tatsächlich abgeschickter
+  Bewertung (User, Zielsprache, Karte, Bewertung, war die Karte davor neu).
+  Getrennt von `ReviewState` (das nur den *aktuellen* FSRS-Zustand hält,
+  keine Historie) – ohne dieses Log ließen sich weder Tageslimits noch eine
+  ehrliche Retention-Rate berechnen.
+- **Tageslimits** wie bei Anki-Deck-Optionen: `srs_new_per_day` (Default 20)
+  und `srs_reviews_per_day` (Default 200), über den bestehenden generischen
+  `defaults`-Mechanismus einstellbar (`POST /api/settings {"defaults":
+  {"srs_new_per_day": 10}}`) – kein neues Einstellungs-Schema nötig.
+  `GET /api/srs/queue` liefert dadurch nie mehr neue Karten oder Reviews
+  aus, als die Tageslimits erlauben; bereits fällige Karten, die das Limit
+  sprengen, bleiben einfach bis zum nächsten Tag liegen (kein Datenverlust).
+- `GET /api/srs/stats`: Reviews/neue Karten heute, **Retention der letzten
+  7 Tage** (Anteil NICHT „again" bewerteter Reviews – Standarddefinition
+  bei Anki/FSRS), sowie die Kartenanzahl je Lernstufe (neu/Learning/Review/
+  Relearning). Alles pro aktiver Zielsprache isoliert.
+- Frontend: kompaktes Statistik-Dashboard auf dem „Üben"-Startbildschirm
+  (4 Kennzahlen-Kacheln + ein Fortschrittsbalken nach Lernstufe), das sich
+  nach jeder abgeschlossenen Wiederholungs-Session automatisch aktualisiert.
+
+Damit ist der Vokabeltrainer aus dem ursprünglichen Brainstorming
+vollständig umgesetzt: FSRS-Scheduling, kombinierte Eingabe-Prüfung +
+Selbstbewertung, dritter Export-Weg neben PDF/Anki, Tageslimits und
+Statistik-Dashboard.
 
 ## Architektur
 

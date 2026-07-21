@@ -262,3 +262,28 @@ class ReviewState(db.Model):
     reps = db.Column(db.Integer, nullable=False, default=0)
     lapses = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now)
+
+
+class ReviewLog(db.Model):
+    """Ein Eintrag pro tatsächlich abgeschickter Bewertung (`/api/srs/answer`)
+    – Grundlage fürs Statistik-Dashboard (Tageslimits, Retention, siehe
+    README "Vokabeltrainer"). Getrennt von `ReviewState` (das nur den
+    AKTUELLEN FSRS-Zustand hält, keine Historie): ohne dieses Log ließe sich
+    weder "wie viele Reviews heute schon gemacht" noch eine ehrliche
+    Retention-Rate (Anteil NICHT "again" bewerteter Reviews) berechnen –
+    beides wäre nur grob aus `ReviewState.reps`/`lapses` schätzbar."""
+
+    __tablename__ = "review_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    target_lang = db.Column(db.String(10), nullable=False)
+    card_type = db.Column(db.String(16), nullable=False)
+    card_id = db.Column(db.String(64), nullable=False)
+    item_type = db.Column(db.String(16), nullable=False)
+    rating = db.Column(db.String(16), nullable=False)  # "again" | "hard" | "good" | "easy"
+    # War die Karte VOR dieser Bewertung noch nie beantwortet (reps==0)?
+    # Treibt den "neue Karten/Tag"-Teil des Tageslimits getrennt vom
+    # "Reviews/Tag"-Teil (siehe api_srs_queue()).
+    was_new = db.Column(db.Boolean, nullable=False, default=False)
+    reviewed_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now, index=True)

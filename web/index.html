@@ -485,6 +485,13 @@
         <div id="reviewIntro">
           <p id="reviewDueCount" class="hint"></p>
           <button id="btnReviewStart" class="btn primary big" data-i18n="review.start_button">Wiederholung starten</button>
+          <div id="reviewStats" class="review-stats">
+            <div class="review-stat"><span id="statReviewsToday" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.reviews_today">Reviews heute</span></div>
+            <div class="review-stat"><span id="statNewToday" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.new_today">Neu heute</span></div>
+            <div class="review-stat"><span id="statRetention" class="review-stat-num">–</span><span class="review-stat-label" data-i18n="review.stats.retention">Retention (7 Tage)</span></div>
+            <div class="review-stat"><span id="statTotalCards" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.total_cards">Karten insgesamt</span></div>
+          </div>
+          <div id="reviewStageBar" class="review-stage-bar"></div>
         </div>
         <div id="reviewSession" class="hidden">
           <div id="reviewProgress" class="muted"></div>

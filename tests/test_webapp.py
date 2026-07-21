@@ -1397,3 +1397,125 @@ def test_api_srs_answer_isolated_between_target_languages(client):
         "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good",
     })
     assert r.status_code == 404  # in "es" wurde die Karte nie hinzugefügt
+
+
+# --------------------------------------------------------------------------- #
+# Vokabeltrainer (SRS, Fundament): Tageslimits (/api/srs/queue) + Dashboard
+# (/api/srs/stats)
+# --------------------------------------------------------------------------- #
+
+def test_api_srs_answer_creates_review_log_entry(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good",
+    })
+    log = models.ReviewLog.query.filter_by(user_id=client.test_user_id).first()
+    assert log is not None
+    assert log.rating == "good"
+    assert log.was_new is True  # reps war 0 vor dieser Bewertung
+    assert log.card_type == "wanikani" and log.card_id == "440"
+
+
+def test_api_srs_answer_second_review_is_not_new(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    body = {"card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good"}
+    client.post("/api/srs/answer", json=body)  # erste Bewertung -> was_new True
+    client.post("/api/srs/answer", json=body)  # zweite -> was_new False
+
+    logs = models.ReviewLog.query.filter_by(user_id=client.test_user_id).order_by(models.ReviewLog.id).all()
+    assert [l.was_new for l in logs] == [True, False]
+
+
+def test_api_srs_queue_respects_new_per_day_limit(client):
+    client.post("/api/settings", json={"defaults": {"srs_new_per_day": 1}})
+    client.post("/api/srs/add", json={"subject_ids": [440, 1], "sample": True})  # 3 neue Zeilen
+
+    r = client.get("/api/srs/queue")
+    data = r.get_json()
+    assert data["due_total"] == 3  # tatsächlich fällig, unabhängig vom Limit
+    assert len(data["items"]) == 1  # aber nur 1 neue Karte pro Tag erlaubt
+
+
+def test_api_srs_queue_new_limit_does_not_affect_already_reviewed_cards(client):
+    """Das "neue Karten"-Limit betrifft nur reps==0 - einmal beantwortete
+    Karten (jetzt "Review"-Status) zählen gegen das Reviews-Limit, nicht
+    gegen das Neue-Karten-Limit."""
+    client.post("/api/settings", json={"defaults": {"srs_new_per_day": 0, "srs_reviews_per_day": 200}})
+    client.post("/api/srs/add", json={"subject_ids": [1], "sample": True})  # 1 Zeile (Radical, nur meaning)
+    row = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="1").first()
+    row.reps = 1  # simuliert: schon einmal beantwortet
+    db.session.commit()
+
+    r = client.get("/api/srs/queue")
+    data = r.get_json()
+    assert len(data["items"]) == 1  # srs_new_per_day=0 blockiert nur NEUE Karten
+
+
+def test_api_srs_queue_respects_reviews_per_day_limit(client, db_session):
+    """`srs_reviews_per_day` deckelt Karten, die schon mindestens einmal
+    beantwortet wurden (reps > 0) - neue Karten laufen über ihr eigenes
+    Limit (`srs_new_per_day`, siehe Test oben)."""
+    client.post("/api/settings", json={"defaults": {"srs_new_per_day": 200, "srs_reviews_per_day": 1}})
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})  # meaning + reading
+    for row in models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").all():
+        row.reps = 1
+    db_session.session.commit()
+
+    r = client.get("/api/srs/queue")
+    assert len(r.get_json()["items"]) == 1
+
+
+def test_api_srs_stats_counts_reviews_and_new_today(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    rows = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").all()
+    for row in rows:
+        client.post("/api/srs/answer", json={
+            "card_type": "wanikani", "card_id": "440", "item_type": row.item_type, "rating": "good",
+        })
+
+    r = client.get("/api/srs/stats")
+    data = r.get_json()
+    assert data["reviews_today"] == 2
+    assert data["new_today"] == 2
+    assert data["total_cards"] == 2
+
+
+def test_api_srs_stats_retention_reflects_again_ratings(client):
+    client.post("/api/srs/add", json={"subject_ids": [440, 1], "sample": True})
+    client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good"})
+    client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "440", "item_type": "reading", "rating": "again"})
+    client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "1", "item_type": "meaning", "rating": "easy"})
+
+    r = client.get("/api/srs/stats")
+    data = r.get_json()
+    # 2 von 3 NICHT "again" -> 66.7%
+    assert data["retention_7d"] == 66.7
+
+
+def test_api_srs_stats_retention_none_without_reviews(client):
+    r = client.get("/api/srs/stats")
+    assert r.get_json()["retention_7d"] is None
+
+
+def test_api_srs_stats_by_stage_counts_new_and_reviewed_separately(client):
+    client.post("/api/srs/add", json={"subject_ids": [1], "sample": True})  # bleibt "new"
+    client.post("/api/srs/add", json={"custom_ids": [
+        client.post("/api/customcards", json={"front_html": "<div>x</div>", "back_html": "<div>y</div>"}).get_json()["id"],
+    ]})
+    custom_id = models.CustomCard.query.filter_by(user_id=client.test_user_id).first().id
+    client.post("/api/srs/answer", json={"card_type": "custom", "card_id": custom_id, "item_type": "front", "rating": "good"})
+
+    r = client.get("/api/srs/stats")
+    data = r.get_json()
+    assert data["by_stage"]["new"] == 1  # das Radical wurde nie beantwortet
+    assert data["by_stage"]["learning"] == 1  # Custom-Karte nach 1x "good" noch im Learning-Status
+    assert data["total_cards"] == 2
+
+
+def test_api_srs_stats_isolated_between_target_languages(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    r = client.get("/api/srs/stats")
+    data = r.get_json()
+    assert data["total_cards"] == 0
+    assert data["reviews_today"] == 0

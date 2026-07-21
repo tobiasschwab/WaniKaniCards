@@ -1582,6 +1582,34 @@ async function enterReviewMode() {
     ? `${data.due_total} ${t("review.due_suffix")}`
     : t("review.none_due");
   $("#btnReviewStart").disabled = data.due_total === 0;
+  loadReviewStats();
+}
+
+async function loadReviewStats() {
+  let stats;
+  try {
+    stats = await api("/api/srs/stats");
+  } catch (e) {
+    return;
+  }
+  $("#statReviewsToday").textContent = stats.reviews_today;
+  $("#statNewToday").textContent = stats.new_today;
+  $("#statRetention").textContent = stats.retention_7d === null ? "–" : `${stats.retention_7d}%`;
+  $("#statTotalCards").textContent = stats.total_cards;
+
+  const stage = stats.by_stage || {};
+  const total = Math.max(1, stats.total_cards || 0);
+  const bar = $("#reviewStageBar");
+  bar.innerHTML = "";
+  for (const key of ["new", "learning", "review", "relearning"]) {
+    const n = stage[key] || 0;
+    if (!n) continue;
+    const seg = document.createElement("span");
+    seg.className = `stage-${key}`;
+    seg.style.width = `${(n / total) * 100}%`;
+    seg.title = `${key}: ${n}`;
+    bar.appendChild(seg);
+  }
 }
 
 function startReviewSession() {
@@ -1596,6 +1624,7 @@ async function showReviewCard() {
   if (reviewIndex >= reviewQueueItems.length) {
     $("#reviewSession").classList.add("hidden");
     $("#reviewDone").classList.remove("hidden");
+    loadReviewStats();
     return;
   }
   const item = reviewQueueItems[reviewIndex];

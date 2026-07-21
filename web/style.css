@@ -441,3 +441,15 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .review-ratings button.rating-good { color: var(--ok); }
 .review-ratings button.rating-easy { color: var(--accent-2); }
 .review-ratings button.suggested { border-color: currentColor; box-shadow: 0 0 0 2px currentColor inset; }
+
+/* Übungs-Modus: Statistik-Dashboard (Fundament) */
+.review-stats { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 18px; }
+.review-stat { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; min-width: 120px; text-align: center; }
+.review-stat-num { display: block; font-size: 22px; font-weight: 700; }
+.review-stat-label { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.review-stage-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; margin-top: 14px; background: var(--border); }
+.review-stage-bar span { display: block; height: 100%; }
+.review-stage-bar .stage-new { background: var(--accent-2); }
+.review-stage-bar .stage-learning { background: var(--warn); }
+.review-stage-bar .stage-review { background: var(--ok); }
+.review-stage-bar .stage-relearning { background: var(--err); }

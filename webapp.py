@@ -32,7 +32,7 @@ import re
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +118,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "duplex": "long-edge",
         "cut_marks": True,
         "hole": False,
+        # Tageslimits für den Vokabeltrainer (wie Anki-Deck-Optionen) - über
+        # den bestehenden generischen "defaults"-Mechanismus einstellbar
+        # (POST /api/settings {"defaults": {"srs_new_per_day": ...}}), kein
+        # eigenes Schema/Endpunkt nötig (siehe api_srs_queue()).
+        "srs_new_per_day": 20,
+        "srs_reviews_per_day": 200,
     },
 }
 
@@ -1867,13 +1873,38 @@ def _srs_resolve_fronts(rows: list["models.ReviewState"]) -> dict[tuple[str, str
     return fronts
 
 
+def _today_start(now: datetime) -> datetime:
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _srs_daily_counts(user_id: int, target_lang: str, now: datetime) -> tuple[int, int]:
+    """(neue Karten heute bereits beantwortet, Reviews heute insgesamt) –
+    Grundlage für die Tageslimits (siehe `api_srs_queue()`) und das
+    Statistik-Dashboard (`api_srs_stats()`)."""
+    today_logs = models.ReviewLog.query.filter(
+        models.ReviewLog.user_id == user_id,
+        models.ReviewLog.target_lang == target_lang,
+        models.ReviewLog.reviewed_at >= _today_start(now),
+    )
+    reviews_today = today_logs.count()
+    new_today = today_logs.filter(models.ReviewLog.was_new.is_(True)).count()
+    return new_today, reviews_today
+
+
 @app.get("/api/srs/queue")
 @login_required
 def api_srs_queue() -> Any:
     """Fällige Karten für die aktuell aktive Zielsprache, älteste Fälligkeit
-    zuerst – Grundlage für den (späteren) Review-Screen. `limit` deckelt die
-    Antwortgröße (Default 50, max. 200), `due_total` ist die volle Anzahl
-    unabhängig vom Limit (fürs „X Karten fällig"-Badge im Frontend)."""
+    zuerst – Grundlage für den Review-Screen. `limit` deckelt zusätzlich die
+    Antwortgröße (Default 50, max. 200). `due_total` ist die volle Anzahl
+    unabhängig von Limit/Tageslimits (fürs „X Karten fällig"-Badge im
+    Frontend).
+
+    Tageslimits (wie bei Anki-Deck-Optionen, siehe `DEFAULT_SETTINGS`
+    `srs_new_per_day`/`srs_reviews_per_day`) begrenzen, wie viele NEUE
+    Karten (`reps == 0`) und wie viele Reviews insgesamt heute noch
+    ausgeliefert werden – bereits Fällige, die das Tageslimit sprengen,
+    bleiben einfach für morgen liegen (kein Datenverlust, nur Verzögerung)."""
     lang = _current_target_lang()
     now = datetime.now(timezone.utc)
     try:
@@ -1887,7 +1918,19 @@ def api_srs_queue() -> Any:
         models.ReviewState.due_at <= now,
     )
     due_total = base_query.count()
-    rows = base_query.order_by(models.ReviewState.due_at.asc()).limit(limit).all()
+
+    defaults = load_settings()["defaults"]
+    new_done_today, reviews_done_today = _srs_daily_counts(current_user.id, lang, now)
+    new_budget = max(0, int(defaults.get("srs_new_per_day", 20)) - new_done_today)
+    review_budget = max(0, int(defaults.get("srs_reviews_per_day", 200)) - reviews_done_today)
+
+    new_rows = base_query.filter(models.ReviewState.reps == 0).order_by(
+        models.ReviewState.due_at.asc()
+    ).limit(new_budget).all() if new_budget else []
+    review_rows = base_query.filter(models.ReviewState.reps > 0).order_by(
+        models.ReviewState.due_at.asc()
+    ).limit(review_budget).all() if review_budget else []
+    rows = sorted(new_rows + review_rows, key=lambda r: r.due_at)[:limit]
 
     fronts = _srs_resolve_fronts(rows)
     items = [
@@ -2043,14 +2086,64 @@ def api_srs_answer() -> Any:
     if row is None:
         return jsonify({"error": "Karte nicht in der Lernwarteschlange gefunden."}), 404
 
+    was_new = row.reps == 0
     try:
         updated = srs.review(srs.state_from_row(row), rating)
     except srs.SrsError as exc:
         return jsonify({"error": str(exc)}), 400
     srs.apply_state_to_row(row, updated)
+    # Log-Eintrag für Tageslimits/Statistik-Dashboard (siehe models.ReviewLog-
+    # Docstring) - ReviewState selbst hält nur den AKTUELLEN Zustand, keine
+    # Historie.
+    db.session.add(models.ReviewLog(
+        user_id=current_user.id, target_lang=row.target_lang, card_type=card_type,
+        card_id=card_id, item_type=item_type, rating=rating, was_new=was_new,
+    ))
     db.session.commit()
 
     return jsonify({"ok": True, "due_at": row.due_at.isoformat(), "reps": row.reps, "lapses": row.lapses})
+
+
+@app.get("/api/srs/stats")
+@login_required
+def api_srs_stats() -> Any:
+    """Statistik-Dashboard für die aktuell aktive Zielsprache: Reviews/neue
+    Karten heute, Retention der letzten 7 Tage (Anteil NICHT "again"
+    bewerteter Reviews – Standarddefinition bei Anki/FSRS) und die Anzahl
+    Karten je Lernstufe."""
+    lang = _current_target_lang()
+    now = datetime.now(timezone.utc)
+
+    new_today, reviews_today = _srs_daily_counts(current_user.id, lang, now)
+
+    week_logs = models.ReviewLog.query.filter(
+        models.ReviewLog.user_id == current_user.id,
+        models.ReviewLog.target_lang == lang,
+        models.ReviewLog.reviewed_at >= now - timedelta(days=7),
+    )
+    week_total = week_logs.count()
+    week_again = week_logs.filter(models.ReviewLog.rating == "again").count()
+    retention_7d = round((week_total - week_again) / week_total * 100, 1) if week_total else None
+
+    states = models.ReviewState.query.filter_by(user_id=current_user.id, target_lang=lang).all()
+    # fsrs.State: 1=Learning, 2=Review, 3=Relearning (siehe srs.py) - "new"
+    # ist kein eigener FSRS-State, sondern unsere eigene Definition
+    # (reps == 0, noch nie beantwortet).
+    by_stage = {"new": 0, "learning": 0, "review": 0, "relearning": 0}
+    stage_names = {1: "learning", 2: "review", 3: "relearning"}
+    for s in states:
+        if s.reps == 0:
+            by_stage["new"] += 1
+        else:
+            by_stage[stage_names.get((s.fsrs_state or {}).get("state"), "learning")] += 1
+
+    return jsonify({
+        "reviews_today": reviews_today,
+        "new_today": new_today,
+        "retention_7d": retention_7d,
+        "by_stage": by_stage,
+        "total_cards": len(states),
+    })
 
 
 # ---------- Frontend --------------------------------------------------------- #
