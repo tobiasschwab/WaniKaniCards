@@ -874,4 +874,12 @@ def static_files(path: str) -> Any:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), debug=True)
+    # In Produktion läuft die App über gunicorn (siehe docker-entrypoint.sh),
+    # dieser Block wird dort nie erreicht. debug=True nur bei explizit
+    # gesetztem FLASK_DEBUG statt hartcodiert, damit ein versehentlicher
+    # direkter Aufruf (`python webapp.py`) nicht automatisch den Werkzeug-
+    # Debugger (interaktive Traceback-Konsole mit Code-Ausführung) aktiviert.
+    app.run(
+        host="0.0.0.0", port=int(os.environ.get("PORT", "8000")),
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+    )
