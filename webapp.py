@@ -262,6 +262,13 @@ app.config["RATELIMIT_STORAGE_URI"] = REDIS_URL
 # Einzelendpunkte (Rendern, Gemini-Aufrufe, Login/Signup) bekommen unten ihr
 # eigenes, strengeres Limit direkt am jeweiligen Endpunkt.
 app.config["RATELIMIT_DEFAULT"] = "120 per minute"
+# Wenn Redis kurzzeitig nicht erreichbar ist, soll das Rate-Limiting auf einen
+# prozesslokalen In-Memory-Zähler ausweichen, statt jeden Request mit einem
+# Fehler abzulehnen (Redis-Ausfall darf nicht die ganze App lahmlegen). Der
+# In-Memory-Zähler ist pro Worker-Prozess und übersteht keinen Neustart - als
+# Notnagel für einen kurzen Redis-Ausfall aber völlig ausreichend; sobald
+# Redis zurück ist, zählt der Limiter wieder zentral.
+app.config["RATELIMIT_IN_MEMORY_FALLBACK_ENABLED"] = True
 limiter.init_app(app)
 
 

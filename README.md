@@ -840,6 +840,7 @@ Disk-Speicher):
 | Variable | Zweck |
 |---|---|
 | `REDIS_URL` | Redis-Verbindung für Job-Queue + Rate-Limiting. Ohne gesetzt: `redis://localhost:6379/0`. |
+| `RUN_MIGRATIONS` | `1` = dieser Container wendet beim Start `alembic upgrade head` an. **Genau einem** Container (dem Web-Service) setzen – nie gleichzeitig Web und Worker, sonst könnten sie sich beim Schema-DDL in die Quere kommen (siehe `docker-entrypoint.sh`). |
 | `S3_BUCKET` | Aktiviert Object Storage für generierte PDFs/APKGs (siehe `storage.py`). Ohne gesetzt: lokales Disk unter `data/output/`. |
 | `S3_ENDPOINT_URL` | Für selbst gehostetes S3-kompatibles Storage (z. B. MinIO). Bei AWS S3 weglassen. |
 | `S3_REGION` | AWS-Region, Default `us-east-1`. Bei MinIO i. d. R. irrelevant. |

@@ -1338,13 +1338,26 @@ def test_api_srs_check_returns_correct_for_matching_meaning(client):
 
 def test_api_srs_check_tolerates_small_typo(client):
     """Tippfehler-Toleranz gilt erst ab 4 normalisierten Zeichen (siehe
-    _fuzzy_correct()) - "Person" (id 449) ist dafür lang genug, "One" (id
-    440) mit nur 3 Zeichen wäre zu kurz für Toleranz."""
+    _match_quality()) - "Person" (id 449) ist dafür lang genug, "One" (id
+    440) mit nur 3 Zeichen wäre zu kurz für Toleranz. Ein nur mit Toleranz
+    akzeptierter Treffer schlägt „hard" statt „good" vor (ehrlicher)."""
     client.post("/api/srs/add", json={"subject_ids": [449], "sample": True})
     r = client.post("/api/srs/check", json={
         "card_type": "wanikani", "card_id": "449", "item_type": "meaning", "answer": "Persen",
     })
-    assert r.get_json()["correct"] is True
+    data = r.get_json()
+    assert data["correct"] is True
+    assert data["suggested_rating"] == "hard"
+
+
+def test_api_srs_check_exact_match_suggests_good(client):
+    """Ein exakter Treffer (ohne Tippfehler) schlägt weiterhin „good" vor -
+    Abgrenzung zum Fuzzy-Treffer oben."""
+    client.post("/api/srs/add", json={"subject_ids": [449], "sample": True})
+    r = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "449", "item_type": "meaning", "answer": "person",
+    })
+    assert r.get_json()["suggested_rating"] == "good"
 
 
 def test_api_srs_check_returns_incorrect_for_wrong_meaning(client):

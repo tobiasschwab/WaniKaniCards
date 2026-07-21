@@ -45,6 +45,10 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://shiori:shiori@db:5432/shiori
       REDIS_URL: redis://redis:6379/0
+      # Nur DIESER (Web-)Container wendet die DB-Migrationen an - der
+      # Worker-Container wartet nur, bis das Schema steht (siehe
+      # docker-entrypoint.sh). Verhindert, dass beide gleichzeitig migrieren.
+      RUN_MIGRATIONS: "1"
       # Erzeugen: python -c "from crypto import generate_master_key; print(generate_master_key())"
       WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
       WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}

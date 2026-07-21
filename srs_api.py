@@ -42,7 +42,11 @@ def _srs_add_card(
     `ReviewState`-Zeile anlegen - bereits vorhandene Zeilen (Karte war schon
     einmal hinzugefügt) bleiben unverändert, damit ein erneutes Hinzufügen
     nie den Lernfortschritt zurücksetzt. Gibt die Anzahl NEU angelegter
-    Zeilen zurück."""
+    Zeilen zurück.
+
+    Committet bewusst NICHT selbst: der Aufrufer (`api_srs_add`) fügt oft viele
+    Karten in einer Schleife hinzu und committet EINMAL am Ende (ein
+    Transaktions-Roundtrip statt einem pro Karte)."""
     added = 0
     for item_type in item_types:
         existing = db.session.get(
@@ -57,8 +61,6 @@ def _srs_add_card(
         srs.apply_state_to_row(row, srs.new_review_state())
         db.session.add(row)
         added += 1
-    if added:
-        db.session.commit()
     return added
 
 
@@ -109,6 +111,9 @@ def api_srs_add() -> Any:
         item_types = ["meaning", "reading"] if record and record.get("reading") else ["meaning"]
         added += _srs_add_card(current_user.id, lang, "kana", kid, item_types)
 
+    # Einmal committen für ALLE hinzugefügten Karten (siehe _srs_add_card).
+    if added:
+        db.session.commit()
     return jsonify({"ok": True, "added": added})
 
 
@@ -265,25 +270,39 @@ def _normalize_answer(text: str) -> str:
     return re.sub(r"[^\w]", "", text.strip().lower(), flags=re.UNICODE)
 
 
-def _fuzzy_correct(typed: str, accepted: list[str]) -> bool:
-    """Eingabe-Prüfung mit Tippfehler-Toleranz (1 Editierschritt erlaubt ab
-    4 normalisierten Zeichen, sonst exakt) – wie bei WaniKani, das
-    Tippfehler bei längeren Antworten großzügig verzeiht, bei kurzen
-    Antworten (wo ein einzelner Fehler die Bedeutung verändert) aber streng
-    bleibt."""
+def _match_quality(typed: str, accepted: list[str]) -> str | None:
+    """Qualität eines Eingabe-Treffers gegen die akzeptierten Antworten:
+
+    - `"exact"`  – nach Normalisierung exakt gleich einer Antwort.
+    - `"fuzzy"`  – kein exakter Treffer, aber innerhalb der Tippfehler-Toleranz
+      (1 Editierschritt, nur ab 4 normalisierten Zeichen – bei kürzeren
+      Antworten würde ein einzelner Fehler die Bedeutung verändern).
+    - `None`     – kein Treffer.
+
+    Die Unterscheidung exact/fuzzy treibt den Bewertungs-VORSCHLAG (siehe
+    `api_srs_check`): ein exakter Treffer schlägt „good" vor, ein nur mit
+    Tippfehler-Toleranz akzeptierter „hard" (ehrlicher – man wusste es nicht
+    ganz sicher), ein Fehltreffer „again"."""
     typed_norm = _normalize_answer(typed)
     if not typed_norm:
-        return False
+        return None
+    fuzzy_hit = False
     for candidate in accepted:
         cand_norm = _normalize_answer(candidate)
         if not cand_norm:
             continue
         if typed_norm == cand_norm:
-            return True
+            return "exact"
         threshold = 1 if len(cand_norm) >= 4 else 0
-        if _levenshtein(typed_norm, cand_norm) <= threshold:
-            return True
-    return False
+        if threshold and _levenshtein(typed_norm, cand_norm) <= threshold:
+            fuzzy_hit = True
+    return "fuzzy" if fuzzy_hit else None
+
+
+def _fuzzy_correct(typed: str, accepted: list[str]) -> bool:
+    """Ob die Eingabe als richtig gilt (exakt ODER innerhalb der Tippfehler-
+    Toleranz) – dünner Wrapper um `_match_quality()`."""
+    return _match_quality(typed, accepted) is not None
 
 
 def _srs_load_card_data(row: "models.ReviewState") -> dict[str, Any] | None:
@@ -356,11 +375,14 @@ def api_srs_check() -> Any:
     if accepted is None:
         return jsonify({"correct": None, "accepted_answers": [], "suggested_rating": None})
 
-    correct = _fuzzy_correct(answer, accepted)
+    quality = _match_quality(answer, accepted)
+    # exact -> "good" (sicher gewusst), fuzzy (nur mit Tippfehler-Toleranz
+    # akzeptiert) -> "hard" (ehrlicher Vorschlag), kein Treffer -> "again".
+    suggested = {"exact": "good", "fuzzy": "hard"}.get(quality, "again")
     return jsonify({
-        "correct": correct,
+        "correct": quality is not None,
         "accepted_answers": accepted,
-        "suggested_rating": "good" if correct else "again",
+        "suggested_rating": suggested,
     })
 
 
