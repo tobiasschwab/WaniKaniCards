@@ -1127,6 +1127,46 @@ def build_sheets(
     return sheets
 
 
+def _make_safe_url_fetcher(allowed_font_paths: set[Path]):
+    """WeasyPrint-`url_fetcher`, der beim Rendern NUR `data:`-URIs und eine
+    feste Allowlist lokaler Font-Dateien lädt – alles andere wird blockiert.
+
+    Sicherheitsrelevant im Web-Multi-User-Betrieb: „Frei erstellen"-Karten
+    dürfen bewusst beliebiges HTML enthalten (siehe templates/cards.html.j2,
+    `front_html | safe`). Ohne diese Sperre könnte ein Nutzer
+
+      * `<img src="http://169.254.169.254/…">` einbetten → der Render-Worker
+        ruft interne/Cloud-Metadata-URLs serverseitig ab (SSRF), oder
+      * `<img src="file:///…/data/shiori.db">` → lokale Serverdateien
+        (SQLite-DB mit fremden Secrets, fremde Exporte, Quellcode) landen im
+        selbst erzeugten PDF (Local File Disclosure).
+
+    Radikal-/Vokabelbilder sind zum Renderzeitpunkt bereits serverseitig zu
+    `data:`-URIs heruntergeladen (siehe `fetch_image_data_uri`), es müssen
+    also legitim nur `data:` und die drei gebündelten Font-Dateien geladen
+    werden. Der Pfadvergleich läuft über aufgelöste `Path`-Objekte (nicht über
+    rohe URL-Strings), damit Prozent-Encoding/Normalisierung durch WeasyPrint
+    keine Lücke aufreißt."""
+    from urllib.parse import unquote, urlparse
+    from urllib.request import url2pathname
+
+    from weasyprint import default_url_fetcher
+
+    def _fetch(url: str, *args: Any, **kwargs: Any):
+        if url.startswith("data:"):
+            return default_url_fetcher(url, *args, **kwargs)
+        parsed = urlparse(url)
+        if parsed.scheme == "file":
+            local_path = Path(url2pathname(unquote(parsed.path))).resolve()
+            if local_path in allowed_font_paths:
+                return default_url_fetcher(url, *args, **kwargs)
+        raise ValueError(
+            f"Externe/nicht erlaubte Ressource beim Rendern blockiert: {url[:80]!r}"
+        )
+
+    return _fetch
+
+
 def render_pdf(
     cards: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None],
     output: str | Path,
@@ -1187,8 +1227,20 @@ def render_pdf(
     )
 
     out_path = Path(output)
-    # base_url erlaubt @font-face mit file://-URLs
-    HTML(string=html_str, base_url=str(HERE)).write_pdf(str(out_path))
+    # base_url erlaubt @font-face mit file://-URLs; der url_fetcher beschränkt
+    # WeasyPrints Ressourcen-Zugriff dann auf genau diese drei Font-Dateien
+    # plus data:-URIs (SSRF-/Local-File-Disclosure-Schutz gegen beliebiges
+    # Custom-Karten-HTML, siehe _make_safe_url_fetcher).
+    allowed_font_paths = {
+        Path(kanji_font).resolve(),
+        Path(sans_font).resolve(),
+        Path(sans_bold_font).resolve(),
+    }
+    HTML(
+        string=html_str,
+        base_url=str(HERE),
+        url_fetcher=_make_safe_url_fetcher(allowed_font_paths),
+    ).write_pdf(str(out_path))
     return out_path
 
 
