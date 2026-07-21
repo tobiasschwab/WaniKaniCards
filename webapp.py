@@ -42,6 +42,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import current_user, login_required
 from rq import Queue
+from sqlalchemy.exc import IntegrityError
 
 import anki_export as ae
 import crypto
@@ -245,7 +246,17 @@ def _get_or_create_user_settings(user_id: int) -> models.UserSettings:
     if settings is None:
         settings = models.UserSettings(user_id=user_id)
         db.session.add(settings)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Das Frontend feuert beim Login mehrere Requests parallel ab
+            # (loadSettings()/loadLanguages() u. Ä., keiner davon wartet auf
+            # den anderen) - zwei können hier gleichzeitig "existiert noch
+            # nicht" sehen und beide versuchen anzulegen. Der Verlierer
+            # rollt zurück und liest einfach die vom Gewinner erzeugte
+            # Zeile - kein Fehler, kein Datenverlust.
+            db.session.rollback()
+            settings = db.session.get(models.UserSettings, user_id)
     return settings
 
 
@@ -258,7 +269,12 @@ def _get_or_create_language_secrets(user_id: int, target_lang: str) -> models.Us
     if row is None:
         row = models.UserLanguageSecrets(user_id=user_id, target_lang=target_lang)
         db.session.add(row)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Gleiches Race wie bei _get_or_create_user_settings() oben.
+            db.session.rollback()
+            row = db.session.get(models.UserLanguageSecrets, (user_id, target_lang))
     return row
 
 
@@ -1886,6 +1902,155 @@ def api_srs_queue() -> Any:
         for r in rows
     ]
     return jsonify({"items": items, "due_total": due_total})
+
+
+def _get_review_row(card_type: str, card_id: str, item_type: str) -> "models.ReviewState | None":
+    """Wie die anderen `*_owned()`-Helfer (siehe `read_job_owned()`): `None`
+    sowohl wenn die Zeile nicht existiert als auch wenn sie einem anderen
+    Nutzer gehört – der zusammengesetzte Primärschlüssel enthält bereits
+    `target_lang`, aber NICHT implizit `user_id`, daher der explizite
+    Vergleich danach."""
+    row = db.session.get(
+        models.ReviewState, (current_user.id, _current_target_lang(), card_type, card_id, item_type),
+    )
+    return row
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Klassische Editierdistanz (Einfügen/Löschen/Ersetzen) – für die
+    kurzen Wörter/Bedeutungen hier reicht die einfache O(n·m)-DP-Variante,
+    keine externe Bibliothek nötig."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, start=1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev = cur
+    return prev[-1]
+
+
+def _normalize_answer(text: str) -> str:
+    return re.sub(r"[^\w]", "", text.strip().lower(), flags=re.UNICODE)
+
+
+def _fuzzy_correct(typed: str, accepted: list[str]) -> bool:
+    """Eingabe-Prüfung mit Tippfehler-Toleranz (1 Editierschritt erlaubt ab
+    4 normalisierten Zeichen, sonst exakt) – wie bei WaniKani, das
+    Tippfehler bei längeren Antworten großzügig verzeiht, bei kurzen
+    Antworten (wo ein einzelner Fehler die Bedeutung verändert) aber streng
+    bleibt."""
+    typed_norm = _normalize_answer(typed)
+    if not typed_norm:
+        return False
+    for candidate in accepted:
+        cand_norm = _normalize_answer(candidate)
+        if not cand_norm:
+            continue
+        if typed_norm == cand_norm:
+            return True
+        threshold = 1 if len(cand_norm) >= 4 else 0
+        if _levenshtein(typed_norm, cand_norm) <= threshold:
+            return True
+    return False
+
+
+def _srs_accepted_answers(row: "models.ReviewState") -> list[str] | None:
+    """Akzeptierte Antworten für eine Prüfrichtung, oder `None`, wenn die
+    Karte nicht automatisch prüfbar ist (Custom-Karten: freies HTML auf
+    beiden Seiten, kein sinnvoller Textvergleich möglich – dort bewertet
+    sich der Nutzer wie bei Anki rein selbst, ohne Auto-Check/Vorschlag)."""
+    if row.card_type == "custom":
+        return None
+    if row.card_type == "kana":
+        card = read_kana_for_user(row.user_id, row.card_id, row.target_lang)
+        if not card:
+            return None
+        if row.item_type == "reading":
+            return [card["reading"]] if card.get("reading") else None
+        answers = [a for a in (card.get("meaning"), card.get("meaning_extra")) if a]
+        return answers or None
+    if row.card_type == "wanikani":
+        token = load_settings().get("token")
+        try:
+            details = kc.card_details_for_ids([int(row.card_id)], sample=not token, token=token)
+        except kc.WaniKaniError:
+            return None
+        detail = details.get(int(row.card_id))
+        if not detail:
+            return None
+        if row.item_type == "reading":
+            if detail.get("kind") == "VocabCard":
+                return detail.get("readings") or None
+            readings = (detail.get("onyomi") or []) + (detail.get("kunyomi") or [])
+            return readings or None
+        return detail.get("meanings") or None
+    return None
+
+
+@app.post("/api/srs/check")
+@login_required
+def api_srs_check() -> Any:
+    """Getippte Antwort gegen die akzeptierten Antworten prüfen (Fuzzy-
+    Match, siehe `_fuzzy_correct()`) und eine Bewertung VORSCHLAGEN – ändert
+    NICHTS am FSRS-Lernstand (das passiert erst in `/api/srs/answer`, wenn
+    der Nutzer den Vorschlag bestätigt oder überschrieben hat). Bei nicht
+    automatisch prüfbaren Karten (Custom) bleibt `correct`/`suggested_rating`
+    `None` – der Nutzer bewertet sich dort rein selbst."""
+    body = request.get_json(silent=True) or {}
+    card_type = str(body.get("card_type", ""))
+    card_id = str(body.get("card_id", ""))
+    item_type = str(body.get("item_type", ""))
+    answer = str(body.get("answer", ""))
+
+    row = _get_review_row(card_type, card_id, item_type)
+    if row is None:
+        return jsonify({"error": "Karte nicht in der Lernwarteschlange gefunden."}), 404
+
+    accepted = _srs_accepted_answers(row)
+    if accepted is None:
+        return jsonify({"correct": None, "accepted_answers": [], "suggested_rating": None})
+
+    correct = _fuzzy_correct(answer, accepted)
+    return jsonify({
+        "correct": correct,
+        "accepted_answers": accepted,
+        "suggested_rating": "good" if correct else "again",
+    })
+
+
+@app.post("/api/srs/answer")
+@login_required
+def api_srs_answer() -> Any:
+    """Bewertung (`"again"`/`"hard"`/`"good"`/`"easy"`, wie bei Anki) für
+    eine Karte übernehmen und den FSRS-Lernstand fortschreiben. Der Nutzer
+    hat die Bewertung ggf. gegenüber dem Vorschlag aus `/api/srs/check`
+    überschrieben – dieser Endpunkt vertraut der übergebenen Bewertung,
+    ohne selbst nochmal zu prüfen."""
+    body = request.get_json(silent=True) or {}
+    card_type = str(body.get("card_type", ""))
+    card_id = str(body.get("card_id", ""))
+    item_type = str(body.get("item_type", ""))
+    rating = str(body.get("rating", ""))
+
+    row = _get_review_row(card_type, card_id, item_type)
+    if row is None:
+        return jsonify({"error": "Karte nicht in der Lernwarteschlange gefunden."}), 404
+
+    try:
+        updated = srs.review(srs.state_from_row(row), rating)
+    except srs.SrsError as exc:
+        return jsonify({"error": str(exc)}), 400
+    srs.apply_state_to_row(row, updated)
+    db.session.commit()
+
+    return jsonify({"ok": True, "due_at": row.due_at.isoformat(), "reps": row.reps, "lapses": row.lapses})
 
 
 # ---------- Frontend --------------------------------------------------------- #

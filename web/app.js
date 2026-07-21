@@ -654,6 +654,33 @@ function updateRenderBtn() {
   const anki = segValue("format") === "anki";
   b.textContent = `${anki ? "Anki-Paket" : "PDF"} erzeugen (${n})`;
   b.disabled = n === 0;
+  $("#btnSrsAdd").disabled = n === 0;
+}
+
+// Sammelt dieselben IDs wie doRender() (subject_ids/custom_ids/kana_ids),
+// aber legt ReviewState-Zeilen an statt eine PDF/Anki-Datei zu erzeugen -
+// der dritte, gleichwertige Export-Weg (siehe README "Vokabeltrainer").
+async function addSelectionToSrs() {
+  const ids = cards.filter((c) => selected.has(String(c.id))).map((c) => c.id);
+  if (!ids.length) return;
+  const body = { sample: isSample() };
+  if (tableMode === "custom") {
+    body.custom_ids = ids.map(String);
+  } else {
+    const kanaIds = ids.filter((i) => String(i).startsWith("kana_"));
+    const subjectIds = ids.filter((i) => !String(i).startsWith("kana_"));
+    body.subject_ids = subjectIds;
+    if (kanaIds.length) body.kana_ids = kanaIds;
+  }
+  $("#btnSrsAdd").disabled = true;
+  try {
+    const result = await api("/api/srs/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    toast(result.added > 0 ? `${result.added} zum Lernen hinzugefügt` : "Bereits in der Lernwarteschlange");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    $("#btnSrsAdd").disabled = selected.size === 0;
+  }
 }
 
 // ---------- Suche (Kompositions-Modus) ----------
@@ -1526,6 +1553,125 @@ async function loadCustoms() {
   sentenceOverrides = {};
   renderTable(list, "Eigene Karten", "custom");
 }
+// ---------- Übungs-Modus (SRS-Vokabeltrainer, Fundament) ----------
+//
+// Dritter Export-Weg neben PDF/Anki: Karten werden über "Zum Lernen
+// hinzufügen" (siehe Render-Bar) in die ReviewState-Tabelle aufgenommen und
+// hier mit FSRS wiederholt. Ablauf pro Karte: Eingabe -> /api/srs/check
+// (Fuzzy-Match, ändert nichts am Lernstand) -> Bewertung anzeigen/vorschlagen
+// -> Nutzer bestätigt/überschreibt -> /api/srs/answer (schreibt den FSRS-
+// Lernstand fort) -> nächste Karte. Custom-Karten sind nicht automatisch
+// prüfbar (freies HTML) - dort nur "Antwort zeigen" + Selbstbewertung wie bei Anki.
+let reviewQueueItems = [];
+let reviewIndex = 0;
+let reviewCurrentItem = null;
+let reviewSuggestedRating = null;
+
+async function enterReviewMode() {
+  let data;
+  try {
+    data = await api("/api/srs/queue?limit=100");
+  } catch (e) {
+    data = { items: [], due_total: 0 };
+  }
+  reviewQueueItems = data.items;
+  $("#reviewIntro").classList.remove("hidden");
+  $("#reviewSession").classList.add("hidden");
+  $("#reviewDone").classList.add("hidden");
+  $("#reviewDueCount").textContent = data.due_total > 0
+    ? `${data.due_total} ${t("review.due_suffix")}`
+    : t("review.none_due");
+  $("#btnReviewStart").disabled = data.due_total === 0;
+}
+
+function startReviewSession() {
+  reviewIndex = 0;
+  $("#reviewIntro").classList.add("hidden");
+  $("#reviewDone").classList.add("hidden");
+  $("#reviewSession").classList.remove("hidden");
+  showReviewCard();
+}
+
+async function showReviewCard() {
+  if (reviewIndex >= reviewQueueItems.length) {
+    $("#reviewSession").classList.add("hidden");
+    $("#reviewDone").classList.remove("hidden");
+    return;
+  }
+  const item = reviewQueueItems[reviewIndex];
+  reviewCurrentItem = item;
+  reviewSuggestedRating = null;
+  $("#reviewProgress").textContent = `${reviewIndex + 1} / ${reviewQueueItems.length}`;
+  $("#reviewItemType").textContent = t(item.item_type === "reading" ? "review.reading_label" : "review.meaning_label");
+
+  const frontEl = $("#reviewFront");
+  if (item.card_type === "custom") {
+    try {
+      const full = await api(`/api/customcards/${item.card_id}`);
+      frontEl.innerHTML = full.front_html || "";
+    } catch (_) {
+      frontEl.textContent = item.front;
+    }
+  } else {
+    frontEl.textContent = item.front;
+  }
+
+  $("#reviewInput").value = "";
+  $("#reviewInputWrap").classList.toggle("hidden", item.card_type === "custom");
+  $("#btnReviewSubmit").textContent = t(item.card_type === "custom" ? "review.show_answer_button" : "review.submit_button");
+  $("#reviewRevealWrap").classList.add("hidden");
+  document.querySelectorAll(".review-ratings button").forEach((b) => b.classList.remove("suggested"));
+  if (item.card_type !== "custom") $("#reviewInput").focus();
+}
+
+function revealReview(correct, acceptedText) {
+  const fb = $("#reviewFeedback");
+  if (correct === true) { fb.textContent = t("review.feedback_correct"); fb.className = "review-feedback ok"; }
+  else if (correct === false) { fb.textContent = t("review.feedback_incorrect"); fb.className = "review-feedback err"; }
+  else { fb.textContent = ""; fb.className = "review-feedback"; }
+  $("#reviewAccepted").innerHTML = acceptedText || "";
+  $("#reviewInputWrap").classList.add("hidden");
+  $("#reviewRevealWrap").classList.remove("hidden");
+  document.querySelectorAll(".review-ratings button").forEach((b) => {
+    b.classList.toggle("suggested", b.dataset.rating === reviewSuggestedRating);
+  });
+}
+
+async function onReviewSubmit() {
+  const item = reviewCurrentItem;
+  if (!item) return;
+  if (item.card_type === "custom") {
+    let backHtml = "";
+    try { backHtml = (await api(`/api/customcards/${item.card_id}`)).back_html || ""; } catch (_) {}
+    reviewSuggestedRating = null;
+    revealReview(null, backHtml);
+    return;
+  }
+  const answer = $("#reviewInput").value;
+  let result;
+  try {
+    result = await api("/api/srs/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_type: item.card_type, card_id: item.card_id, item_type: item.item_type, answer }),
+    });
+  } catch (e) { toast(e.message); return; }
+  reviewSuggestedRating = result.suggested_rating;
+  revealReview(result.correct, escapeHtml((result.accepted_answers || []).join(", ")));
+}
+
+async function onReviewRate(rating) {
+  const item = reviewCurrentItem;
+  if (!item) return;
+  try {
+    await api("/api/srs/answer", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_type: item.card_type, card_id: item.card_id, item_type: item.item_type, rating }),
+    });
+  } catch (e) { toast(e.message); }
+  reviewIndex++;
+  showReviewCard();
+}
+
 async function prefillFromWk() {
   const q = $("#cfPrefill").value.trim(); if (!q) return;
   const list = await resolve({ mode: "search", q });
@@ -1636,11 +1782,13 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#modeText").classList.toggle("hidden", v !== "text");
     $("#modeCustom").classList.toggle("hidden", v !== "custom");
     $("#modeWortliste").classList.toggle("hidden", v !== "wortliste");
+    $("#modeReview").classList.toggle("hidden", v !== "review");
     document.querySelectorAll(".tab-group").forEach((g) => {
       g.classList.toggle("sel", !!g.querySelector(`button[data-v="${v}"]`));
     });
     if (v === "custom") loadCustoms();
     if (v === "wortliste") loadWortliste();
+    if (v === "review") enterReviewMode();
   });
 
   // Ausklapp-Elemente (Text-Modus-Erklärung, erweiterte Druckoptionen): ein
@@ -1797,10 +1945,18 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#wlAddBtn").addEventListener("click", addManualWortliste);
   $("#wlAddMeaning").addEventListener("keydown", (e) => { if (e.key === "Enter") addManualWortliste(); });
 
+  $("#btnReviewStart").addEventListener("click", startReviewSession);
+  $("#btnReviewSubmit").addEventListener("click", onReviewSubmit);
+  $("#reviewInput").addEventListener("keydown", (e) => { if (e.key === "Enter") onReviewSubmit(); });
+  document.querySelectorAll(".review-ratings button").forEach((b) => {
+    b.addEventListener("click", () => onReviewRate(b.dataset.rating));
+  });
+
   $("#checkAll").addEventListener("change", (e) => selectAll(e.target.checked));
   $("#selAll").addEventListener("click", () => selectAll(true));
   $("#selNone").addEventListener("click", () => selectAll(false));
   $("#btnRender").addEventListener("click", doRender);
+  $("#btnSrsAdd").addEventListener("click", addSelectionToSrs);
 
   $("#authToggleMode").addEventListener("click", () => setAuthMode(authMode === "signup" ? "login" : "signup"));
   $("#authSubmit").addEventListener("click", submitAuthForm);

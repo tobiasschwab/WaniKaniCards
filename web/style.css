@@ -424,3 +424,20 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--text); color: var(--bg-elev); padding: 11px 18px; border-radius: 12px; font-size: 14px; box-shadow: var(--shadow); opacity: 0; transition: opacity .2s, transform .2s; z-index: 50; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.err { background: var(--err); color: #fff; }
+
+/* Übungs-Modus (SRS-Vokabeltrainer) */
+.review-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; margin-top: 10px; text-align: center; }
+.review-item-type { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 10px; }
+.review-front { font-size: 42px; font-weight: 700; margin-bottom: 6px; word-break: break-word; }
+#reviewInputWrap input { text-align: center; font-size: 16px; }
+.review-feedback { font-weight: 700; font-size: 15px; }
+.review-feedback.ok { color: var(--ok); }
+.review-feedback.err { color: var(--err); }
+.review-accepted { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.review-ratings { justify-content: center; }
+.review-ratings button { border-width: 2px; }
+.review-ratings button.rating-again { color: var(--err); }
+.review-ratings button.rating-hard { color: var(--warn); }
+.review-ratings button.rating-good { color: var(--ok); }
+.review-ratings button.rating-easy { color: var(--accent-2); }
+.review-ratings button.suggested { border-color: currentColor; box-shadow: 0 0 0 2px currentColor inset; }

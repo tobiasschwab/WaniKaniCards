@@ -997,10 +997,36 @@ lernen (Auswahl-Tabelle → „Zum Lernen hinzufügen" statt/zusätzlich zu
   Token automatisch auf die Sample-Registry zurück (Demo-Modus, wie überall
   sonst in der App).
 
-**Noch offen** (spätere Phasen): `POST /api/srs/answer` (getippte Antwort
-prüfen, Fuzzy-Match, FSRS-State updaten), ein Review-Screen im Frontend
-(Eingabefeld + Bewertungs-Buttons), sowie ein Statistik-Dashboard mit
-Tageslimits (neue Karten/Tag, Reviews/Tag, wie bei Anki).
+**Phase 3 (umgesetzt) – Eingabe-Prüfung & Review-Screen:**
+
+- `POST /api/srs/check` – getippte Antwort per Fuzzy-Match gegen die
+  akzeptierten Antworten prüfen (Levenshtein-Toleranz: 1 Tippfehler erlaubt
+  ab 4 normalisierten Zeichen, sonst exakt – wie bei WaniKani) und eine
+  Bewertung **vorschlagen**, OHNE den FSRS-Lernstand zu verändern. Bei
+  Kanji/Vokabel kommen die akzeptierten Antworten aus den WaniKani-Daten
+  selbst (Meanings bzw. Onyomi+Kunyomi/Vokabel-Lesungen), bei Dictionary-/
+  KI-Karten aus `meaning`/`reading`. Custom-Karten sind nicht automatisch
+  prüfbar (freies HTML auf beiden Seiten) – dort bleibt `correct`/
+  `suggested_rating` `None`, der Nutzer bewertet sich rein selbst wie bei Anki.
+- `POST /api/srs/answer` – übernimmt die (ggf. vom Nutzer überschriebene)
+  Bewertung und schreibt den FSRS-Lernstand fort. Vertraut der übergebenen
+  Bewertung, ohne selbst nochmal zu prüfen – die Prüfung ist bewusst vom
+  Fortschreiben getrennt (`/api/srs/check` bleibt ein reiner Lesevorgang).
+- Frontend: neuer „Üben"-Tab mit vollständigem Review-Screen (Vorderseite
+  zeigen → Antwort eintippen → prüfen → Bewertung vorgeschlagen/bestätigen/
+  überschreiben → nächste Karte). Die Auswahl-Tabelle bekommt einen dritten
+  Button „Zum Lernen hinzufügen" neben „PDF erzeugen"/„Anki exportieren"
+  (ruft `/api/srs/add` mit derselben Auswahl auf).
+- Live-Test (Playwright) deckte eine echte, vorbestehende Race-Condition
+  auf: `_get_or_create_user_settings()`/`_get_or_create_language_secrets()`
+  crashten mit einem UNIQUE-constraint-`IntegrityError`, wenn das Frontend
+  mehrere Requests beim Login parallel abfeuert (`loadSettings()`/
+  `loadLanguages()`, keiner wartet auf den anderen) und beide gleichzeitig
+  "existiert noch nicht" sehen – gefixt (Rollback + Zeile des Gewinners
+  erneut lesen statt crashen), mit Regressionstest.
+
+**Noch offen** (spätere Phase): ein Statistik-Dashboard mit Tageslimits
+(neue Karten/Tag, Reviews/Tag, Retention-Rate, wie bei Anki-Deck-Optionen).
 
 ## Architektur
 

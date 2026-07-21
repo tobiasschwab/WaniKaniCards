@@ -8,6 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from sqlalchemy.exc import IntegrityError
+
 import models  # noqa: E402
 import webapp  # noqa: E402
 from extensions import db  # noqa: E402
@@ -332,6 +334,34 @@ def test_api_settings_secrets_stored_encrypted_not_plaintext(client):
     assert "supersecrettoken" not in secrets_row.wanikani_token_enc
     assert settings_row.deepl_key_enc is not None
     assert "mydeeplkey" not in settings_row.deepl_key_enc
+
+
+def test_get_or_create_language_secrets_survives_concurrent_insert_race(client, db_session, monkeypatch):
+    """Regressionstest für einen live per Playwright gefundenen Bug: das
+    Frontend feuert beim Login mehrere Requests parallel ab (loadSettings()/
+    loadLanguages(), keiner wartet auf den anderen). Sehen zwei Requests
+    gleichzeitig "Zeile existiert noch nicht", legen beide sie an - der
+    Verlierer crashte vorher mit einem UNIQUE-constraint IntegrityError statt
+    einfach die vom Gewinner erzeugte Zeile zu lesen."""
+    original_commit = db.session.commit
+    calls = {"n": 0}
+
+    def racy_commit():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # Simuliert einen "gewinnenden" nebenläufigen Request, der die
+            # Zeile zwischen unserem None-Check und unserem eigenen Commit
+            # bereits erfolgreich angelegt hat.
+            db.session.rollback()
+            db.session.add(models.UserLanguageSecrets(user_id=client.test_user_id, target_lang="ja"))
+            original_commit()
+            raise IntegrityError("insert", {}, Exception("UNIQUE constraint failed"))
+        return original_commit()
+
+    monkeypatch.setattr(db.session, "commit", racy_commit)
+    row = webapp._get_or_create_language_secrets(client.test_user_id, "ja")
+    assert row is not None
+    assert row.user_id == client.test_user_id
 
 
 def test_api_settings_get_set_target_lang(client):
@@ -1253,3 +1283,117 @@ def test_api_srs_queue_excludes_not_yet_due_cards(client, db_session):
 
     r = client.get("/api/srs/queue")
     assert r.get_json() == {"items": [], "due_total": 0}
+
+
+# --------------------------------------------------------------------------- #
+# Vokabeltrainer (SRS, Fundament): /api/srs/check, /api/srs/answer
+# --------------------------------------------------------------------------- #
+
+def test_api_srs_check_returns_correct_for_matching_meaning(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    r = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "answer": "one",
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["correct"] is True
+    assert "one" in data["accepted_answers"]
+    assert data["suggested_rating"] == "good"
+
+
+def test_api_srs_check_tolerates_small_typo(client):
+    """Tippfehler-Toleranz gilt erst ab 4 normalisierten Zeichen (siehe
+    _fuzzy_correct()) - "Person" (id 449) ist dafür lang genug, "One" (id
+    440) mit nur 3 Zeichen wäre zu kurz für Toleranz."""
+    client.post("/api/srs/add", json={"subject_ids": [449], "sample": True})
+    r = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "449", "item_type": "meaning", "answer": "Persen",
+    })
+    assert r.get_json()["correct"] is True
+
+
+def test_api_srs_check_returns_incorrect_for_wrong_meaning(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    r = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "answer": "banana",
+    })
+    data = r.get_json()
+    assert data["correct"] is False
+    assert data["suggested_rating"] == "again"
+
+
+def test_api_srs_check_reading_uses_onyomi_and_kunyomi(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    r = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "reading", "answer": "いち",
+    })
+    assert r.get_json()["correct"] is True
+    r2 = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "reading", "answer": "ひと",
+    })
+    assert r2.get_json()["correct"] is True  # kunyomi ebenfalls akzeptiert
+
+
+def test_api_srs_check_returns_ungraded_for_custom_card(client):
+    created = client.post("/api/customcards", json={"front_html": "<div>x</div>", "back_html": "<div>y</div>"}).get_json()
+    client.post("/api/srs/add", json={"custom_ids": [created["id"]]})
+    r = client.post("/api/srs/check", json={
+        "card_type": "custom", "card_id": created["id"], "item_type": "front", "answer": "irrelevant",
+    })
+    assert r.get_json() == {"correct": None, "accepted_answers": [], "suggested_rating": None}
+
+
+def test_api_srs_check_404_when_card_not_in_queue(client):
+    r = client.post("/api/srs/check", json={
+        "card_type": "wanikani", "card_id": "999999", "item_type": "meaning", "answer": "x",
+    })
+    assert r.status_code == 404
+
+
+def test_api_srs_answer_updates_fsrs_state_and_advances_due_date(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    row = models.ReviewState.query.filter_by(
+        user_id=client.test_user_id, card_id="440", item_type="meaning",
+    ).first()
+    original_due = row.due_at
+
+    r = client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good",
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["ok"] is True
+    assert data["reps"] == 1
+    assert data["lapses"] == 0
+
+    db.session.refresh(row)
+    assert row.due_at > original_due
+    assert row.reps == 1
+
+
+def test_api_srs_answer_rejects_unknown_rating(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    r = client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "excellent",
+    })
+    assert r.status_code == 400
+
+
+def test_api_srs_answer_404_when_card_not_in_queue(client):
+    r = client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": "999999", "item_type": "meaning", "rating": "good",
+    })
+    assert r.status_code == 404
+
+
+def test_api_srs_answer_isolated_between_target_languages(client):
+    """Dieselbe (card_type, card_id, item_type) darf in einer ANDEREN
+    Zielsprache nicht existieren/beeinflussbar sein, auch wenn zufällig
+    dieselbe card_id verwendet wird."""
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+
+    r = client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good",
+    })
+    assert r.status_code == 404  # in "es" wurde die Karte nie hinzugefügt
