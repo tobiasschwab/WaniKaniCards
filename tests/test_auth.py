@@ -27,6 +27,27 @@ def test_signup_creates_user_and_settings_and_logs_in(db_session):
     }
 
 
+def test_signup_accepts_native_lang_and_active_target_lang(db_session):
+    client = webapp.app.test_client()
+    r = client.post("/api/auth/signup", json={
+        "email": "lang@example.com", "password": "supersecret123",
+        "native_lang": "EN", "active_target_lang": "ES",
+    })
+    assert r.status_code == 201
+
+    me = client.get("/api/auth/me").get_json()
+    assert me["native_lang"] == "en"
+    assert me["active_target_lang"] == "es"
+
+
+def test_api_languages_public_works_without_login(db_session):
+    client = webapp.app.test_client()
+    r = client.get("/api/languages/public")
+    assert r.status_code == 200
+    codes = {l["code"] for l in r.get_json()["supported_target_langs"]}
+    assert {"ja", "en", "es"}.issubset(codes)
+
+
 def test_signup_rejects_invalid_email(db_session):
     client = webapp.app.test_client()
     r = client.post("/api/auth/signup", json={"email": "not-an-email", "password": "supersecret123"})

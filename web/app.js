@@ -29,6 +29,7 @@ async function checkAuthAndInit() {
     onAuthenticated(me.email);
   } else {
     await setUiLanguage("de"); // vor dem Login noch keine Muttersprache bekannt
+    loadAuthLanguageOptions().catch(() => {});
     $("#authOverlay").classList.remove("hidden");
   }
 }
@@ -50,6 +51,31 @@ function setAuthMode(mode) {
   $("#authSubmit").textContent = t(mode === "signup" ? "auth.signup.submit" : "auth.login.submit");
   $("#authToggleMode").textContent = t(mode === "signup" ? "auth.signup.toggle" : "auth.login.toggle");
   $("#authStatus").textContent = "";
+  $("#authLanguageFields").classList.toggle("hidden", mode !== "signup");
+}
+
+// Sprachwahl im Registrierungsformular - VOR dem ersten Login gibt es noch
+// keinen current_user, dessen Muttersprache/Zielsprache abfragbar wäre,
+// deshalb der eigene, login-freie Endpunkt (siehe /api/languages/public).
+async function loadAuthLanguageOptions() {
+  const nativeSel = $("#authNativeLang");
+  nativeSel.innerHTML = "";
+  for (const { code, label } of _UI_LANGS) {
+    const opt = document.createElement("option");
+    opt.value = code; opt.textContent = label;
+    nativeSel.appendChild(opt);
+  }
+  try {
+    const data = await api("/api/languages/public");
+    const targetSel = $("#authTargetLang");
+    targetSel.innerHTML = "";
+    for (const { code, display_name } of data.supported_target_langs || []) {
+      const opt = document.createElement("option");
+      opt.value = code; opt.textContent = display_name;
+      targetSel.appendChild(opt);
+    }
+    targetSel.value = "ja";
+  } catch (_) { /* Sprachwahl bleibt leer, Registrierung funktioniert trotzdem mit Serverdefaults */ }
 }
 
 async function submitAuthForm() {
@@ -58,10 +84,15 @@ async function submitAuthForm() {
   const st = $("#authStatus");
   st.textContent = "";
   const path = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+  const body = { email, password };
+  if (authMode === "signup") {
+    body.native_lang = $("#authNativeLang").value || "de";
+    body.active_target_lang = $("#authTargetLang").value || "ja";
+  }
   try {
     const r = await api(path, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(body),
     });
     $("#authPassword").value = "";
     onAuthenticated(r.email);

@@ -883,6 +883,23 @@ def api_post_settings() -> Any:
 
 # ---------- API: Sprachen (Muttersprache/aktive Zielsprache) ---------------- #
 
+@app.get("/api/languages/public")
+def api_languages_public() -> Any:
+    """Wie `/api/languages`, aber OHNE Login - für die Sprachwahl im
+    Registrierungsformular (vor dem ersten Login gibt es noch keinen
+    `current_user`, dessen Muttersprache/Zielsprache abfragbar wäre).
+    Liefert bewusst keine nutzerspezifischen Daten, nur die statische Liste
+    unterstützter Zielsprachen - `?native_lang=` steuert nur die
+    Anzeigesprache der Namen (Default Deutsch)."""
+    native_lang = (request.args.get("native_lang") or "de").strip().lower()[:10]
+    return jsonify({
+        "supported_target_langs": [
+            {"code": code, "display_name": get_pack(code).display_name(native_lang)}
+            for code in SUPPORTED_TARGET_LANGS
+        ],
+    })
+
+
 @app.get("/api/languages")
 @login_required
 def api_languages() -> Any:
@@ -1574,13 +1591,17 @@ def api_create_kanacard() -> Any:
     """Wort (aus dem Text-Modus, ohne WaniKani-Treffer) als Dictionary- oder
     KI-Karte anlegen.
 
-    Default (`source` fehlt/`"dictionary"`): Bedeutung kommt aus JMdict, per
-    `word` nachgeschlagen (`kc.build_kana_card`).
+    Default (`source` fehlt/`"dictionary"`): bei Japanisch kommt die
+    Bedeutung aus JMdict (`kc.build_kana_card`). Für jede andere Zielsprache
+    (kein JMdict-Äquivalent) übernimmt Gemini die Nachschlage-Funktion
+    (`kc.build_generic_dictionary_card`, siehe README "Multi-Language-
+    Architektur", Entscheidung 3) – braucht dafür einen hinterlegten
+    Gemini-Key.
 
     `source: "ai"` (aus dem KI-Modus, siehe `annotate_text_ai()`): Bedeutung
-    kommt direkt von Gemini (`meaning`/`reading` im Request), kein JMdict-
-    Lookup – der Nutzer hat das Wort bewusst im KI-Modus angeklickt, es wird
-    nie automatisch für alle KI-erkannten Wörter eine Karte erzeugt.
+    kommt direkt von Gemini (`meaning`/`reading` im Request), kein weiterer
+    Lookup nötig – der Nutzer hat das Wort bewusst im KI-Modus angeklickt, es
+    wird nie automatisch für alle KI-erkannten Wörter eine Karte erzeugt.
 
     Satzübersetzung in beiden Fällen optional per DeepL, wenn ein Key
     hinterlegt ist (sonst bleibt die Karte trotzdem gültig)."""
@@ -1591,7 +1612,8 @@ def api_create_kanacard() -> Any:
     source = str(body.get("source") or "dictionary").strip()
     if not word:
         return jsonify({"error": "Kein Wort angegeben."}), 400
-    deepl_key = load_settings().get("deepl_key") or None
+    s = load_settings()
+    deepl_key = s.get("deepl_key") or None
     sentence_audio = body.get("sentence_audio_url") or None
     if source == "ai":
         meaning = str(body.get("meaning") or "").strip()
@@ -1601,10 +1623,22 @@ def api_create_kanacard() -> Any:
             word, meaning=meaning, reading=body.get("reading"), sentence=sentence,
             sentence_audio_url=sentence_audio, deepl_key=deepl_key,
         )
-    else:
+    elif _current_pack().has_furigana:  # aktuell gleichbedeutend mit "hat JMdict", siehe JapanesePack
         card_obj = kc.build_kana_card(word, sentence, deepl_key=deepl_key)
         if card_obj is None:
             return jsonify({"error": f"„{word}“ wurde im Wörterbuch nicht gefunden."}), 404
+    else:
+        pack = _current_pack()
+        gemini_key = s.get("gemini_key") or None
+        if not gemini_key:
+            return jsonify({"error": "Kein Gemini-API-Key in den Einstellungen hinterlegt (nötig für das Wörterbuch dieser Sprache)."}), 400
+        card_obj = kc.build_generic_dictionary_card(
+            word, sentence, gemini_key=gemini_key, gemini_model=_resolve_gemini_model(s),
+            target_lang_name=pack.display_name("de"), native_lang_name=get_pack(current_user.native_lang).display_name("de"),
+            has_reading=pack.has_furigana, deepl_key=deepl_key,
+        )
+        if card_obj is None:
+            return jsonify({"error": f"„{word}“ wurde nicht als gültiges Wort erkannt."}), 404
     record = {
         "id": card_obj.card_id,
         "word": card_obj.word,

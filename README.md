@@ -899,17 +899,35 @@ anderen Zielsprache landet dadurch z. B. unter `Englisch::sonstige` statt
 fälschlich unter `Japanisch::…`.
 
 **Frontend-i18n:** `web/i18n.js` + `web/i18n/{de,en}.json` übersetzen die
-UI-Chrome (Header, Login, Einstellungen, Moduswahl) nach der Muttersprache
-– bewusst **getrennt** von der Zielsprache (Karteninhalte bleiben in der
-gelernten Sprache, nur Menüs/Buttons wechseln). Deckt aktuell die
-wichtigste, am häufigsten sichtbare Chrome ab (`data-i18n`-Attribute),
-nicht jeden dynamisch erzeugten String – eine Erweiterung um weitere
+UI-Chrome (Header, Login/Signup, komplette Einstellungen, alle Moduswahl-
+Bereiche inkl. Level/Suche/Text/Frei-erstellen/Wortliste, Kartentabelle,
+Render-Optionen, Verlauf, Footer) nach der Muttersprache – bewusst
+**getrennt** von der Zielsprache (Karteninhalte bleiben in der gelernten
+Sprache, nur Menüs/Buttons wechseln). Deckt die statische Chrome breit ab
+(`data-i18n`-Attribute), **nicht** dynamisch von JavaScript erzeugte
+Strings (z. B. Toast-Meldungen, Fehlertexte) – eine Erweiterung um weitere
 Sprachen/Strings ist rein additiv (neue `i18n/<code>.json` + Attribute).
 Der Sprachwechsler (Einstellungen → „Sprachen") ruft `GET /api/languages`
 (Capabilities + verfügbare Zielsprachen) und `POST /api/settings/language`
 auf; die Level-Stapel-/Suche-Tabs blenden sich automatisch aus, wenn die
 aktive Zielsprache keinen `has_content_provider`-Pack hat (mit Fallback auf
-„Frei erstellen").
+„Frei erstellen"). Das Registrierungsformular fragt Mutter-/Zielsprache
+gleich mit ab (`GET /api/languages/public`, bewusst ohne Login – vor dem
+ersten Login gibt es noch keinen `current_user`).
+
+**Generischer Wörterbuch-Fallback:** `gemini_client.lookup_word()` +
+`kanji_cards.build_generic_dictionary_card()` lassen ein manuell
+eingegebenes Wort (Standard-Endpunkt `POST /api/kanacards`, `source`
+fehlt/`"dictionary"`) für Zielsprachen ohne JMdict-Äquivalent per Gemini
+statt per Wörterbuch-Datei nachschlagen – braucht dafür einen hinterlegten
+Gemini-Key. Bei Japanisch bleibt JMdict die Quelle (schneller, kein
+API-Call nötig).
+
+**Testabdeckung:** `tests/test_webapp.py` prüft `/api/languages`,
+`/api/settings/language`, die Isolation von Custom-/Kana-/Known-Words/Jobs
+zwischen Zielsprachen sowie das Blockieren der WaniKani-only-Endpunkte für
+Nicht-Japanisch; `tests/test_gemini_client.py`/`tests/test_kanji_cards.py`
+decken `lookup_word()`/`build_generic_dictionary_card()` ab.
 
 **Offene Entscheidungen (Defaults gesetzt, bei Bedarf ändern):**
 
@@ -921,15 +939,16 @@ aktive Zielsprache keinen `has_content_provider`-Pack hat (mit Fallback auf
    gleichzeitig sichtbaren Sprachen).
 3. **Gemini als universeller Wörterbuch-Fallback**: für Sprachen ohne
    eigenes Wörterbuch-Backend (alle außer Japanisch) übernimmt Gemini die
-   Bedeutungs-/Lesungs-Ermittlung im KI-Textmodus – braucht also zwingend
-   einen hinterlegten Gemini-Key, um für diese Sprachen nutzbar zu sein.
+   Bedeutungs-/Lesungs-Ermittlung im KI-Textmodus UND beim manuellen
+   Wort-Nachschlagen – braucht also zwingend einen hinterlegten Gemini-Key,
+   um für diese Sprachen nutzbar zu sein.
 
 **Nächste mögliche Schritte** (nicht Teil dieses Umbaus, da erst bei
 Bedarf): ein zweiter vollausgestatteter `LanguagePack` (z. B. Chinesisch
 mit Pinyin-Lesungen/jieba-Tokenizer/CC-CEDICT) – dank der Abstraktion ein
-in sich geschlossener Task, der keinen bestehenden Code anfasst; vollständige
-i18n-Abdeckung weiterer UI-Strings; weitere UI-Sprachen über zusätzliche
-`i18n/<code>.json`-Dateien.
+in sich geschlossener Task, der keinen bestehenden Code anfasst; i18n für
+dynamisch erzeugte JS-Strings (Toasts/Fehlermeldungen); weitere UI-Sprachen
+über zusätzliche `i18n/<code>.json`-Dateien.
 
 ## Architektur
 

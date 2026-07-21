@@ -445,6 +445,106 @@ def _analyze_batch(
     return by_sentence
 
 
+# --------------------------------------------------------------------------- #
+# Generischer Wörterbuch-Fallback (Multi-Language-Architektur, siehe README):
+# JMdict deckt nur Japanisch ab - für jede andere Zielsprache übernimmt
+# Gemini die Bedeutungs-/Lesungs-Ermittlung für ein einzelnes, manuell
+# eingegebenes Wort (statt für jede Sprache ein eigenes JMdict-Analogon
+# pflegen zu müssen, siehe README-Entscheidung 3).
+# --------------------------------------------------------------------------- #
+
+_WORD_LOOKUP_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "found": {"type": "BOOLEAN"},
+        "meaning": {"type": "STRING"},
+        "reading": {"type": "STRING"},
+    },
+    "required": ["found", "meaning", "reading"],
+}
+
+_WORD_LOOKUP_CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache")) / "gemini_word_lookup"
+
+
+def _word_lookup_prompt(word: str, target_lang_name: str, native_lang_name: str, has_reading: bool) -> str:
+    reading_instruction = (
+        f' "reading" (Standard-Lesung/Aussprache-Hilfe des Worts, sofern für {target_lang_name} üblich, sonst leer)'
+    ) if has_reading else ' "reading" (leer lassen, diese Sprache hat kein gesondertes Lesungssystem)'
+    return (
+        f'Das Wort "{word}" ist {target_lang_name.lower()}. Gib zurück: "found" (true, wenn es ein echtes, '
+        f"nachschlagbares Wort dieser Sprache ist - false bei Tippfehlern/unsinnigen Eingaben), "
+        f'"meaning" (kurze Kern-Bedeutung auf {native_lang_name}, wie in einem Wörterbuch, leer wenn nicht '
+        f"gefunden), und{reading_instruction}."
+    )
+
+
+def _word_lookup_cache_path(word: str, model: str, target_lang_name: str) -> Path:
+    key = hashlib.sha1(f"{model}\n{target_lang_name}\n{word}".encode("utf-8")).hexdigest()
+    return _WORD_LOOKUP_CACHE_DIR / f"{key}.json"
+
+
+def lookup_word(
+    word: str,
+    api_key: str,
+    *,
+    model: str = DEFAULT_MODEL,
+    session: requests.Session | None = None,
+    use_cache: bool = True,
+    target_lang_name: str = "Englisch",
+    native_lang_name: str = "Deutsch",
+    has_reading: bool = False,
+) -> dict[str, Any] | None:
+    """Ein einzelnes, manuell eingegebenes Wort per Gemini nachschlagen –
+    universeller Fallback für Zielsprachen ohne eigenes Wörterbuch-Backend
+    (siehe Modulkommentar oben). Gibt `{"meaning", "reading"}` zurück, oder
+    `None` wenn nichts gefunden wurde bzw. bei fehlendem Text/Key,
+    Netzwerkfehler oder kaputter Antwort (fail-soft wie der Rest des Moduls)."""
+    word = word.strip()
+    if not word or not api_key:
+        return None
+
+    cache_file = _word_lookup_cache_path(word, model, target_lang_name) if use_cache else None
+    if cache_file and cache_file.is_file():
+        try:
+            return json.loads(cache_file.read_text(encoding="utf-8")) or None
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    session = session or requests.Session()
+    body = {
+        "contents": [{"parts": [{"text": _word_lookup_prompt(word, target_lang_name, native_lang_name, has_reading)}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": _WORD_LOOKUP_SCHEMA,
+        },
+    }
+    url = f"{_API_BASE}/models/{model}:generateContent"
+    label = f"Wort-Lookup „{word}“ ({model})"
+    resp = _post_with_retry(url, api_key, body, session, label)
+    if resp is None:
+        return None
+
+    try:
+        data = resp.json()
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        payload = json.loads(text)
+    except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Gemini: Antwort für %s nicht auswertbar (%s): %s", label, type(exc).__name__, exc)
+        return None
+
+    result = None
+    if payload.get("found") and payload.get("meaning"):
+        result = {"meaning": payload["meaning"], "reading": payload.get("reading") or None}
+
+    if cache_file:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+    return result
+
+
 def list_models(api_key: str, *, session: requests.Session | None = None) -> list[str] | None:
     """Für Text-Chat geeignete Gemini-Modelle live über die API abrufen
     (`ListModels`), statt eine feste Liste im Code zu pflegen – Google fügt

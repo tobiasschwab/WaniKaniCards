@@ -951,3 +951,184 @@ def test_two_users_render_with_their_own_tokens_not_each_others(client, db_sessi
     other.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": False})
 
     assert seen_tokens == ["alice-token", "bob-token"]
+
+
+# --------------------------------------------------------------------------- #
+# Multi-Language-Architektur: /api/languages, /api/settings/language,
+# target_lang-Isolation, WK-only-Endpunkte für Nicht-Japanisch
+# --------------------------------------------------------------------------- #
+
+def test_api_languages_returns_japanese_capabilities_by_default(client):
+    r = client.get("/api/languages")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["native_lang"] == "de"
+    assert data["active_target_lang"] == "ja"
+    caps = data["active_capabilities"]
+    assert caps["has_content_provider"] is True
+    assert caps["reading_labels"] == ["Onyomi", "Kunyomi"]
+    assert caps["has_furigana"] is True
+    assert caps["has_offline_tokenizer"] is True
+    codes = {l["code"] for l in data["supported_target_langs"]}
+    assert {"ja", "en", "es"}.issubset(codes)
+
+
+def test_api_languages_returns_generic_capabilities_for_other_language(client):
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    data = client.get("/api/languages").get_json()
+    assert data["active_target_lang"] == "es"
+    caps = data["active_capabilities"]
+    assert caps["has_content_provider"] is False
+    assert caps["reading_labels"] == []
+    assert caps["has_furigana"] is False
+    assert caps["has_offline_tokenizer"] is False
+
+
+def test_api_settings_language_switches_native_and_target(client):
+    r = client.post("/api/settings/language", json={"native_lang": "en", "active_target_lang": "es"})
+    assert r.status_code == 200
+    assert r.get_json() == {"ok": True, "native_lang": "en", "active_target_lang": "es"}
+
+    me = client.get("/api/auth/me").get_json()
+    assert me["native_lang"] == "en"
+    assert me["active_target_lang"] == "es"
+
+
+def test_api_settings_language_partial_update_keeps_other_field(client):
+    client.post("/api/settings/language", json={"active_target_lang": "fr"})
+    r = client.post("/api/settings/language", json={"native_lang": "en"})
+    assert r.get_json() == {"ok": True, "native_lang": "en", "active_target_lang": "fr"}
+
+
+def test_api_settings_language_rejects_non_string(client):
+    r = client.post("/api/settings/language", json={"native_lang": 123})
+    assert r.status_code == 400
+
+
+def test_target_lang_isolates_custom_cards_between_languages(client):
+    client.post("/api/customcards", json={"front_html": "<div>ja-karte</div>", "back_html": "<div>b</div>"})
+    assert len(client.get("/api/customcards").get_json()) == 1
+
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    assert client.get("/api/customcards").get_json() == []
+
+    client.post("/api/settings/language", json={"active_target_lang": "ja"})
+    cards = client.get("/api/customcards").get_json()
+    assert len(cards) == 1
+    assert cards[0]["characters"] == "ja-kar"  # _custom_descriptor kürzt auf 6 Zeichen
+
+
+def test_target_lang_isolates_known_words_between_languages(client):
+    client.post("/api/known/42")
+    known = models.KnownWord.query.filter_by(user_id=client.test_user_id, target_lang="ja").all()
+    assert {int(r.word_id) for r in known} == {42}
+
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    known_es = models.KnownWord.query.filter_by(user_id=client.test_user_id, target_lang="es").all()
+    assert known_es == []
+
+    # Über die WaniKani-Wortliste sichtbar geprüft statt webapp.load_known()
+    # direkt (das braucht current_user, also einen aktiven Request-Kontext).
+    r = client.get("/api/wortliste?sample=1")
+    entries = r.get_json()["entries"]
+    assert not any(e["id"] == 42 for e in entries)  # aktiv ist jetzt "es"
+
+    client.post("/api/settings/language", json={"active_target_lang": "ja"})
+    r = client.get("/api/wortliste?sample=1")
+    entries = r.get_json()["entries"]
+    assert any(e["id"] == 42 and e.get("manually_known") for e in entries)
+
+
+def test_target_lang_isolates_kana_cards_between_languages(client, monkeypatch):
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
+
+    created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
+    assert any(c["id"] == created["id"] for c in client.get("/api/kanacards").get_json())
+
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    assert client.get("/api/kanacards").get_json() == []
+
+    client.post("/api/settings/language", json={"active_target_lang": "ja"})
+    assert any(c["id"] == created["id"] for c in client.get("/api/kanacards").get_json())
+
+
+def test_target_lang_isolates_jobs_between_languages(client, db_session):
+    db.session.add(models.Job(id="ja-job", user_id=client.test_user_id, target_lang="ja", status="done"))
+    db.session.add(models.Job(id="es-job", user_id=client.test_user_id, target_lang="es", status="done"))
+    db.session.commit()
+
+    assert [j["id"] for j in client.get("/api/jobs").get_json()] == ["ja-job"]
+
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    assert [j["id"] for j in client.get("/api/jobs").get_json()] == ["es-job"]
+
+
+def test_wk_only_endpoints_blocked_for_non_japanese(client):
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+
+    r = client.post("/api/resolve", json={"mode": "level", "level": 1, "sample": True})
+    assert r.status_code == 400
+    assert "Japanisch" in r.get_json()["error"]
+
+    r = client.post("/api/card-detail", json={"subject_ids": [1], "sample": True})
+    assert r.status_code == 400
+
+    r = client.post("/api/test-token", json={"token": "x"})
+    assert r.status_code == 400
+
+    r = client.post("/api/text-annotate", json={"text": "hola", "sample": True})
+    assert r.status_code == 400
+
+
+def test_wk_only_endpoints_work_normally_for_japanese(client):
+    """Regressionstest: die Gating-Checks dürfen den Default-Fall (aktive
+    Zielsprache = Japanisch) nicht versehentlich mitblockieren."""
+    r = client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": True})
+    assert r.status_code == 200
+    r = client.post("/api/text-annotate", json={"text": "大きい山です。", "sample": True})
+    assert r.status_code == 200
+
+
+def test_api_create_kanacard_uses_gemini_fallback_for_non_japanese(client, monkeypatch):
+    """Für Zielsprachen ohne JMdict-Äquivalent übernimmt Gemini die
+    Wörterbuch-Funktion (siehe kc.build_generic_dictionary_card)."""
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    import kanji_cards as kc
+
+    def fake_lookup(word, api_key, *, model=None, session=None, use_cache=True, target_lang_name="", native_lang_name="", has_reading=False):
+        assert target_lang_name == "Spanisch"
+        return {"meaning": "house", "reading": None}
+
+    monkeypatch.setattr(kc.gemini_client, "lookup_word", fake_lookup)
+
+    r = client.post("/api/kanacards", json={"word": "casa"})
+    assert r.status_code == 200
+    desc = r.get_json()
+    assert desc["characters"] == "casa"
+    assert desc["meaning"] == "house"
+    assert desc["kind"] == "KI"
+
+    stored = webapp.read_kana_for_user(client.test_user_id, desc["id"], "es")
+    assert stored["word"] == "casa"
+    assert stored["source"] == "ai"
+
+
+def test_api_create_kanacard_requires_gemini_key_for_non_japanese(client):
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    r = client.post("/api/kanacards", json={"word": "casa"})
+    assert r.status_code == 400
+    assert "Gemini" in r.get_json()["error"]
+
+
+def test_api_create_kanacard_404_when_gemini_finds_nothing_for_non_japanese(client, monkeypatch):
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    client.post("/api/settings", json={"gemini_key": "mykey"})
+
+    import kanji_cards as kc
+    monkeypatch.setattr(kc.gemini_client, "lookup_word", lambda *a, **k: None)
+
+    r = client.post("/api/kanacards", json={"word": "qwxyz"})
+    assert r.status_code == 404

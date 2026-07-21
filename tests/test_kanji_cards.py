@@ -23,6 +23,7 @@ from kanji_cards import (  # noqa: E402
     build_radical_card,
     build_vocab_card,
     build_kana_card,
+    build_generic_dictionary_card,
     build_kana_card_from_dict,
     build_ai_kana_card,
     KanaCard,
@@ -1214,6 +1215,32 @@ def test_build_kana_card_skips_translation_without_deepl_key(monkeypatch):
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
     card = build_kana_card("しあい", sentence="しあいがはじまりました。")
     assert card.sentence_translation is None
+
+
+# --------------------------------------------------------------------------- #
+# build_generic_dictionary_card() – Gemini-Fallback für Nicht-Japanisch
+# --------------------------------------------------------------------------- #
+
+def test_build_generic_dictionary_card_uses_gemini_lookup(monkeypatch):
+    def fake_lookup_word(word, api_key, *, model=None, session=None, use_cache=True, target_lang_name="", native_lang_name="", has_reading=False):
+        assert word == "casa"
+        assert target_lang_name == "Spanisch"
+        return {"meaning": "house", "reading": None}
+
+    monkeypatch.setattr(gemini_client, "lookup_word", fake_lookup_word)
+    card = build_generic_dictionary_card(
+        "casa", "La casa es grande.", gemini_key="dummy", target_lang_name="Spanisch", native_lang_name="Deutsch",
+    )
+    assert isinstance(card, KanaCard)
+    assert card.word == "casa"
+    assert card.meaning == "house"
+    assert card.source == "ai"
+    assert card.sentence_ja == "La casa es grande."
+
+
+def test_build_generic_dictionary_card_returns_none_when_gemini_finds_nothing(monkeypatch):
+    monkeypatch.setattr(gemini_client, "lookup_word", lambda *a, **k: None)
+    assert build_generic_dictionary_card("qwxyz", gemini_key="dummy") is None
 
 
 def test_build_kana_card_from_dict_roundtrip():

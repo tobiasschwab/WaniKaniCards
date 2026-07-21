@@ -45,6 +45,16 @@
           <span class="label" data-i18n="auth.password">Passwort</span>
           <input id="authPassword" type="password" autocomplete="current-password" placeholder="mindestens 8 Zeichen">
         </label>
+        <div id="authLanguageFields" class="hidden">
+          <label class="field">
+            <span class="label" data-i18n="auth.native_lang_label">Muttersprache</span>
+            <select id="authNativeLang" class="select"></select>
+          </label>
+          <label class="field" style="margin-top:10px">
+            <span class="label" data-i18n="auth.target_lang_label">Zielsprache (was möchtest du lernen?)</span>
+            <select id="authTargetLang" class="select"></select>
+          </label>
+        </div>
         <div class="row gap">
           <button id="authSubmit" class="btn primary" data-i18n="auth.login.submit">Anmelden</button>
           <button id="authToggleMode" class="btn small" type="button" data-i18n="auth.login.toggle">Noch kein Konto? Registrieren</button>
@@ -91,8 +101,8 @@
             <button type="button" class="settings-row-head">
               <span class="settings-icon" style="background:#2d5580">WK</span>
               <span class="settings-row-text">
-                <span class="settings-row-title">WaniKani</span>
-                <span class="settings-row-desc">Kartendaten &amp; Lernstand</span>
+                <span class="settings-row-title" data-i18n="settings.wanikani.title">WaniKani</span>
+                <span class="settings-row-desc" data-i18n="settings.wanikani.desc">Kartendaten &amp; Lernstand</span>
               </span>
               <span id="tokenRowPill" class="pill pill-warn">Nicht verbunden</span>
               <span class="chev">▾</span>
@@ -102,14 +112,14 @@
                 <span class="label">API-Token <em>(read-only genügt)</em></span>
                 <div class="token-row">
                   <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 20b059b1-eeca-…">
-                  <button id="tokenShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+                  <button id="tokenShow" type="button" class="ghost-btn" data-i18n-title="common.show" title="Anzeigen">👁</button>
                 </div>
                 <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert – keine Datenbank.</span>
               </label>
               <div class="row gap">
-                <button id="tokenSave" class="btn primary">Speichern</button>
-                <button id="tokenTest" class="btn">Verbindung testen</button>
-                <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span>Demo (ohne Token)</label>
+                <button id="tokenSave" class="btn primary" data-i18n="common.save">Speichern</button>
+                <button id="tokenTest" class="btn" data-i18n="settings.wanikani.test">Verbindung testen</button>
+                <label class="switch" style="margin-left:auto"><input type="checkbox" id="sample"><span></span><span data-i18n="settings.wanikani.demo_label">Demo (ohne Token)</span></label>
               </div>
               <div id="tokenStatus" class="status" style="margin-top:8px"></div>
             </div>
@@ -120,28 +130,28 @@
             <button type="button" class="settings-row-head">
               <span class="settings-icon" style="background:#8f5fd6">De</span>
               <span class="settings-row-text">
-                <span class="settings-row-title">DeepL</span>
-                <span class="settings-row-desc">Satzübersetzung für Dictionary-Karten · optional</span>
+                <span class="settings-row-title" data-i18n="settings.deepl.title">DeepL</span>
+                <span class="settings-row-desc" data-i18n="settings.deepl.desc">Satzübersetzung für Dictionary-Karten · optional</span>
               </span>
               <span id="deeplRowPill" class="pill pill-off">Nicht verbunden</span>
               <span class="chev">▾</span>
             </button>
             <div class="settings-row-body hidden">
               <label class="field">
-                <span class="label">API-Key</span>
+                <span class="label" data-i18n="settings.api_key_label">API-Key</span>
                 <div class="token-row">
                   <input id="deeplInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. 6316a6c7-…:fx">
-                  <button id="deeplShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+                  <button id="deeplShow" type="button" class="ghost-btn" data-i18n-title="common.show" title="Anzeigen">👁</button>
                 </div>
                 <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Free-Keys enden auf <code>:fx</code>.</span>
               </label>
               <label class="field" style="margin-top:10px">
-                <span class="label">Zielsprache</span>
+                <span class="label" data-i18n="settings.deepl.target_lang_label">Zielsprache</span>
                 <select id="targetLang" class="select"></select>
                 <span class="hint">Gilt für alle DeepL-Übersetzungen: Beispielsätze auf Dictionary-Karten <strong>und</strong> den 🌐-Button im „Felder anpassen"-Dialog.</span>
               </label>
               <div class="row gap">
-                <button id="deeplSave" class="btn primary">Speichern</button>
+                <button id="deeplSave" class="btn primary" data-i18n="common.save">Speichern</button>
               </div>
               <div id="deeplStatus" class="status" style="margin-top:8px"></div>
             </div>
@@ -152,23 +162,23 @@
             <button type="button" class="settings-row-head">
               <span class="settings-icon" style="background:#4f7a5c">✨</span>
               <span class="settings-row-text">
-                <span class="settings-row-title">Gemini</span>
-                <span class="settings-row-desc">Grammatikanalyse im Text-Modus · optional</span>
+                <span class="settings-row-title" data-i18n="settings.gemini.title">Gemini</span>
+                <span class="settings-row-desc" data-i18n="settings.gemini.desc">Grammatikanalyse im Text-Modus · optional</span>
               </span>
               <span id="geminiRowPill" class="pill pill-off">Nicht verbunden</span>
               <span class="chev">▾</span>
             </button>
             <div class="settings-row-body hidden">
               <label class="field">
-                <span class="label">API-Key</span>
+                <span class="label" data-i18n="settings.api_key_label">API-Key</span>
                 <div class="token-row">
                   <input id="geminiInput" type="password" autocomplete="off" spellcheck="false" placeholder="z. B. AIzaSy…">
-                  <button id="geminiShow" type="button" class="ghost-btn" title="Anzeigen">👁</button>
+                  <button id="geminiShow" type="button" class="ghost-btn" data-i18n-title="common.show" title="Anzeigen">👁</button>
                 </div>
                 <span class="hint">Wird lokal in <code>data/settings.json</code> gespeichert. Satztexte werden dafür an Googles Gemini-API gesendet.</span>
               </label>
               <label class="field" style="margin-top:10px">
-                <span class="label">Modell</span>
+                <span class="label" data-i18n="settings.gemini.model_label">Modell</span>
                 <div class="token-row">
                   <select id="geminiModel" class="select">
                     <option value="gemini-flash-latest">gemini-flash-latest (schnell/günstig, empfohlen)</option>
@@ -180,7 +190,7 @@
                 <span class="hint">Mit 🔄 werden die aktuell für diesen API-Key verfügbaren Modelle direkt bei Google abgefragt (braucht einen gespeicherten Key). <code>pro</code>-Modelle haben im kostenlosen Kontingent meist <strong>kein</strong> Guthaben (HTTP 429 „quota exceeded", nicht nur Rate-Limit) und brauchen ein Google-Konto mit aktivierter Abrechnung – für Gratis-Nutzung <code>flash</code>/<code>flash-lite</code> wählen.</span>
               </label>
               <div class="row gap">
-                <button id="geminiSave" class="btn primary">Speichern</button>
+                <button id="geminiSave" class="btn primary" data-i18n="common.save">Speichern</button>
               </div>
               <div id="geminiStatus" class="status" style="margin-top:8px"></div>
             </div>
@@ -193,13 +203,13 @@
     <div id="fieldEditOverlay" class="modal-overlay hidden">
       <section id="fieldEditPanel" class="modal-panel">
         <div class="modal-head">
-          <h2 id="fieldEditTitle">Karte bearbeiten</h2>
-          <button id="fieldEditClose" class="icon-btn" title="Schließen">✕</button>
+          <h2 id="fieldEditTitle" data-i18n="fieldEdit.title">Karte bearbeiten</h2>
+          <button id="fieldEditClose" class="icon-btn" data-i18n-title="common.close" title="Schließen">✕</button>
         </div>
         <div id="fieldEditBody" class="field-edit-body"></div>
         <div class="row gap" style="margin-top:14px">
-          <button id="fieldEditSave" class="btn primary">Speichern</button>
-          <button id="fieldEditResetAll" class="btn small">Alles zurücksetzen</button>
+          <button id="fieldEditSave" class="btn primary" data-i18n="common.save">Speichern</button>
+          <button id="fieldEditResetAll" class="btn small" data-i18n="fieldEdit.reset_all">Alles zurücksetzen</button>
           <span id="fieldEditStatus" class="muted"></span>
         </div>
       </section>
@@ -209,8 +219,8 @@
     <div id="imageCardOverlay" class="modal-overlay hidden">
       <section id="imageCardPanel" class="modal-panel">
         <div class="modal-head">
-          <h2 id="imageCardTitle">Bildkarte</h2>
-          <button id="imageCardClose" class="icon-btn" title="Schließen">✕</button>
+          <h2 id="imageCardTitle" data-i18n="imageCard.title">Bildkarte</h2>
+          <button id="imageCardClose" class="icon-btn" data-i18n-title="common.close" title="Schließen">✕</button>
         </div>
         <p class="hint">Erzeugt ein einfaches Clipart-Bild per Gemini für die Vorderseite dieser Vokabel – die Rückseite bleibt wie gewohnt. Eignet sich nur für Begriffe, die sich gut bildlich darstellen lassen.</p>
         <div id="imageCardPreview" class="image-card-preview">
@@ -218,12 +228,12 @@
         </div>
         <label class="switch" style="margin-top:10px">
           <input type="checkbox" id="imageCardShowMeaning">
-          <span></span>Bedeutung zusätzlich auf der Vorderseite anzeigen
+          <span></span><span data-i18n="imageCard.show_meaning">Bedeutung zusätzlich auf der Vorderseite anzeigen</span>
         </label>
         <div class="row gap" style="margin-top:14px">
-          <button id="imageCardGenerate" class="btn primary">Generieren</button>
-          <button id="imageCardAccept" class="btn" disabled>Übernehmen</button>
-          <button id="imageCardRemove" class="btn small">Bild entfernen</button>
+          <button id="imageCardGenerate" class="btn primary" data-i18n="imageCard.generate">Generieren</button>
+          <button id="imageCardAccept" class="btn" disabled data-i18n="common.accept">Übernehmen</button>
+          <button id="imageCardRemove" class="btn small" data-i18n="imageCard.remove">Bild entfernen</button>
           <span id="imageCardStatus" class="muted"></span>
         </div>
       </section>
@@ -253,18 +263,18 @@
       <div id="modeLevel" class="mode">
         <div class="controls-row">
           <label class="field inline">
-            <span class="label">Level</span>
+            <span class="label" data-i18n="modeLevel.level_label">Level</span>
             <input id="level" type="number" min="1" max="60" value="1" class="num">
           </label>
           <div class="field inline">
-            <span class="label">Stapel</span>
+            <span class="label" data-i18n="modeLevel.stack_label">Stapel</span>
             <div class="chipcheck-group" id="type">
-              <label class="chipcheck"><input type="checkbox" value="radicals">Radicals</label>
-              <label class="chipcheck active"><input type="checkbox" value="kanji" checked>Kanji</label>
-              <label class="chipcheck"><input type="checkbox" value="vocabulary">Vokabel</label>
+              <label class="chipcheck"><input type="checkbox" value="radicals"><span data-i18n="modeLevel.radicals">Radicals</span></label>
+              <label class="chipcheck active"><input type="checkbox" value="kanji" checked><span data-i18n="modeLevel.kanji">Kanji</span></label>
+              <label class="chipcheck"><input type="checkbox" value="vocabulary"><span data-i18n="modeLevel.vocab">Vokabel</span></label>
             </div>
           </div>
-          <button id="btnLevel" class="btn primary">Auflisten</button>
+          <button id="btnLevel" class="btn primary" data-i18n="modeLevel.list_button">Auflisten</button>
         </div>
         <p id="levelTypeError" class="error hidden">Bitte mindestens einen Kartentyp auswählen.</p>
       </div>
@@ -273,11 +283,11 @@
       <div id="modeCompose" class="mode hidden">
         <div class="controls-row">
           <label class="field inline grow">
-            <span class="label">Vokabel oder Kanji suchen</span>
+            <span class="label" data-i18n="modeCompose.search_label">Vokabel oder Kanji suchen</span>
             <input id="searchInput" type="text" class="text" placeholder="z. B. 一人, 人, ground …">
           </label>
-          <button id="btnSearch" class="btn primary">Suchen</button>
-          <button id="btnComposeClear" class="btn">Tabelle leeren</button>
+          <button id="btnSearch" class="btn primary" data-i18n="modeCompose.search_button">Suchen</button>
+          <button id="btnComposeClear" class="btn" data-i18n="common.clear_table">Tabelle leeren</button>
         </div>
         <div id="searchResults" class="search-results"></div>
         <p class="hint">Treffer anklicken → alle enthaltenen Kanji &amp; Radicals werden rekursiv aufgelöst und an die Tabelle unten <strong>angehängt</strong>. Mehrere Vokabeln nacheinander suchen &amp; anklicken, um sie zu kombinieren. „Tabelle leeren“ setzt zurück.</p>
@@ -288,20 +298,20 @@
       <div id="modeText" class="mode hidden">
         <div id="textInputWrap">
           <label class="field">
-            <span class="label">Japanischer Text</span>
+            <span class="label" data-i18n="modeText.text_label">Text</span>
             <textarea id="textInput" class="text" rows="8" placeholder="Text einfügen – z. B. ein Artikel, ein Buchkapitel, ein Beispieldialog …"></textarea>
           </label>
           <div class="row gap">
-            <button id="btnTextUpload" class="btn small" type="button">📄 PDF/Bild hochladen</button>
+            <button id="btnTextUpload" class="btn small" type="button" data-i18n="modeText.upload_button">📄 PDF/Bild hochladen</button>
             <input id="textUploadFile" type="file" accept=".pdf,application/pdf,image/*" class="hidden" />
             <span id="textUploadStatus" class="muted"></span>
           </div>
           <div class="row gap">
             <div class="segmented" id="textAnalysisMode" data-value="fast">
-              <button data-v="fast" class="active">Schnell (kostenlos)</button>
-              <button data-v="ki">✨ Mit KI (Übersetzung, Grammatik)</button>
+              <button data-v="fast" class="active" data-i18n="modeText.fast_button">Schnell (kostenlos)</button>
+              <button data-v="ki" data-i18n="modeText.ki_button">✨ Mit KI (Übersetzung, Grammatik)</button>
             </div>
-            <button id="btnTextProcess" class="btn primary">Analysieren</button>
+            <button id="btnTextProcess" class="btn primary" data-i18n="modeText.analyze_button">Analysieren</button>
             <span id="textStatus" class="muted"></span>
           </div>
           <p class="hint">„Schnell" lemmatisiert nur und gleicht gegen WaniKani ab (kostenlos, kein Key nötig). „Mit KI" nutzt zusätzlich Gemini für Satzübersetzung, Grammatik-Erklärung und eine Vokabel-Tabelle (Gemini-Key in den Einstellungen nötig, sendet den Text an Google).</p>
@@ -399,7 +409,7 @@
         <div class="ed2col">
           <div class="ed2side">
             <div class="ed2head">
-              <span class="label">Vorderseite</span>
+              <span class="label" data-i18n="modeCustom.front_label">Vorderseite</span>
               <div class="rt-toolbar">
                 <button data-t="cfFront" data-cmd="bold"><b>B</b></button>
                 <button data-t="cfFront" data-cmd="italic"><i>I</i></button>
@@ -412,7 +422,7 @@
           </div>
           <div class="ed2side">
             <div class="ed2head">
-              <span class="label">Rückseite</span>
+              <span class="label" data-i18n="modeCustom.back_label">Rückseite</span>
               <div class="rt-toolbar">
                 <button data-t="cfBack" data-cmd="bold"><b>B</b></button>
                 <button data-t="cfBack" data-cmd="italic"><i>I</i></button>
@@ -429,11 +439,11 @@
         <label class="field" style="margin-top:12px"><span class="label">Tags <em>(Komma-getrennt · werden vorne oben rechts gedruckt)</em></span>
           <input id="cfTags" type="text" class="text" placeholder="Vocab, Eigene"></label>
         <div class="row gap" style="margin-top:6px">
-          <button id="cfSave" class="btn primary">Karte speichern</button>
-          <button id="cfClear" class="btn">Leeren / Vorlage</button>
+          <button id="cfSave" class="btn primary" data-i18n="modeCustom.save_button">Karte speichern</button>
+          <button id="cfClear" class="btn" data-i18n="modeCustom.clear_button">Leeren / Vorlage</button>
           <span style="margin-left:auto"></span>
           <input id="cfPrefill" type="text" class="text" style="max-width:150px" placeholder="aus WaniKani…">
-          <button id="cfLoadWk" class="btn small">Laden</button>
+          <button id="cfLoadWk" class="btn small" data-i18n="modeCustom.load_button">Laden</button>
         </div>
         <div id="cfStatus" class="status" style="margin-top:6px"></div>
         <p class="hint">Gespeicherte Karten erscheinen unten in der Tabelle – dort auswählen und als PDF erzeugen.</p>
@@ -443,21 +453,21 @@
       <div id="modeWortliste" class="mode hidden">
         <div class="controls-row">
           <label class="field inline grow">
-            <span class="label">Filtern</span>
+            <span class="label" data-i18n="modeWortliste.filter_label">Filtern</span>
             <input id="wlSearch" type="text" class="text" placeholder="Volltextsuche – Zeichen oder Bedeutung …">
           </label>
           <span id="wlCount" class="muted"></span>
         </div>
         <div class="controls-row" style="margin-top:10px">
           <label class="field inline grow">
-            <span class="label">Wort</span>
+            <span class="label" data-i18n="modeWortliste.word_label">Wort</span>
             <input id="wlAddChar" type="text" class="text" placeholder="z. B. 元気 oder げんき">
           </label>
           <label class="field inline grow">
-            <span class="label">Bedeutung</span>
+            <span class="label" data-i18n="modeWortliste.meaning_label">Bedeutung</span>
             <input id="wlAddMeaning" type="text" class="text" placeholder="z. B. gesund, munter">
           </label>
-          <button id="wlAddBtn" class="btn primary">+ Manuell hinzufügen</button>
+          <button id="wlAddBtn" class="btn primary" data-i18n="modeWortliste.add_button">+ Manuell hinzufügen</button>
         </div>
         <p class="hint">Manuell hinzugefügte Wörter sind unabhängig von WaniKani/Wörterbuch – für Wörter, die du schon von woanders kannst.</p>
         <div id="wlList" class="wl-list"></div>
@@ -470,10 +480,10 @@
     <!-- Tabelle + Rendern -->
     <section id="tablePanel" class="panel">
       <div class="table-head">
-        <h2 id="tableTitle">Karten</h2>
+        <h2 id="tableTitle" data-i18n="table.title">Karten</h2>
         <div class="row gap">
-          <button id="selAll" class="btn small">Alle</button>
-          <button id="selNone" class="btn small">Keine</button>
+          <button id="selAll" class="btn small" data-i18n="table.select_all">Alle</button>
+          <button id="selNone" class="btn small" data-i18n="table.select_none">Keine</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -481,10 +491,10 @@
           <thead>
             <tr>
               <th class="c-check"><input type="checkbox" id="checkAll"></th>
-              <th class="c-char">Zeichen</th>
-              <th>Typ</th>
-              <th>Bedeutung</th>
-              <th class="c-lvl">Level</th>
+              <th class="c-char" data-i18n="table.header.chars">Zeichen</th>
+              <th data-i18n="table.header.type">Typ</th>
+              <th data-i18n="table.header.meaning">Bedeutung</th>
+              <th class="c-lvl" data-i18n="table.header.level">Level</th>
               <th class="c-act" id="thActions"></th>
             </tr>
           </thead>
@@ -495,15 +505,15 @@
       <div class="render-bar">
         <div class="render-opts">
           <div class="opt">
-            <span class="label">Format</span>
+            <span class="label" data-i18n="render.format_label">Format</span>
             <div class="segmented" id="format" data-value="pdf">
-              <button data-v="pdf" class="active">PDF · Drucken</button>
-              <button data-v="anki">Anki · .apkg</button>
+              <button data-v="pdf" class="active" data-i18n="render.pdf_button">PDF · Drucken</button>
+              <button data-v="anki" data-i18n="render.anki_button">Anki · .apkg</button>
             </div>
           </div>
           <div id="printOpts" class="print-opts">
             <div class="opt">
-              <span class="label">Layout</span>
+              <span class="label" data-i18n="render.layout_label">Layout</span>
               <div class="segmented" id="layout" data-value="a6">
                 <button data-v="a6" class="active">A6 · 1/Seite</button>
                 <button data-v="a4-4up">A4 · 4/Seite</button>
@@ -512,18 +522,18 @@
             <button type="button" class="disclosure-toggle" data-target="printAdvanced">▾ Weitere Druckoptionen</button>
             <div id="printAdvanced" class="disclosure-body hidden">
               <div class="opt hidden" id="paperOpt">
-                <span class="label">Papier</span>
+                <span class="label" data-i18n="render.paper_label">Papier</span>
                 <select id="paper" class="select"><option value="a4">A4</option><option value="letter">Letter</option><option value="a6">A6</option></select>
               </div>
               <div class="opt">
-                <span class="label">Duplex</span>
+                <span class="label" data-i18n="render.duplex_label">Duplex</span>
                 <div class="segmented" id="duplex" data-value="long-edge">
-                  <button data-v="long-edge" class="active">Lang</button>
-                  <button data-v="short-edge">Kurz</button>
+                  <button data-v="long-edge" class="active" data-i18n="render.duplex_long">Lang</button>
+                  <button data-v="short-edge" data-i18n="render.duplex_short">Kurz</button>
                 </div>
               </div>
-              <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span>Schnittmarken</label>
-              <label class="switch"><input type="checkbox" id="hole"><span></span>Stanzloch</label>
+              <label class="switch"><input type="checkbox" id="cutmarks" checked><span></span><span data-i18n="render.cutmarks_label">Schnittmarken</span></label>
+              <label class="switch"><input type="checkbox" id="hole"><span></span><span data-i18n="render.hole_label">Stanzloch</span></label>
             </div>
           </div>
           <p id="ankiHint" class="hint hidden">Erzeugt ein <code>.apkg</code> zum lokalen Import in Anki (Datei → Importieren). Kein Docker/Anki-Netzwerk nötig.</p>
@@ -536,12 +546,12 @@
 
     <!-- Verlauf -->
     <section class="panel history">
-      <h2>Verlauf</h2>
+      <h2 data-i18n="history.title">Verlauf</h2>
       <ul id="historyList" class="history-list"></ul>
-      <p id="historyEmpty" class="muted">Noch keine Exporte.</p>
+      <p id="historyEmpty" class="muted" data-i18n="history.empty">Noch keine Exporte.</p>
     </section>
 
-    <footer class="foot">Dateibasiert · keine Datenbank · Shiori</footer>
+    <footer class="foot" data-i18n="footer.text">Dateibasiert · keine Datenbank · Shiori</footer>
   </div>
 
   <div id="toast" class="toast hidden"></div>

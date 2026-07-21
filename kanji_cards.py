@@ -847,6 +847,38 @@ def build_kana_card(
     return card
 
 
+def build_generic_dictionary_card(
+    word: str,
+    sentence: str | None = None,
+    *,
+    gemini_key: str,
+    target_lang_name: str = "Englisch",
+    native_lang_name: str = "Deutsch",
+    has_reading: bool = False,
+    deepl_key: str | None = None,
+    gemini_model: str = gemini_client.DEFAULT_MODEL,
+    translate_fn: "callable | None" = None,
+) -> KanaCard | None:
+    """Wie `build_kana_card()` (manuell eingegebenes Wort → Karte), aber für
+    Zielsprachen OHNE eigenes Wörterbuch-Backend wie JMdict (alles außer
+    Japanisch, siehe README "Multi-Language-Architektur", Entscheidung 3):
+    Gemini übernimmt die Bedeutungs-/Lesungs-Ermittlung
+    (`gemini_client.lookup_word()`) statt eines sprachspezifischen
+    Wörterbuchs. Gibt `None` zurück, wenn Gemini das Wort nicht als echten
+    Treffer erkennt bzw. bei fehlendem Key/Netzwerkfehler – nie hart
+    abbrechen, der Aufrufer zeigt dann „nicht gefunden" wie bei JMdict."""
+    entry = gemini_client.lookup_word(
+        word, gemini_key, model=gemini_model,
+        target_lang_name=target_lang_name, native_lang_name=native_lang_name, has_reading=has_reading,
+    )
+    if not entry:
+        return None
+    return build_ai_kana_card(
+        word, meaning=entry["meaning"], reading=entry.get("reading"), sentence=sentence,
+        deepl_key=deepl_key, translate_fn=translate_fn,
+    )
+
+
 def build_ai_kana_card(
     word: str,
     *,

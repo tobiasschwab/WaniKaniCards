@@ -553,3 +553,45 @@ def test_generate_image_is_not_cached_across_calls():
     gc.generate_image("家", "Haus", "key", session=session)
     gc.generate_image("家", "Haus", "key", session=session)
     assert len(session.calls) == 2
+
+
+# --------------------------------------------------------------------------- #
+# lookup_word() – generischer Wörterbuch-Fallback für Nicht-Japanisch
+# --------------------------------------------------------------------------- #
+
+def _word_lookup_body(found: bool, meaning: str = "", reading: str = "") -> dict:
+    payload = {"found": found, "meaning": meaning, "reading": reading}
+    return {
+        "candidates": [{"content": {"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}}]
+    }
+
+
+def test_lookup_word_returns_meaning_and_reading(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_WORD_LOOKUP_CACHE_DIR", tmp_path / "lookup")
+    session = _FakeSession({"key": _FakeResp(json_data=_word_lookup_body(True, "house", "casa"))})
+    result = gc.lookup_word("casa", "key", session=session, target_lang_name="Spanisch", has_reading=False)
+    assert result == {"meaning": "house", "reading": "casa"}
+
+
+def test_lookup_word_returns_none_when_not_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_WORD_LOOKUP_CACHE_DIR", tmp_path / "lookup")
+    session = _FakeSession({"key": _FakeResp(json_data=_word_lookup_body(False))})
+    assert gc.lookup_word("asdkjhasd", "key", session=session) is None
+
+
+def test_lookup_word_returns_none_without_key():
+    assert gc.lookup_word("casa", "", session=_FakeSession({})) is None
+
+
+def test_lookup_word_returns_none_on_network_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_WORD_LOOKUP_CACHE_DIR", tmp_path / "lookup")
+    session = _FakeSession({}, error=True)
+    assert gc.lookup_word("casa", "key", session=session) is None
+
+
+def test_lookup_word_uses_cache_on_second_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(gc, "_WORD_LOOKUP_CACHE_DIR", tmp_path / "lookup")
+    session = _FakeSession({"key": _FakeResp(json_data=_word_lookup_body(True, "house", ""))})
+    gc.lookup_word("casa", "key", session=session, model="m", target_lang_name="Spanisch")
+    gc.lookup_word("casa", "key", session=session, model="m", target_lang_name="Spanisch")
+    assert len(session.calls) == 1
