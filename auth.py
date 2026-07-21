@@ -15,9 +15,10 @@ from __future__ import annotations
 import re
 
 from flask import Blueprint, jsonify, request
+from flask_limiter.util import get_remote_address
 from flask_login import current_user, login_required, login_user, logout_user
 
-from extensions import db
+from extensions import db, limiter
 from models import User, UserSettings
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -27,6 +28,15 @@ _MIN_PASSWORD_LEN = 8
 
 
 @bp.post("/signup")
+# Bewusst IMMER nach IP limitiert (key_func=get_remote_address), NICHT der
+# App-Standard-key_func (Identität, falls eingeloggt): signup() loggt den
+# neu angelegten Nutzer sofort ein (login_user() unten) - mit dem Standard-
+# key_func würde ein Angreifer bei jedem Aufruf automatisch einen NEUEN
+# Rate-Limit-Bucket bekommen (die jeweils frisch eingeloggte Identität des
+# zuvor erzeugten Kontos), das Limit liefe dadurch komplett ins Leere
+# (live nachgestellt: Redis-Keys zeigten LIMITS:.../1/, /2/, /3/... statt
+# eines gemeinsamen Buckets pro IP).
+@limiter.limit("5 per hour", key_func=get_remote_address)
 def signup():
     """Neues Konto anlegen + sofort einloggen (Session-Cookie).
 
@@ -62,6 +72,7 @@ def signup():
 
 
 @bp.post("/login")
+@limiter.limit("10 per minute;30 per hour")
 def login():
     body = request.get_json(silent=True) or {}
     email = str(body.get("email", "")).strip().lower()

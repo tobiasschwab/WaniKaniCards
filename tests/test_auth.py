@@ -112,3 +112,29 @@ def test_logout_ends_session(db_session):
     r = client.post("/api/auth/logout")
     assert r.status_code == 200
     assert client.get("/api/auth/me").get_json() == {"authenticated": False}
+
+
+def test_login_is_rate_limited(db_session, monkeypatch):
+    """Regressionstest für einen im Sicherheitsreview gefundenen Bug: Login/
+    Signup hatten kein eigenes Rate-Limit (nur das großzügige globale
+    120/min), was Brute-Force/Credential-Stuffing kaum bremst."""
+    monkeypatch.setattr(webapp.limiter, "enabled", True)
+    client = webapp.app.test_client()
+    client.post("/api/auth/signup", json={"email": "ratelimit@example.com", "password": "supersecret123"})
+    client.post("/api/auth/logout")
+
+    responses = [
+        client.post("/api/auth/login", json={"email": "ratelimit@example.com", "password": "wrong"})
+        for _ in range(11)
+    ]
+    assert any(r.status_code == 429 for r in responses)
+
+
+def test_signup_is_rate_limited(db_session, monkeypatch):
+    monkeypatch.setattr(webapp.limiter, "enabled", True)
+    client = webapp.app.test_client()
+    responses = [
+        client.post("/api/auth/signup", json={"email": f"spam{i}@example.com", "password": "supersecret123"})
+        for i in range(6)
+    ]
+    assert any(r.status_code == 429 for r in responses)

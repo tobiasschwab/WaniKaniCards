@@ -499,7 +499,7 @@
             <div id="reviewItemType" class="review-item-type"></div>
             <div id="reviewFront" class="review-front"></div>
             <div id="reviewInputWrap" class="row gap" style="margin-top:14px">
-              <input id="reviewInput" type="text" class="text" autocomplete="off" data-i18n-placeholder="review.answer_placeholder" placeholder="Antwort eingeben …">
+              <input id="reviewInput" type="text" class="text" autocomplete="off" data-i18n-placeholder="review.answer_placeholder" data-i18n-aria-label="review.answer_placeholder" aria-label="Antwort eingeben" placeholder="Antwort eingeben …">
               <button id="btnReviewSubmit" class="btn primary" data-i18n="review.submit_button">Prüfen</button>
             </div>
             <div id="reviewRevealWrap" class="hidden" style="margin-top:14px">
@@ -515,6 +515,7 @@
           </div>
         </div>
         <p id="reviewDone" class="hint hidden" data-i18n="review.done_message">Alle fälligen Karten für heute geschafft! 🎉</p>
+        <p id="reviewLimitHint" class="hint muted hidden"></p>
       </div>
 
       <div id="resolveError" class="error hidden"></div>
@@ -583,8 +584,9 @@
         </div>
         <div class="row gap">
           <button id="btnRender" class="btn primary big" disabled>PDF erzeugen (0)</button>
-          <button id="btnSrsAdd" class="btn big" disabled data-i18n="render.srs_add_button" title="Karten direkt in Shiori mit Spaced Repetition lernen, statt zu exportieren">Zum Lernen hinzufügen</button>
+          <button id="btnSrsAdd" class="btn big" disabled data-i18n="render.srs_add_button" data-i18n-title="render.srs_add_hint" title="Karten direkt in Shiori mit Spaced Repetition lernen, statt zu exportieren">Zum Lernen hinzufügen</button>
         </div>
+        <p id="srsAddHint" class="hint" data-i18n="render.srs_add_hint">Karten direkt in Shiori mit Spaced Repetition lernen, statt zu exportieren.</p>
         <div id="progress" class="progress hidden"><div class="spinner"></div><span id="progressText">Wird erzeugt…</span></div>
         <div id="renderError" class="error hidden"></div>
       </div>

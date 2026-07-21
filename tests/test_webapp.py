@@ -579,6 +579,26 @@ def test_api_kanacards_list_and_delete(client, monkeypatch):
     assert client.delete(f"/api/kanacards/{created['id']}").status_code == 404
 
 
+def test_api_delete_kanacard_cleans_up_review_state_and_log(client, monkeypatch):
+    """Regressionstest (Architektur-Review): eine gelöschte Karte darf keine
+    Datenleiche in ReviewState/ReviewLog hinterlassen - sonst würde sie in
+    der Review-Queue als "fällig" weitergeführt, obwohl sie gar nicht mehr
+    existiert."""
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
+    created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
+    kid = created["id"]
+
+    client.post("/api/srs/add", json={"kana_ids": [kid]})
+    assert models.ReviewState.query.filter_by(user_id=client.test_user_id, card_type="kana", card_id=kid).count() > 0
+    models.ReviewLog.query.filter_by(user_id=client.test_user_id, card_type="kana", card_id=kid).first()
+
+    client.delete(f"/api/kanacards/{kid}")
+
+    assert models.ReviewState.query.filter_by(user_id=client.test_user_id, card_type="kana", card_id=kid).count() == 0
+    assert models.ReviewLog.query.filter_by(user_id=client.test_user_id, card_type="kana", card_id=kid).count() == 0
+
+
 def test_api_kanacards_isolated_between_users(client, db_session, monkeypatch):
     import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
@@ -629,6 +649,20 @@ def test_api_customcard_create_read_update_delete(client):
     r = client.delete(f"/api/customcards/{cid}")
     assert r.status_code == 200
     assert client.get(f"/api/customcards/{cid}").status_code == 404
+
+
+def test_api_delete_customcard_cleans_up_review_state_and_log(client):
+    """Analog zum kanacards-Pendant oben, für CustomCards."""
+    created = client.post("/api/customcards", json={"front_html": "x", "back_html": "y", "tags": []}).get_json()
+    cid = created["id"]
+
+    client.post("/api/srs/add", json={"custom_ids": [cid]})
+    assert models.ReviewState.query.filter_by(user_id=client.test_user_id, card_type="custom", card_id=cid).count() > 0
+
+    client.delete(f"/api/customcards/{cid}")
+
+    assert models.ReviewState.query.filter_by(user_id=client.test_user_id, card_type="custom", card_id=cid).count() == 0
+    assert models.ReviewLog.query.filter_by(user_id=client.test_user_id, card_type="custom", card_id=cid).count() == 0
 
 
 def test_api_customcard_edit_rejects_foreign_id(client, db_session):
@@ -1451,6 +1485,30 @@ def test_api_srs_queue_new_limit_does_not_affect_already_reviewed_cards(client):
     assert len(data["items"]) == 1  # srs_new_per_day=0 blockiert nur NEUE Karten
 
 
+def test_api_settings_rejects_non_numeric_daily_limit(client):
+    """Regressionstest: ein ungültiger Tageslimit-Wert wurde früher blind in
+    die Settings übernommen und crashte erst später beim Abruf der
+    Review-Queue (api_srs_queue) mit einem 500er statt hier mit einem
+    verständlichen 400er abgewiesen zu werden."""
+    r = client.post("/api/settings", json={"defaults": {"srs_new_per_day": "viel"}})
+    assert r.status_code == 400
+
+    r = client.post("/api/settings", json={"defaults": {"srs_reviews_per_day": None}})
+    assert r.status_code == 400
+
+
+def test_api_srs_queue_survives_invalid_daily_limit_in_settings(client):
+    """Auch wenn ein ungültiger Wert (z.B. durch direkten DB-Zugriff oder
+    einen alten Datenstand) in den Settings landet, darf die Queue nicht
+    mit einem 500er abstürzen, sondern soll auf den Default zurückfallen."""
+    row = models.UserSettings.query.filter_by(user_id=client.test_user_id).first()
+    row.defaults = {**(row.defaults or {}), "srs_new_per_day": "viel"}
+    db.session.commit()
+
+    r = client.get("/api/srs/queue")
+    assert r.status_code == 200
+
+
 def test_api_srs_queue_respects_reviews_per_day_limit(client, db_session):
     """`srs_reviews_per_day` deckelt Karten, die schon mindestens einmal
     beantwortet wurden (reps > 0) - neue Karten laufen über ihr eigenes
@@ -1519,3 +1577,27 @@ def test_api_srs_stats_isolated_between_target_languages(client):
     data = r.get_json()
     assert data["total_cards"] == 0
     assert data["reviews_today"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Statische Datei-Route – Path-Traversal-Härtung
+# --------------------------------------------------------------------------- #
+
+def test_static_files_serves_existing_file(client):
+    r = client.get("/app.js")
+    assert r.status_code == 200
+
+
+def test_static_files_rejects_path_traversal(client):
+    r = client.get("/../webapp.py")
+    assert r.status_code == 404
+
+
+def test_static_files_rejects_encoded_path_traversal(client):
+    r = client.get("/%2e%2e/webapp.py")
+    assert r.status_code == 404
+
+
+def test_static_files_404_for_missing_file(client):
+    r = client.get("/does-not-exist.xyz")
+    assert r.status_code == 404

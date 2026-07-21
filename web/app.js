@@ -347,6 +347,13 @@ async function onLanguageSelectChanged() {
     loadHistory();
     if (segValue("modeTabs") === "custom") loadCustoms();
     if (segValue("modeTabs") === "wortliste") loadWortliste();
+    // Eine laufende Review-Session zeigt Karten der ALTEN Zielsprache - die
+    // Queue wurde für diese geladen und Antworten würden sonst gegen die neu
+    // aktive Sprache verbucht (Server scoped /api/srs/* immer nach der
+    // AKTUELL aktiven Sprache, nicht nach der Sprache der Session). Deshalb
+    // die Session hart abbrechen statt sie weiterlaufen zu lassen.
+    resetReviewSession();
+    if (segValue("modeTabs") === "review") enterReviewMode();
     toast("Gespeichert");
   } catch (e) {
     st.textContent = e.message; st.className = "status err";
@@ -1566,6 +1573,19 @@ let reviewQueueItems = [];
 let reviewIndex = 0;
 let reviewCurrentItem = null;
 let reviewSuggestedRating = null;
+let reviewDueTotal = 0;
+
+function resetReviewSession() {
+  reviewQueueItems = [];
+  reviewIndex = 0;
+  reviewCurrentItem = null;
+  reviewSuggestedRating = null;
+  reviewDueTotal = 0;
+  $("#reviewSession").classList.add("hidden");
+  $("#reviewDone").classList.add("hidden");
+  $("#reviewIntro").classList.add("hidden");
+  $("#reviewLimitHint").classList.add("hidden");
+}
 
 async function enterReviewMode() {
   let data;
@@ -1575,6 +1595,7 @@ async function enterReviewMode() {
     data = { items: [], due_total: 0 };
   }
   reviewQueueItems = data.items;
+  reviewDueTotal = data.due_total;
   $("#reviewIntro").classList.remove("hidden");
   $("#reviewSession").classList.add("hidden");
   $("#reviewDone").classList.add("hidden");
@@ -1582,7 +1603,23 @@ async function enterReviewMode() {
     ? `${data.due_total} ${t("review.due_suffix")}`
     : t("review.none_due");
   $("#btnReviewStart").disabled = data.due_total === 0;
+  updateReviewLimitHint();
   loadReviewStats();
+}
+
+function updateReviewLimitHint() {
+  // `due_total` zählt ALLE fälligen Karten, `reviewQueueItems.length` nur
+  // die nach Tageslimit ausgelieferten - ohne diesen Hinweis suggeriert
+  // "Alle fälligen Karten geschafft" fälschlich, dass wirklich nichts mehr
+  // offen ist, obwohl nur das Tageslimit weitere Karten zurückhält.
+  const hint = $("#reviewLimitHint");
+  const throttled = reviewDueTotal - reviewQueueItems.length;
+  if (throttled > 0) {
+    hint.textContent = `${t("review.limit_hint_prefix")} ${throttled} ${t("review.limit_hint_suffix")}`;
+    hint.classList.remove("hidden");
+  } else {
+    hint.classList.add("hidden");
+  }
 }
 
 async function loadReviewStats() {
@@ -1624,6 +1661,7 @@ async function showReviewCard() {
   if (reviewIndex >= reviewQueueItems.length) {
     $("#reviewSession").classList.add("hidden");
     $("#reviewDone").classList.remove("hidden");
+    updateReviewLimitHint();
     loadReviewStats();
     return;
   }
@@ -1696,7 +1734,13 @@ async function onReviewRate(rating) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ card_type: item.card_type, card_id: item.card_id, item_type: item.item_type, rating }),
     });
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    // Bewertung ist NICHT gespeichert worden - bei der nächsten Karte
+    // weiterzumachen würde sie stillschweigend verlieren. Stattdessen auf
+    // derselben Karte bleiben, damit der Nutzer erneut bewerten kann.
+    toast(e.message);
+    return;
+  }
   reviewIndex++;
   showReviewCard();
 }

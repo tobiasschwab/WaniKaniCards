@@ -67,6 +67,8 @@
   "review.due_suffix": "card(s) due",
   "review.none_due": "Nothing due right now – well learned! 🎉",
   "review.done_message": "All due cards done for now! 🎉",
+  "review.limit_hint_prefix": "Daily limit reached –",
+  "review.limit_hint_suffix": "more card(s) are already due and will be delivered tomorrow.",
   "review.stats.reviews_today": "Reviews today",
   "review.stats.new_today": "New today",
   "review.stats.retention": "Retention (7 days)",
@@ -112,6 +114,7 @@
   "render.cutmarks_label": "Cut marks",
   "render.hole_label": "Hole punch",
   "render.srs_add_button": "Add to learning",
+  "render.srs_add_hint": "Learn cards directly in Shiori with spaced repetition, instead of exporting.",
   "history.title": "History",
   "history.empty": "No exports yet.",
   "footer.text": "File-based · no database · Shiori"

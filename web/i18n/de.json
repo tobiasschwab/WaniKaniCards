@@ -67,6 +67,8 @@
   "review.due_suffix": "Karte(n) fällig",
   "review.none_due": "Aktuell nichts fällig – gut gelernt! 🎉",
   "review.done_message": "Alle fälligen Karten für heute geschafft! 🎉",
+  "review.limit_hint_prefix": "Tageslimit erreicht –",
+  "review.limit_hint_suffix": "weitere Karte(n) sind bereits fällig und werden morgen ausgeliefert.",
   "review.stats.reviews_today": "Reviews heute",
   "review.stats.new_today": "Neu heute",
   "review.stats.retention": "Retention (7 Tage)",
@@ -112,6 +114,7 @@
   "render.cutmarks_label": "Schnittmarken",
   "render.hole_label": "Stanzloch",
   "render.srs_add_button": "Zum Lernen hinzufügen",
+  "render.srs_add_hint": "Karten direkt in Shiori mit Spaced Repetition lernen, statt zu exportieren.",
   "history.title": "Verlauf",
   "history.empty": "Noch keine Exporte.",
   "footer.text": "Dateibasiert · keine Datenbank · Shiori"

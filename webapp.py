@@ -38,8 +38,6 @@ from typing import Any
 
 import redis
 from flask import Flask, abort, g, jsonify, redirect, request, send_file, send_from_directory
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from flask_login import current_user, login_required
 from rq import Queue
 from sqlalchemy.exc import IntegrityError
@@ -52,7 +50,7 @@ import pdf_import
 import srs
 import storage
 from auth import bp as auth_bp
-from extensions import db, login_manager
+from extensions import db, limiter, login_manager
 from languages.registry import SUPPORTED_TARGET_LANGS, get_pack
 
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
@@ -210,15 +208,19 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 redis_conn = redis.from_url(REDIS_URL)
 render_queue = Queue("renders", connection=redis_conn)
 
-limiter = Limiter(
-    key_func=lambda: str(current_user.get_id()) if current_user.is_authenticated else get_remote_address(),
-    app=app,
-    storage_uri=REDIS_URL,
-    # Großzügiger Default für die meisten (billigen) Endpunkte - teure
-    # Einzelendpunkte (Rendern, Gemini-Aufrufe) bekommen unten ihr eigenes,
-    # strengeres Limit direkt am jeweiligen Endpunkt.
-    default_limits=["120 per minute"],
-)
+# `limiter` selbst lebt in extensions.py (App-Factory-Pattern: ohne `app=`
+# konstruiert), damit auch auth.py eigene @limiter.limit(...)-Dekoratoren auf
+# seine Routen anwenden kann, ohne webapp.py importieren zu müssen (Zirkel-
+# import). Storage-URI/Default-Limit werden hier per Flask-Config gesetzt,
+# bevor `init_app()` läuft - das ist der von Flask-Limiter vorgesehene Weg
+# für den Fall, dass Limiter-Instanz und Flask-App in unterschiedlichen
+# Modulen entstehen.
+app.config["RATELIMIT_STORAGE_URI"] = REDIS_URL
+# Großzügiger Default für die meisten (billigen) Endpunkte - teure
+# Einzelendpunkte (Rendern, Gemini-Aufrufe, Login/Signup) bekommen unten ihr
+# eigenes, strengeres Limit direkt am jeweiligen Endpunkt.
+app.config["RATELIMIT_DEFAULT"] = "120 per minute"
+limiter.init_app(app)
 
 # Wie viele gleichzeitig laufende/wartende Render-Jobs ein einzelner Nutzer
 # haben darf, bevor /api/render neue Anfragen ablehnt - verhindert, dass ein
@@ -899,7 +901,17 @@ def api_post_settings() -> Any:
     if isinstance(body.get("target_lang"), str) and body["target_lang"].strip().upper() in _TARGET_LANGS:
         s["target_lang"] = body["target_lang"].strip().upper()
     if isinstance(body.get("defaults"), dict):
-        s["defaults"] = {**s["defaults"], **body["defaults"]}
+        incoming_defaults = dict(body["defaults"])
+        # Tageslimits müssen positive Ganzzahlen sein - ungültige Werte hier
+        # abzuweisen statt sie blind zu übernehmen verhindert, dass sie erst
+        # später beim Abruf der Review-Queue (api_srs_queue) auffallen.
+        for key in ("srs_new_per_day", "srs_reviews_per_day"):
+            if key in incoming_defaults:
+                try:
+                    incoming_defaults[key] = max(0, int(incoming_defaults[key]))
+                except (TypeError, ValueError):
+                    return jsonify({"error": f"'{key}' muss eine ganze Zahl sein."}), 400
+        s["defaults"] = {**s["defaults"], **incoming_defaults}
     save_settings(s)
     return jsonify({"ok": True, "token_set": bool(s.get("token")), "username": s.get("username", "")})
 
@@ -1590,12 +1602,25 @@ def api_save_customcard() -> Any:
     return jsonify(read_custom_owned(cid))
 
 
+def _delete_srs_rows_for_card(user_id: int, card_type: str, card_id: str) -> None:
+    """Räumt `ReviewState`/`ReviewLog`-Zeilen einer gelöschten Karte weg.
+    Ohne das bliebe der SRS-Lernstand als Datenleiche liegen (`card_id`
+    zeigt danach ins Leere) und würde in `/api/srs/queue` als "fällig"
+    weitergeführt, obwohl die Karte gar nicht mehr existiert - `/api/srs/
+    check`+`/answer` würden für sie außerdem ins Leere greifen (kein Front/
+    Back mehr ladbar). `card_id` ist über alle Zielsprachen hinweg eindeutig,
+    daher genügt der Filter ohne `target_lang`."""
+    models.ReviewState.query.filter_by(user_id=user_id, card_type=card_type, card_id=card_id).delete()
+    models.ReviewLog.query.filter_by(user_id=user_id, card_type=card_type, card_id=card_id).delete()
+
+
 @app.delete("/api/customcards/<cid>")
 @login_required
 def api_delete_customcard(cid: str) -> Any:
     if read_custom_owned(cid) is None:
         abort(404)
     models.CustomCard.query.filter_by(id=cid, user_id=current_user.id).delete()
+    _delete_srs_rows_for_card(current_user.id, "custom", cid)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -1685,6 +1710,7 @@ def api_delete_kanacard(kid: str) -> Any:
     if read_kana_owned(kid) is None:
         abort(404)
     models.KanaCard.query.filter_by(id=kid, user_id=current_user.id).delete()
+    _delete_srs_rows_for_card(current_user.id, "kana", kid)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -1921,8 +1947,19 @@ def api_srs_queue() -> Any:
 
     defaults = load_settings()["defaults"]
     new_done_today, reviews_done_today = _srs_daily_counts(current_user.id, lang, now)
-    new_budget = max(0, int(defaults.get("srs_new_per_day", 20)) - new_done_today)
-    review_budget = max(0, int(defaults.get("srs_reviews_per_day", 200)) - reviews_done_today)
+
+    def _safe_int(value: Any, fallback: int) -> int:
+        # Einstellungen kommen aus einem generischen JSON-Merge (POST
+        # /api/settings {"defaults": {...}}) ohne Typ-Validierung - ein
+        # ungültiger Wert (String, null, ...) darf die Warteschlange nicht
+        # mit einem 500er abschießen, sondern fällt auf den Default zurück.
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    new_budget = max(0, _safe_int(defaults.get("srs_new_per_day", 20), 20) - new_done_today)
+    review_budget = max(0, _safe_int(defaults.get("srs_reviews_per_day", 200), 200) - reviews_done_today)
 
     new_rows = base_query.filter(models.ReviewState.reps == 0).order_by(
         models.ReviewState.due_at.asc()
@@ -2155,8 +2192,12 @@ def index() -> Any:
 
 @app.get("/<path:path>")
 def static_files(path: str) -> Any:
+    # `is_relative_to` statt `startswith(str(WEB_DIR))`: Ein reiner
+    # String-Präfix-Vergleich hätte auch ein Verzeichnis wie "web-secret"
+    # (Geschwister von WEB_DIR, gleicher String-Präfix) fälschlich als
+    # "innerhalb von WEB_DIR" durchgehen lassen.
     target = (WEB_DIR / path).resolve()
-    if not str(target).startswith(str(WEB_DIR)) or not target.is_file():
+    if not target.is_relative_to(WEB_DIR.resolve()) or not target.is_file():
         abort(404)
     return send_from_directory(WEB_DIR, path)
 
