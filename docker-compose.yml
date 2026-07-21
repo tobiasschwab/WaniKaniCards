@@ -18,6 +18,19 @@ services:
       timeout: 5s
       retries: 10
 
+  # Multi-User Phase 3: Job-Queue (RQ) + Rate-Limiting (Flask-Limiter) teilen
+  # sich dieselbe Redis-Instanz - siehe webapp.py REDIS_URL.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - shiori_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   shiori:
     build: .
     image: shiori
@@ -25,19 +38,48 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "9020:8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://shiori:shiori@db:5432/shiori
+      REDIS_URL: redis://redis:6379/0
       # Erzeugen: python -c "from crypto import generate_master_key; print(generate_master_key())"
       WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
       WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}
+      # Optional: S3/MinIO statt lokalem Disk für PDFs/APKGs (siehe storage.py).
+      # S3_BUCKET: shiori-outputs
+      # S3_ENDPOINT_URL: http://minio:9000
     volumes:
       # PDFs/Anki-Exporte + API-Caches liegen weiterhin dateibasiert im Host-
-      # Ordner ./data (Phase 1: nur Accounts/Auth sind in Postgres, siehe
-      # README "Multi-User-Architektur" - Nutzdaten folgen in Phase 2).
+      # Ordner ./data, solange kein S3_BUCKET gesetzt ist (siehe storage.py).
+      - ./data:/data
+    restart: unless-stopped
+
+  # Verarbeitet die von webapp.py über `render_queue.enqueue()` eingereihten
+  # Render-Jobs (siehe webapp.py `_run_render`) - eigener Prozess/Container,
+  # damit ein hängender Render-Job nicht den Webserver blockiert und sich die
+  # Anzahl der Worker unabhängig von den Webserver-Instanzen skalieren lässt
+  # (z. B. `docker compose up --scale worker=3`).
+  worker:
+    build: .
+    image: shiori
+    command: rq worker renders --url redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://shiori:shiori@db:5432/shiori
+      REDIS_URL: redis://redis:6379/0
+      WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
+      WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}
+    volumes:
       - ./data:/data
     restart: unless-stopped
 
 volumes:
   shiori_pg_data:
+  shiori_redis_data:

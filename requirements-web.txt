@@ -8,3 +8,10 @@ Flask-Login>=0.6
 psycopg2-binary>=2.9
 alembic>=1.13
 cryptography>=42
+
+# Multi-User Phase 3: Job-Queue (statt threading.Thread), Object Storage für
+# PDFs/APKGs (statt lokalem Disk), Rate-Limiting.
+rq>=1.16
+redis>=5.0
+boto3>=1.34
+Flask-Limiter>=3.5

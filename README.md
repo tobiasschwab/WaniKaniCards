@@ -709,11 +709,12 @@ zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
 - **Alle zentralen Endpunkte sind jetzt `@login_required`** (Ausnahmen:
   `/api/auth/*` selbst sowie die statischen Frontend-Dateien). Ohne Login
   liefert jeder geschützte Endpunkt `401` statt Daten preiszugeben.
-- **Render-Worker im eigenen App-Context**: `_run_render()` läuft weiterhin
-  in einem `threading.Thread` (kein Request-Kontext dort verfügbar), braucht
-  für DB-Zugriffe aber jetzt `with app.app_context():` – Nutzer-Settings
-  werden explizit über den im Job gespeicherten `user_id` geladen
-  (`load_settings_for_user()`), nicht über `current_user`.
+- **Render-Worker im eigenen App-Context**: `_run_render()` braucht für
+  DB-Zugriffe `with app.app_context():` (kein Request-Kontext im Worker
+  verfügbar) – Nutzer-Settings werden explizit über den im Job gespeicherten
+  `user_id` geladen (`load_settings_for_user()`), nicht über `current_user`.
+  Seit Phase 3 läuft dieser Worker-Code in einem eigenen RQ-Prozess statt in
+  einem `threading.Thread` im Webserver-Prozess (siehe unten).
 - **Minimaler Login/Signup-Gate im Frontend** (`web/index.html`/`app.js`):
   ein Vollbild-Overlay blockiert die App, bis `/api/auth/me` eine
   eingeloggte Sitzung bestätigt; „Registrieren"/„Anmelden" wechselbar per
@@ -748,17 +749,85 @@ zwei Testclients, bleibt der zuerst eingeloggte Nutzer in `g` hängen. Behoben
 in Produktion ein No-Op (dort bekommt jeder Request ohnehin einen frischen
 Context), in Tests aber notwendig für korrekte Multi-Tenant-Isolationstests.
 
-**Geplante nächste Schritte (Phase 3 und später):**
+**Aktueller Stand – Phase 3 (Jobs/Dateien SaaS-tauglich, Schutzmechanismen,
+Betrieb & Recht), umgesetzt:**
 
-1. **Jobs/Dateien SaaS-tauglich machen** – `threading.Thread`-Rendering durch
-   eine echte Queue (Celery/RQ + Redis) ablösen, generierte PDFs/APKGs von
-   lokalem Disk in Object Storage (S3/MinIO, signierte Download-URLs,
-   Auto-Löschung nach X Tagen) verschieben.
-2. **Schutzmechanismen** – Rate-Limiting (`Flask-Limiter`) pro Nutzer/IP,
-   Limit an gleichzeitigen Render-Jobs pro Nutzer.
-3. **Betrieb & Recht** – strukturiertes Logging mit `user_id`-Kontext,
-   Backups, sowie (nicht-technisch, aber Pflicht bei fremden Nutzerdaten)
-   Datenschutzerklärung/ToS/DSGVO-Lösch- und Auskunftsfunktion.
+- **Job-Queue statt `threading.Thread`**: `/api/render` reiht Render-Jobs
+  jetzt über `render_queue.enqueue(_run_render, job_id, job_timeout=600)`
+  ([RQ](https://python-rq.org/) + Redis) ein, statt sie im Webserver-Prozess
+  selbst per Hintergrund-Thread abzuarbeiten. Ein oder mehrere separate
+  `rq worker renders`-Prozesse holen Jobs von der Queue – ein hängender
+  Render-Job blockiert dadurch weder den Webserver noch andere Nutzer, und
+  die Worker-Anzahl skaliert unabhängig von den Webserver-Instanzen
+  (`docker compose up --scale worker=3`). Weil jeder Job in einer eigenen
+  Worker-Ausführung läuft (keine parallelen Threads mehr im selben Prozess),
+  entfällt das frühere `_export_lock`.
+- **Object-Storage-Abstraktion (`storage.py`)**: generierte PDFs/APKGs
+  liegen standardmäßig weiterhin lokal unter `data/output/` (Zero-Config,
+  wie bisher), können aber ohne Code-Änderung in S3/MinIO umgezogen werden –
+  einfach `S3_BUCKET` (und optional `S3_ENDPOINT_URL` für MinIO) setzen.
+  `_run_render()` rendert dafür zunächst in ein `tempfile.TemporaryDirectory()`
+  (WeasyPrint/genanki brauchen einen echten Dateipfad), liest danach die
+  fertigen Bytes und übergibt sie an `storage.save_output()`. Downloads
+  (`/api/jobs/<id>/pdf`, `/apkg`) fragen `storage.generate_download_url()`
+  ab: liefert die Funktion eine signierte, zeitlich begrenzte S3-URL, wird
+  per `redirect()` direkt dorthin verwiesen (kein Umweg über den App-Server);
+  ohne Object Storage liefert sie `None`, und die Datei geht wie bisher per
+  `send_file()` vom lokalen Disk raus. Getestet über
+  [moto](https://github.com/getmoto/moto) (`tests/test_storage.py`) – kein
+  echtes AWS/MinIO nötig, um die S3-Pfade zu verifizieren.
+- **Rate-Limiting (`Flask-Limiter`)**: alle Endpunkte greifen auf ein
+  globales Default-Limit von 120 Requests/Minute zurück (pro eingeloggtem
+  Nutzer, sonst pro IP – `key_func` nutzt `current_user.get_id()`).
+  Teurere Endpunkte (externe API-Aufrufe/Rendering) haben zusätzlich ein
+  enges eigenes Limit: `/api/render` 10/Minute, `/api/gemini/*` sowie
+  `/api/text-extract`/`/api/text-annotate-ai` je 20/Minute. Nutzt dieselbe
+  Redis-Instanz wie die Job-Queue (`storage_uri=REDIS_URL`) – eine
+  Infrastruktur für zwei Zwecke.
+- **Limit an gleichzeitigen Render-Jobs pro Nutzer**: `/api/render` zählt vor
+  dem Anlegen eines neuen Jobs, wie viele `Job`-Zeilen des anfragenden
+  Nutzers noch `queued`/`running` sind, und lehnt ab `_MAX_CONCURRENT_JOBS_PER_USER`
+  (3) mit `429` ab. Grund: anders als WaniKanis eigenes Rate-Limit (das
+  bereits pro Token/Nutzer gilt) ist die Render-Worker-Kapazität geteilte
+  Infrastruktur – ein einzelner Nutzer soll sie nicht durch beliebig viele
+  parallele Jobs blockieren können.
+- **Strukturiertes Logging mit `user_id`-Kontext**: jede Log-Zeile bekommt
+  automatisch den eingeloggten Nutzer angehängt
+  (`%(asctime)s %(levelname)s %(name)s [user=%(user_id)s]: %(message)s`),
+  über einen `logging.Filter`, der auf den **Root-Handler** registriert ist
+  (nicht auf den Root-Logger selbst – Logger-Filter greifen nur für Records,
+  die direkt auf diesem Logger erzeugt wurden, nicht für Records, die von
+  Kind-Loggern wie `werkzeug`/`gunicorn.error` dorthin propagiert werden;
+  ein Filter auf dem Root-*Logger* hätte solche Records ohne `user_id`
+  durchgelassen und beim Formatieren mit `ValueError` gecrasht – live
+  nachgestellt und gefixt). Außerhalb eines Requests (z. B. im RQ-Worker-
+  Prozess) steht `user_id` auf `"-"`.
+- **Backups & Betrieb**: siehe [`docs/BACKUP.md`](docs/BACKUP.md) für die
+  Postgres-Backup-Strategie.
+- **Datenschutz/ToS**: siehe [`docs/PRIVACY_TEMPLATE.md`](docs/PRIVACY_TEMPLATE.md)
+  und [`docs/TERMS_TEMPLATE.md`](docs/TERMS_TEMPLATE.md) – **Vorlagen**, die
+  vor einem echten öffentlichen Betrieb von einem Juristen geprüft/angepasst
+  werden müssen, keine Rechtsberatung.
+
+**Zusätzliche Umgebungsvariablen für Phase 3** (alle optional – ohne sie
+läuft die App wie zuvor mit einem lokalen Redis-Fallback bzw. rein lokalem
+Disk-Speicher):
+
+| Variable | Zweck |
+|---|---|
+| `REDIS_URL` | Redis-Verbindung für Job-Queue + Rate-Limiting. Ohne gesetzt: `redis://localhost:6379/0`. |
+| `S3_BUCKET` | Aktiviert Object Storage für generierte PDFs/APKGs (siehe `storage.py`). Ohne gesetzt: lokales Disk unter `data/output/`. |
+| `S3_ENDPOINT_URL` | Für selbst gehostetes S3-kompatibles Storage (z. B. MinIO). Bei AWS S3 weglassen. |
+| `S3_REGION` | AWS-Region, Default `us-east-1`. Bei MinIO i. d. R. irrelevant. |
+
+Lokal einen Worker-Prozess starten (zusätzlich zum Webserver):
+
+```bash
+rq worker renders --url redis://localhost:6379/0
+```
+
+Mit Docker startet `docker compose up` automatisch einen `redis`- und einen
+`worker`-Service mit (siehe `docker-compose.yml`).
 
 ## Architektur
 

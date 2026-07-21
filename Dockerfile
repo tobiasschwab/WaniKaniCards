@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 
 # App-Code (inkl. gebündelter Noto-JP-Schriften unter fonts/ und WanaKana-JS unter vendor/)
 COPY kanji_cards.py anki_export.py webapp.py dictionary.py gemini_client.py pdf_import.py \
-     models.py extensions.py auth.py crypto.py sample_data.json ./
+     models.py extensions.py auth.py crypto.py storage.py sample_data.json ./
 COPY templates/ ./templates/
 COPY fonts/ ./fonts/
 COPY vendor/ ./vendor/

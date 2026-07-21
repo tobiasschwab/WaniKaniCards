@@ -58,26 +58,28 @@ def client(db_session):
     return c
 
 
-class _SynchronousThread:
-    """Test-Double für `threading.Thread`: `.start()` führt das Ziel SOFORT
-    synchron aus statt in einem echten Hintergrund-Thread. `/api/render`
-    stößt den Render-Worker (`_run_render`) über `threading.Thread(...).start()`
-    an – ein echter Hintergrund-Thread würde sonst mit dem Tabellen-Teardown
-    von `db_session` um dieselbe (Test-)Datenbank wettlaufen, je nachdem wie
-    schnell der Test selbst fertig ist."""
-
-    def __init__(self, target=None, args=(), kwargs=None, daemon=None):
-        self._target = target
-        self._args = args
-        self._kwargs = kwargs or {}
-
-    def start(self) -> None:
-        self._target(*self._args, **self._kwargs)
+def _synchronous_enqueue(func, *args, **kwargs):
+    """Test-Double für `render_queue.enqueue()`: führt das Ziel SOFORT synchron
+    aus statt es über Redis an einen echten RQ-Worker-Prozess zu übergeben –
+    Tests laufen ohne eine laufende Redis-/Worker-Infrastruktur und ohne
+    Wettlauf mit dem Tabellen-Teardown von `db_session`. `job_timeout` u. Ä.
+    Keyword-Argumente von `Queue.enqueue()` werden ignoriert (beim direkten
+    Aufruf sinnlos)."""
+    func(*args)
+    return None
 
 
 @pytest.fixture(autouse=True)
-def _synchronous_render_thread(monkeypatch):
-    monkeypatch.setattr(webapp.threading, "Thread", _SynchronousThread)
+def _synchronous_render_queue(monkeypatch):
+    monkeypatch.setattr(webapp.render_queue, "enqueue", _synchronous_enqueue)
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limiting(monkeypatch):
+    """Flask-Limiter zählt gegen Redis (`storage_uri=REDIS_URL`) – in Tests
+    soll das Limit nie zuschlagen, unabhängig davon, ob/wie schnell Requests
+    aufeinanderfolgen oder ob überhaupt ein Redis erreichbar ist."""
+    monkeypatch.setattr(webapp.limiter, "enabled", False)
 
 
 @pytest.fixture

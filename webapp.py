@@ -29,28 +29,59 @@ import hashlib
 import logging
 import os
 import re
-import threading
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, abort, g, jsonify, request, send_file, send_from_directory
+import redis
+from flask import Flask, abort, g, jsonify, redirect, request, send_file, send_from_directory
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_login import current_user, login_required
+from rq import Queue
 
 import anki_export as ae
 import crypto
 import kanji_cards as kc
 import models
 import pdf_import
+import storage
 from auth import bp as auth_bp
 from extensions import db, login_manager
 
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
 # im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
 # gunicorn/Flask fangen stdout ab, das reicht für `docker logs`.
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+#
+# Jeder Log-Eintrag bekommt zusätzlich den eingeloggten Nutzer angehängt
+# (Multi-User-Betrieb: "wessen Request hat das ausgelöst" ist sonst aus den
+# Logs allein nicht ersichtlich) - "-" außerhalb eines Requests (z. B. im
+# RQ-Worker-Prozess, der Jobs verarbeitet).
+class _UserIdLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            from flask import has_request_context
+            record.user_id = current_user.id if (has_request_context() and current_user.is_authenticated) else "-"
+        except Exception:  # noqa: BLE001 - Logging darf nie selbst crashen
+            record.user_id = "-"
+        return True
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s [user=%(user_id)s]: %(message)s",
+)
+# Als Filter auf dem Root-Handler (nicht auf dem Root-Logger!) registrieren:
+# Logger-Filter laufen nur für Records, die auf GENAU diesem Logger erzeugt
+# wurden, nicht für Records, die von Kind-Loggern (z. B. "werkzeug",
+# "gunicorn.error") zum Root propagiert werden – die würden sonst ohne
+# `user_id`-Attribut beim Root-Handler landen und die Format-String-
+# Auswertung mit ValueError crashen.
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_UserIdLogFilter())
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
@@ -64,8 +95,6 @@ WEB_DIR = HERE / "web"
 
 for _d in (DATA_DIR, OUTPUT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
-
-_export_lock = threading.Lock()
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "token": "",
@@ -157,6 +186,36 @@ def _reset_login_cache() -> None:
     (siehe tests/conftest.py `db_session`). In Produktion ein No-Op, da dort
     ohnehin jeder Request einen eigenen, frischen Context bekommt."""
     g.pop("_login_user", None)
+
+
+# ---------- Multi-User Phase 3: Job-Queue + Rate-Limiting (Redis) ----------- #
+#
+# REDIS_URL fällt ohne Angabe auf ein lokales Redis zurück (Zero-Config für
+# Entwicklung, analog zum SQLite-Fallback bei DATABASE_URL) - für den
+# produktiven Multi-User-Betrieb läuft ein eigener Redis-Dienst (siehe
+# docker-compose.yml). Dieselbe Verbindung dient sowohl der Job-Queue (RQ)
+# als auch dem Rate-Limiting-Zähler (Flask-Limiter) - zwei unterschiedliche
+# Nutzungen derselben Infrastruktur, kein zweiter Dienst nötig.
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+redis_conn = redis.from_url(REDIS_URL)
+render_queue = Queue("renders", connection=redis_conn)
+
+limiter = Limiter(
+    key_func=lambda: str(current_user.get_id()) if current_user.is_authenticated else get_remote_address(),
+    app=app,
+    storage_uri=REDIS_URL,
+    # Großzügiger Default für die meisten (billigen) Endpunkte - teure
+    # Einzelendpunkte (Rendern, Gemini-Aufrufe) bekommen unten ihr eigenes,
+    # strengeres Limit direkt am jeweiligen Endpunkt.
+    default_limits=["120 per minute"],
+)
+
+# Wie viele gleichzeitig laufende/wartende Render-Jobs ein einzelner Nutzer
+# haben darf, bevor /api/render neue Anfragen ablehnt - verhindert, dass ein
+# Nutzer die komplette Worker-Kapazität für sich beansprucht (siehe
+# api_render()). WaniKanis eigenes Rate-Limit ist schon pro Token isoliert,
+# die EIGENE Serverkapazität (Worker-Prozesse) aber nicht.
+_MAX_CONCURRENT_JOBS_PER_USER = 3
 
 
 @app.errorhandler(crypto.SecretCryptoError)
@@ -592,48 +651,58 @@ def _build_mixed_deck(p: dict[str, Any], user_id: int, token: str | None = None)
 
 
 def _run_render(job_id: str) -> None:
-    """Läuft in einem eigenen Thread OHNE Flask-Request-Kontext – braucht
-    deshalb `app.app_context()` für DB-Zugriffe (`current_user` ist hier
-    nicht verfügbar, alle Lookups laufen über den im Job gespeicherten
-    `user_id` statt über den eingeloggten Nutzer)."""
+    """Der eigentliche Render-Worker – läuft als RQ-Job in einem separaten
+    Worker-Prozess OHNE Flask-Request-Kontext, braucht deshalb
+    `app.app_context()` für DB-Zugriffe (`current_user` ist hier nicht
+    verfügbar, alle Lookups laufen über den im Job gespeicherten `user_id`
+    statt über den eingeloggten Nutzer). Da RQ jeden Job in einer eigenen
+    Job-Ausführung verarbeitet (keine parallelen Threads im selben Prozess,
+    die sich hier in die Quere kommen könnten), ist kein eigenes Lock mehr
+    nötig (anders als beim früheren `threading.Thread`-Ansatz)."""
     with app.app_context():
         job = read_job(job_id)
         if job is None:
             return
         user_id = job["user_id"]
         p = job["params"]
-        with _export_lock:
-            job = read_job(job_id) or job
-            job["status"] = "running"
-            job["started_at"] = _now()
-            write_job(job)
+        job["status"] = "running"
+        job["started_at"] = _now()
+        write_job(job)
 
-            anki = p.get("format") == "anki"
-            out_path = OUTPUT_DIR / (f"{job_id}.apkg" if anki else f"{job_id}.pdf")
-            try:
-                settings = load_settings_for_user(user_id)
-                # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-/
-                # Dictionary-Karten, kein Demo-Modus) gerendert werden.
-                needs_token = bool(p.get("subject_ids")) and not p.get("sample")
-                if needs_token and not settings.get("token"):
-                    raise kc.WaniKaniError(
-                        "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
-                    )
+        anki = p.get("format") == "anki"
+        out_key = f"{job_id}.apkg" if anki else f"{job_id}.pdf"
+        try:
+            settings = load_settings_for_user(user_id)
+            # Token nur nötig, wenn WaniKani-Subjects (keine reinen Custom-/
+            # Dictionary-Karten, kein Demo-Modus) gerendert werden.
+            needs_token = bool(p.get("subject_ids")) and not p.get("sample")
+            if needs_token and not settings.get("token"):
+                raise kc.WaniKaniError(
+                    "Kein API-Token gespeichert. Bitte in den Einstellungen setzen."
+                )
 
-                deck = _build_mixed_deck(p, user_id, token=settings.get("token"))
-                if not deck:
-                    raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
+            deck = _build_mixed_deck(p, user_id, token=settings.get("token"))
+            if not deck:
+                raise kc.WaniKaniError("Keine Karten für die Auswahl gefunden.")
 
+            # Erst in eine lokale Temp-Datei rendern (WeasyPrint/genanki
+            # schreiben direkt auf einen Dateipfad), danach die fertigen Bytes
+            # über die Storage-Abstraktion sichern (lokales Disk ODER S3/MinIO
+            # - siehe storage.py). Der Zwischenschritt kostet bei lokalem
+            # Disk eine zusätzliche Kopie, hält den Rendering-Code aber
+            # unabhängig davon, wo das Ergebnis am Ende landet.
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_path = Path(tmp_dir) / out_key
                 if anki:
                     deck_name = job.get("title") or "Shiori"
-                    _, n = ae.export_deck(deck, out_path, deck_name=deck_name)
+                    _, n = ae.export_deck(deck, tmp_path, deck_name=deck_name)
                 else:
                     username = settings.get("username", "")
                     if not p.get("sample") and not username:
                         username = ""  # kein Token → kein Name
                     kc.render_deck(
                         deck,
-                        out_path,
+                        tmp_path,
                         layout=p.get("layout", "a6"),
                         paper=p.get("paper", "a4"),
                         duplex=p.get("duplex", "long-edge"),
@@ -642,16 +711,17 @@ def _run_render(job_id: str) -> None:
                         username=username,
                     )
                     n = len(deck)
-                job["status"] = "done"
-                job["n_cards"] = n
-                job["filename"] = out_path.name
-            except kc.WaniKaniError as exc:
-                job["status"], job["error"] = "error", str(exc)
-            except Exception as exc:  # noqa: BLE001
-                job["status"], job["error"] = "error", f"Unerwarteter Fehler: {exc}"
-            finally:
-                job["finished_at"] = _now()
-                write_job(job)
+                storage.save_output(OUTPUT_DIR, out_key, tmp_path.read_bytes())
+            job["status"] = "done"
+            job["n_cards"] = n
+            job["filename"] = out_key
+        except kc.WaniKaniError as exc:
+            job["status"], job["error"] = "error", str(exc)
+        except Exception as exc:  # noqa: BLE001
+            job["status"], job["error"] = "error", f"Unerwarteter Fehler: {exc}"
+        finally:
+            job["finished_at"] = _now()
+            write_job(job)
 
 
 # ---------- API: Konfig & Einstellungen ------------------------------------- #
@@ -719,6 +789,7 @@ def api_post_settings() -> Any:
 
 @app.post("/api/gemini/models")
 @login_required
+@limiter.limit("20 per minute")
 def api_gemini_models() -> Any:
     """Verfügbare Gemini-Modelle live per API abrufen (ListModels), statt eine
     hartcodierte Liste zu pflegen – akzeptiert optional einen noch nicht
@@ -737,6 +808,7 @@ def api_gemini_models() -> Any:
 
 @app.post("/api/gemini/tts")
 @login_required
+@limiter.limit("20 per minute")
 def api_gemini_tts() -> Any:
     """Text (Original-Satz im KI-Modus) per Gemini vorlesen lassen – gibt
     eine data-URI zurück, die sich sowohl direkt im Browser abspielen als
@@ -759,6 +831,7 @@ def api_gemini_tts() -> Any:
 
 @app.post("/api/gemini/generate-image")
 @login_required
+@limiter.limit("20 per minute")
 def api_gemini_generate_image() -> Any:
     """Bildkarten-Feature: ein einfaches Clipart-Bild für eine Vokabel per
     Gemini generieren lassen (siehe `gemini_client.generate_image()`) – gibt
@@ -950,6 +1023,7 @@ def api_text_annotate() -> Any:
 
 @app.post("/api/text-annotate-ai")
 @login_required
+@limiter.limit("20 per minute")
 def api_text_annotate_ai() -> Any:
     """Text per Gemini satzweise analysieren (eigener „KI"-Modus, siehe
     `kc.annotate_text_ai()`): pro Satz Original, deutsche Übersetzung,
@@ -1014,6 +1088,7 @@ def api_text_annotate_ai() -> Any:
 
 @app.post("/api/text-extract")
 @login_required
+@limiter.limit("20 per minute")
 def api_text_extract() -> Any:
     """Text aus einer hochgeladenen PDF-Datei oder einem Bild extrahieren
     (siehe `pdf_import.py`) – liefert reinen Text zurück, der dann genauso
@@ -1195,6 +1270,7 @@ def api_wortliste_add_manual() -> Any:
 
 @app.post("/api/render")
 @login_required
+@limiter.limit("10 per minute")
 def api_render() -> Any:
     body = request.get_json(silent=True) or {}
     subject_ids = body.get("subject_ids") or []
@@ -1240,6 +1316,19 @@ def api_render() -> Any:
     n = len(params["custom_ids"]) + len(params["subject_ids"]) + len(params["kana_ids"])
     title = body.get("title") or f"{n} Karten"
 
+    # Ein Nutzer soll nicht die gesamte Worker-Kapazität (gemeinsame
+    # Infrastruktur, im Gegensatz zum WaniKani-Rate-Limit, das ja bereits pro
+    # Token/Nutzer gilt) durch beliebig viele parallele Render-Jobs blockieren.
+    active_count = models.Job.query.filter(
+        models.Job.user_id == current_user.id,
+        models.Job.status.in_(("queued", "running")),
+    ).count()
+    if active_count >= _MAX_CONCURRENT_JOBS_PER_USER:
+        return jsonify({
+            "error": f"Zu viele laufende Render-Jobs (max. {_MAX_CONCURRENT_JOBS_PER_USER} gleichzeitig). "
+                     "Bitte warte, bis ein Job fertig ist.",
+        }), 429
+
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id,
@@ -1249,7 +1338,7 @@ def api_render() -> Any:
         "created_at": _now(),
     }
     write_job(job, user_id=current_user.id)
-    threading.Thread(target=_run_render, args=(job_id,), daemon=True).start()
+    render_queue.enqueue(_run_render, job_id, job_timeout=600)
     return jsonify(job), 202
 
 
@@ -1395,51 +1484,51 @@ def api_job(job_id: str) -> Any:
 def api_delete_job(job_id: str) -> Any:
     if read_job_owned(job_id) is None:
         abort(404)
-    (OUTPUT_DIR / f"{job_id}.pdf").unlink(missing_ok=True)
-    (OUTPUT_DIR / f"{job_id}.apkg").unlink(missing_ok=True)
+    storage.delete_output(OUTPUT_DIR, f"{job_id}.pdf")
+    storage.delete_output(OUTPUT_DIR, f"{job_id}.apkg")
     models.Job.query.filter_by(id=job_id, user_id=current_user.id).delete()
     db.session.commit()
     return jsonify({"ok": True})
 
 
-@app.get("/api/jobs/<job_id>/pdf")
-@login_required
-def api_job_pdf(job_id: str) -> Any:
+def _serve_job_output(job_id: str, *, suffix: str, mimetype: str) -> Any:
+    """Gemeinsame Auslieferung für PDF/APKG: bei S3/MinIO per Redirect auf eine
+    signierte URL (kein Umweg über den App-Server nötig), sonst lokal per
+    `send_file()` (siehe storage.py: `generate_download_url()` liefert `None`,
+    solange kein Object Storage konfiguriert ist)."""
     job = read_job_owned(job_id)
     if job is None or job.get("status") != "done":
         abort(404)
-    pdf = OUTPUT_DIR / f"{job_id}.pdf"
-    if not pdf.is_file():
-        abort(404)
+    key = f"{job_id}{suffix}"
     download = request.args.get("download") == "1"
     safe = "".join(c for c in job.get("title", "cards") if c.isalnum() or c in " -_")
+    download_name = f"wanikani-{safe.strip() or 'cards'}{suffix}"
+
+    url = storage.generate_download_url(key, filename=download_name)
+    if url is not None:
+        return redirect(url)
+
+    if not storage.output_exists(OUTPUT_DIR, key):
+        abort(404)
     return send_file(
-        pdf,
-        mimetype="application/pdf",
+        OUTPUT_DIR / key,
+        mimetype=mimetype,
         as_attachment=download,
-        download_name=f"wanikani-{safe.strip() or 'cards'}.pdf",
+        download_name=download_name,
         max_age=0,
     )
+
+
+@app.get("/api/jobs/<job_id>/pdf")
+@login_required
+def api_job_pdf(job_id: str) -> Any:
+    return _serve_job_output(job_id, suffix=".pdf", mimetype="application/pdf")
 
 
 @app.get("/api/jobs/<job_id>/apkg")
 @login_required
 def api_job_apkg(job_id: str) -> Any:
-    job = read_job_owned(job_id)
-    if job is None or job.get("status") != "done":
-        abort(404)
-    apkg = OUTPUT_DIR / f"{job_id}.apkg"
-    if not apkg.is_file():
-        abort(404)
-    download = request.args.get("download") == "1"
-    safe = "".join(c for c in job.get("title", "cards") if c.isalnum() or c in " -_")
-    return send_file(
-        apkg,
-        mimetype="application/octet-stream",
-        as_attachment=download,
-        download_name=f"wanikani-{safe.strip() or 'cards'}.apkg",
-        max_age=0,
-    )
+    return _serve_job_output(job_id, suffix=".apkg", mimetype="application/octet-stream")
 
 
 # ---------- Frontend --------------------------------------------------------- #

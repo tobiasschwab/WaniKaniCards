@@ -18,3 +18,6 @@ data/
 
 # Erzeugte Anki-Pakete (groß wegen eingebetteter Schriften, keine Preview nötig)
 *.apkg
+
+# Lokal gestarteter Redis (Job-Queue/Rate-Limiting, siehe storage.py/webapp.py)
+dump.rdb
