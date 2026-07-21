@@ -980,11 +980,27 @@ lernen (Auswahl-Tabelle → „Zum Lernen hinzufügen" statt/zusätzlich zu
   Kombiniert damit WaniKanis strenge Eingabe-Prüfung mit Ankis
   Selbsteinschätzungs-Flexibilität.
 
-**Noch offen** (spätere Phasen): `POST /api/srs/add` (Karten aus der
-Auswahl in die Lernwarteschlange aufnehmen), `GET /api/srs/queue` +
-`POST /api/srs/answer` (die eigentliche Review-Session), ein Review-Screen
-im Frontend, sowie ein Statistik-Dashboard mit Tageslimits (neue Karten/Tag,
-Reviews/Tag, wie bei Anki).
+**Phase 2 (umgesetzt) – Warteschlange & Hinzufügen:**
+
+- `POST /api/srs/add` – nimmt dieselbe Auswahl-Form wie `/api/render`
+  entgegen (`subject_ids`/`custom_ids`/`kana_ids`) und legt pro Karte die
+  passenden `ReviewState`-Zeilen an: Kanji/Vokabel bekommen `meaning`+
+  `reading`, Radicals (keine Lesung bei WaniKani) nur `meaning`, Custom-
+  Karten `front`, Dictionary-/KI-Karten `meaning` (+`reading`, falls die
+  Karte selbst eine Lesung hat). **Idempotent** – ein erneutes Hinzufügen
+  überschreibt nie den Fortschritt bereits vorhandener Zeilen.
+- `GET /api/srs/queue` – fällige Karten der aktiven Zielsprache, älteste
+  Fälligkeit zuerst, mit aufgelöstem Vorschautext (`front`) und `is_new`-
+  Flag; `due_total` unabhängig vom `limit`-Parameter fürs „X fällig"-Badge.
+  WaniKani-Subjects werden gebündelt in einem Request aufgelöst (nutzt den
+  bestehenden Disk-Cache aus `kanji_cards.py`) und fallen ohne gespeicherten
+  Token automatisch auf die Sample-Registry zurück (Demo-Modus, wie überall
+  sonst in der App).
+
+**Noch offen** (spätere Phasen): `POST /api/srs/answer` (getippte Antwort
+prüfen, Fuzzy-Match, FSRS-State updaten), ein Review-Screen im Frontend
+(Eingabefeld + Bewertungs-Buttons), sowie ein Statistik-Dashboard mit
+Tageslimits (neue Karten/Tag, Reviews/Tag, wie bei Anki).
 
 ## Architektur
 

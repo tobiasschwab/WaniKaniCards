@@ -48,6 +48,7 @@ import crypto
 import kanji_cards as kc
 import models
 import pdf_import
+import srs
 import storage
 from auth import bp as auth_bp
 from extensions import db, login_manager
@@ -1731,6 +1732,160 @@ def api_job_pdf(job_id: str) -> Any:
 @login_required
 def api_job_apkg(job_id: str) -> Any:
     return _serve_job_output(job_id, suffix=".apkg", mimetype="application/octet-stream")
+
+
+# ---------- Vokabeltrainer (SRS, Fundament) ---------------------------------- #
+#
+# Dritter Export-Weg neben PDF/Anki: Karten direkt in Shiori mit FSRS lernen
+# (siehe srs.py, models.ReviewState, README "Vokabeltrainer"). Phase 2:
+# Karten in die Warteschlange aufnehmen + auflisten - der eigentliche
+# Review-Screen (Eingabe/Bewertung, `/api/srs/answer`) ist eine spätere
+# Phase.
+
+def _srs_add_card(
+    user_id: int, target_lang: str, card_type: str, card_id: str, item_types: list[str],
+) -> int:
+    """Für jeden noch NICHT vorhandenen `item_type` eine frische
+    `ReviewState`-Zeile anlegen - bereits vorhandene Zeilen (Karte war schon
+    einmal hinzugefügt) bleiben unverändert, damit ein erneutes Hinzufügen
+    nie den Lernfortschritt zurücksetzt. Gibt die Anzahl NEU angelegter
+    Zeilen zurück."""
+    added = 0
+    for item_type in item_types:
+        existing = db.session.get(
+            models.ReviewState, (user_id, target_lang, card_type, card_id, item_type),
+        )
+        if existing is not None:
+            continue
+        row = models.ReviewState(
+            user_id=user_id, target_lang=target_lang, card_type=card_type,
+            card_id=card_id, item_type=item_type,
+        )
+        srs.apply_state_to_row(row, srs.new_review_state())
+        db.session.add(row)
+        added += 1
+    if added:
+        db.session.commit()
+    return added
+
+
+@app.post("/api/srs/add")
+@login_required
+def api_srs_add() -> Any:
+    """Ausgewählte Karten (dieselbe Auswahl-Form wie `/api/render`) in die
+    Lernwarteschlange aufnehmen. Kanji/Vokabel bekommen zwei Zeilen (Meaning
+    + Reading, wie WaniKani selbst), Radicals/Custom-Karten nur eine
+    (Radicals haben keine Lesung); Dictionary-/KI-Karten bekommen eine
+    Reading-Zeile nur, wenn die Karte selbst eine Lesung hat."""
+    body = request.get_json(silent=True) or {}
+    subject_ids = [int(i) for i in (body.get("subject_ids") or [])]
+    custom_ids = [str(i) for i in (body.get("custom_ids") or [])]
+    kana_ids = [str(i) for i in (body.get("kana_ids") or [])]
+    if not (subject_ids or custom_ids or kana_ids):
+        return jsonify({"error": "Keine Karten ausgewählt."}), 400
+
+    # Ownership vor dem Hinzufügen prüfen (IDOR-Schutz, siehe api_render()).
+    for cid in custom_ids:
+        if read_custom_owned(cid) is None:
+            return jsonify({"error": f"Eigene Karte „{cid}“ nicht gefunden."}), 404
+    for kid in kana_ids:
+        if read_kana_owned(kid) is None:
+            return jsonify({"error": f"Dictionary-Karte „{kid}“ nicht gefunden."}), 404
+
+    lang = _current_target_lang()
+    sample = bool(body.get("sample"))
+    added = 0
+
+    if subject_ids:
+        if (blocked := _require_content_provider()) is not None:
+            return blocked
+        token = None if sample else load_settings().get("token")
+        try:
+            details = kc.resolve_subject_ids(subject_ids, sample=sample, token=token)
+        except kc.WaniKaniError as exc:
+            return jsonify({"error": str(exc)}), 502
+        for d in details:
+            item_types = ["meaning", "reading"] if d.get("object") in ("kanji", "vocabulary") else ["meaning"]
+            added += _srs_add_card(current_user.id, lang, "wanikani", str(d["id"]), item_types)
+
+    for cid in custom_ids:
+        added += _srs_add_card(current_user.id, lang, "custom", cid, ["front"])
+
+    for kid in kana_ids:
+        record = read_kana_owned(kid)
+        item_types = ["meaning", "reading"] if record and record.get("reading") else ["meaning"]
+        added += _srs_add_card(current_user.id, lang, "kana", kid, item_types)
+
+    return jsonify({"ok": True, "added": added})
+
+
+def _srs_resolve_fronts(rows: list["models.ReviewState"]) -> dict[tuple[str, str], str]:
+    """Kurzer Vorschautext ("Vorderseite") je `(card_type, card_id)` für die
+    Warteschlangen-Ansicht – WaniKani-Subjects gebündelt in einem Request
+    aufgelöst (nutzt den bestehenden Disk-Cache aus kanji_cards.py, kein
+    Request pro Karte), Custom-/Dictionary-Karten direkt aus der DB."""
+    fronts: dict[tuple[str, str], str] = {}
+    wk_ids = sorted({int(r.card_id) for r in rows if r.card_type == "wanikani"})
+    if wk_ids:
+        token = load_settings().get("token")
+        try:
+            # Ohne gespeicherten Token auf die Sample-Registry zurückfallen
+            # (Demo-Modus, gleiche Konvention wie überall sonst in der App,
+            # z. B. /api/text-annotate) - sonst bliebe die Vorschau für jede
+            # Demo-Karte leer, weil der echte WaniKani-Request ohne Token
+            # fehlschlägt.
+            for d in kc.resolve_subject_ids(wk_ids, sample=not token, token=token):
+                fronts[("wanikani", str(d["id"]))] = d["characters"]
+        except kc.WaniKaniError:
+            pass
+    for r in rows:
+        key = (r.card_type, r.card_id)
+        if key in fronts:
+            continue
+        if r.card_type == "custom":
+            card = read_custom_for_user(r.user_id, r.card_id)
+            fronts[key] = _strip_html(card["front_html"])[:80] if card else "?"
+        elif r.card_type == "kana":
+            card = read_kana_for_user(r.user_id, r.card_id, r.target_lang)
+            fronts[key] = (card.get("word") if card else None) or "?"
+    return fronts
+
+
+@app.get("/api/srs/queue")
+@login_required
+def api_srs_queue() -> Any:
+    """Fällige Karten für die aktuell aktive Zielsprache, älteste Fälligkeit
+    zuerst – Grundlage für den (späteren) Review-Screen. `limit` deckelt die
+    Antwortgröße (Default 50, max. 200), `due_total` ist die volle Anzahl
+    unabhängig vom Limit (fürs „X Karten fällig"-Badge im Frontend)."""
+    lang = _current_target_lang()
+    now = datetime.now(timezone.utc)
+    try:
+        limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 50
+
+    base_query = models.ReviewState.query.filter(
+        models.ReviewState.user_id == current_user.id,
+        models.ReviewState.target_lang == lang,
+        models.ReviewState.due_at <= now,
+    )
+    due_total = base_query.count()
+    rows = base_query.order_by(models.ReviewState.due_at.asc()).limit(limit).all()
+
+    fronts = _srs_resolve_fronts(rows)
+    items = [
+        {
+            "card_type": r.card_type,
+            "card_id": r.card_id,
+            "item_type": r.item_type,
+            "front": fronts.get((r.card_type, r.card_id), "?"),
+            "due_at": r.due_at.isoformat(),
+            "is_new": r.reps == 0,
+        }
+        for r in rows
+    ]
+    return jsonify({"items": items, "due_total": due_total})
 
 
 # ---------- Frontend --------------------------------------------------------- #

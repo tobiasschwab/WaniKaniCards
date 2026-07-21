@@ -1132,3 +1132,124 @@ def test_api_create_kanacard_404_when_gemini_finds_nothing_for_non_japanese(clie
 
     r = client.post("/api/kanacards", json={"word": "qwxyz"})
     assert r.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Vokabeltrainer (SRS, Fundament): /api/srs/add, /api/srs/queue
+# --------------------------------------------------------------------------- #
+
+def test_api_srs_add_requires_at_least_one_card(client):
+    r = client.post("/api/srs/add", json={})
+    assert r.status_code == 400
+
+
+def test_api_srs_add_kanji_creates_meaning_and_reading_rows(client):
+    r = client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    assert r.status_code == 200
+    assert r.get_json() == {"ok": True, "added": 2}
+
+    rows = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").all()
+    assert {row.item_type for row in rows} == {"meaning", "reading"}
+    assert all(row.card_type == "wanikani" for row in rows)
+    assert all(row.reps == 0 for row in rows)
+
+
+def test_api_srs_add_radical_creates_only_meaning_row(client):
+    r = client.post("/api/srs/add", json={"subject_ids": [1], "sample": True})
+    assert r.status_code == 200
+    assert r.get_json() == {"ok": True, "added": 1}
+
+    rows = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="1").all()
+    assert [row.item_type for row in rows] == ["meaning"]
+
+
+def test_api_srs_add_is_idempotent_and_keeps_existing_progress(client, db_session):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    row = models.ReviewState.query.filter_by(
+        user_id=client.test_user_id, card_id="440", item_type="meaning",
+    ).first()
+    row.reps = 7
+    db_session.session.commit()
+
+    r = client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    assert r.get_json() == {"ok": True, "added": 0}  # beide Zeilen existieren schon
+
+    row = models.ReviewState.query.filter_by(
+        user_id=client.test_user_id, card_id="440", item_type="meaning",
+    ).first()
+    assert row.reps == 7  # Fortschritt NICHT zurückgesetzt
+
+
+def test_api_srs_add_custom_card_creates_front_row(client):
+    created = client.post("/api/customcards", json={"front_html": "<div>x</div>", "back_html": "<div>y</div>"}).get_json()
+    r = client.post("/api/srs/add", json={"custom_ids": [created["id"]]})
+    assert r.get_json() == {"ok": True, "added": 1}
+    row = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_type="custom").first()
+    assert row.item_type == "front"
+
+
+def test_api_srs_add_custom_card_rejects_foreign_ownership(client, db_session):
+    other = models.User(email="srsother@example.com"); other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    db.session.add(models.CustomCard(id="foreign1", user_id=other.id, front_html="x", back_html="y"))
+    db.session.commit()
+
+    r = client.post("/api/srs/add", json={"custom_ids": ["foreign1"]})
+    assert r.status_code == 404
+
+
+def test_api_srs_add_kana_card_reading_depends_on_record(client, monkeypatch):
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
+    created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
+
+    r = client.post("/api/srs/add", json={"kana_ids": [created["id"]]})
+    assert r.status_code == 200
+    rows = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_type="kana").all()
+    # "しあい" hat aus dem Dictionary-Eintrag keine gesonderte Lesung (nur kanji_hint/meaning) -> nur "meaning"
+    assert [row.item_type for row in rows] == ["meaning"]
+
+
+def test_api_srs_add_blocked_for_wanikani_subjects_in_non_japanese(client):
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    r = client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    assert r.status_code == 400
+
+
+def test_api_srs_queue_lists_due_new_cards_and_respects_limit(client):
+    client.post("/api/srs/add", json={"subject_ids": [440, 1], "sample": True})
+    r = client.get("/api/srs/queue")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["due_total"] == 3  # 440: meaning+reading, 1: meaning
+    assert len(data["items"]) == 3
+    assert all(item["is_new"] for item in data["items"])
+    fronts = {item["front"] for item in data["items"]}
+    # Ohne gespeicherten Token muss die Vorschau auf die Sample-Registry
+    # zurückfallen (Demo-Modus) statt bei "?" zu landen - Regressionstest für
+    # einen live gefundenen Bug (sample-Flag wurde nicht durchgereicht).
+    assert fronts == {"一"}
+
+    r2 = client.get("/api/srs/queue?limit=1")
+    assert len(r2.get_json()["items"]) == 1
+    assert r2.get_json()["due_total"] == 3
+
+
+def test_api_srs_queue_isolated_between_target_languages(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    client.post("/api/settings/language", json={"active_target_lang": "es"})
+    r = client.get("/api/srs/queue")
+    assert r.get_json() == {"items": [], "due_total": 0}
+
+
+def test_api_srs_queue_excludes_not_yet_due_cards(client, db_session):
+    from datetime import datetime, timedelta, timezone
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    rows = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").all()
+    for row in rows:
+        row.due_at = datetime.now(timezone.utc) + timedelta(days=5)
+    db_session.session.commit()
+
+    r = client.get("/api/srs/queue")
+    assert r.get_json() == {"items": [], "due_total": 0}
