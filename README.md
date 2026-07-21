@@ -703,6 +703,8 @@ zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
 | `DATABASE_URL` | Postgres-Verbindung, z. B. `postgresql+psycopg2://user:pass@host/db`. Ohne gesetzt: SQLite unter `data/shiori.db`. |
 | `WKCARDS_SECRET_KEY` | Fernet-Master-Key zum Ver-/Entschlüsseln gespeicherter API-Keys (`crypto.py`). |
 | `WKCARDS_SESSION_SECRET` | Flasks Session-Signing-Key (`SECRET_KEY`) – bewusst **eine andere** Variable als `WKCARDS_SECRET_KEY`: unterschiedliche Rotationsanforderungen/Formate. |
+| `SESSION_COOKIE_SECURE` | `1` = Session-Cookie nur über HTTPS senden. In Produktion hinter HTTPS-Terminierung setzen; in der lokalen `http://localhost`-Entwicklung weglassen (sonst wird das Cookie nicht gesetzt und der Login schlägt fehl). |
+| `TRUST_PROXY` | Anzahl vertrauenswürdiger Reverse-Proxy-Hops davor (meist `1`). Aktiviert `ProxyFix`, damit `X-Forwarded-For` ausgewertet wird und Rate-Limiting/Client-IP hinter einem Proxy stimmen. **Nur setzen, wenn wirklich ein Proxy davor steht** – sonst könnte ein Client die Header fälschen und das per-IP-Limit umgehen. |
 
 **Aktueller Stand – Phase 2 (Datenmigration & Autorisierung), umgesetzt:**
 
@@ -1103,6 +1105,31 @@ Damit ist der Vokabeltrainer aus dem ursprünglichen Brainstorming
 vollständig umgesetzt: FSRS-Scheduling, kombinierte Eingabe-Prüfung +
 Selbstbewertung, dritter Export-Weg neben PDF/Anki, Tageslimits und
 Statistik-Dashboard.
+
+**Phase 5 (umgesetzt) – Karten-Verwaltung & Eingabe-Komfort:**
+
+- `GET /api/srs/cards` / `POST /api/srs/remove`: ein Karten-Browser („Karten
+  verwalten" auf dem Üben-Startbildschirm) listet alle Karten im Training der
+  aktiven Zielsprache – gruppiert je Karte (Meaning+Reading zusammengefasst),
+  mit Vorschautext, Fälligkeit und Wiederholungszahl – und erlaubt das gezielte
+  Entfernen einer versehentlich hinzugefügten Karte. Nur der SRS-Lernstand
+  wird verworfen, das Kartenobjekt (WaniKani/eigene Karte) bleibt bestehen.
+- **WanaKana im Review-Screen**: bei japanischen Lesungen wird das
+  Antwortfeld automatisch mit WanaKana gebunden (Romaji→Kana live), ohne
+  IME-Umschalten. Nur bei `item_type=="reading"` und aktiver Zielsprache
+  Japanisch – für Bedeutungen/andere Sprachen wird die Bindung wieder gelöst,
+  damit normale Texteingabe nicht ins Kana verfälscht wird. Ausgeliefert über
+  die neue `/vendor/`-Route (dieselbe Path-Traversal-Härtung wie `web/`).
+- **Tastatur-Shortcuts** wie bei Anki: nach dem Aufdecken bewerten die Tasten
+  `1`–`4` (Nochmal/Schwer/Gut/Leicht), `Enter` übernimmt den vorgeschlagenen
+  Wert – nur aktiv, solange die Antwort aufgedeckt ist.
+
+**Konto-Verwaltung (umgesetzt):** `POST /api/auth/change-password` (altes
+Passwort zur Bestätigung nötig) und `DELETE /api/auth/account` (Passwort-
+Bestätigung, löscht das Konto samt aller zugehörigen Daten – Karten,
+Lernstände, Verlauf, Job-Ausgabedateien – da die Fremdschlüssel bewusst kein
+`ON DELETE CASCADE` haben, siehe `services.delete_all_user_data`). Beide im
+Einstellungs-Panel unter „Konto".
 
 ## Architektur
 

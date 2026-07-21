@@ -42,6 +42,7 @@ from typing import Any
 
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from flask_login import current_user, login_required
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import cards_api
 import jobs_api
@@ -115,6 +116,11 @@ HERE = Path(__file__).resolve().parent
 # `DATA_DIR`/`OUTPUT_DIR` selbst leben in services.py (auch vom Render-Worker
 # gebraucht) - hier nur für den SQLite-Fallback der DATABASE_URL gebraucht.
 WEB_DIR = HERE / "web"
+# Gebündelte Fremdbibliotheken (z. B. WanaKana für die Romaji→Kana-Eingabe im
+# Review-Screen). Liegen bewusst außerhalb von web/ (werden auch in den Anki-
+# Export eingebettet, siehe anki_export.py) und über eine eigene Route
+# ausgeliefert.
+VENDOR_DIR = HERE / "vendor"
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +150,64 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.environ.get("WKCARDS_SESSION_SECRET", "dev-insecure-change-me")
 
+# ---------- Session-Cookie-Härtung ------------------------------------------ #
+#
+# HTTPONLY: Session-Cookie ist für JavaScript unsichtbar (Schutz gegen
+# Cookie-Diebstahl per XSS) - in Flask ohnehin Default, hier explizit.
+# SAMESITE=Lax: das Cookie wird bei Cross-Site-POSTs nicht mitgeschickt
+# (CSRF-Milderung); "Lax" statt "Strict", damit ein normaler Link auf die App
+# von außen die Sitzung nicht verliert.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# SECURE: Cookie nur über HTTPS senden. Standardmäßig AUS, weil die App in der
+# lokalen Entwicklung über http://localhost läuft - dort würde ein Secure-
+# Cookie gar nicht gesetzt und der Login schlüge fehl. In Produktion (hinter
+# HTTPS-Terminierung) per SESSION_COOKIE_SECURE=1 aktivieren (siehe README/
+# docker-compose.yml).
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE") == "1"
+
+# ---------- ProxyFix (Rate-Limiting/Client-IP hinter Reverse-Proxy) --------- #
+#
+# Hinter einem Reverse-Proxy (nginx/Traefik/Cloud-LB) sieht Flask sonst immer
+# die Proxy-IP als Absender - alle Nutzer teilten sich dann EINEN Rate-Limit-
+# Bucket (nach 5 Signups/Stunde wäre die Registrierung für ALLE gesperrt,
+# siehe auth.py). TRUST_PROXY = Anzahl vertrauenswürdiger Proxy-Hops davor
+# (meist "1"). NUR setzen, wenn wirklich ein Proxy davor steht, der
+# X-Forwarded-For korrekt setzt - sonst könnte ein Client die Header selbst
+# fälschen und das per-IP-Limit umgehen. Default AUS (0), sicher für den
+# Direktbetrieb ohne Proxy.
+_trusted_proxy_hops = 0
+try:
+    _trusted_proxy_hops = max(0, int(os.environ.get("TRUST_PROXY", "0")))
+except ValueError:
+    _trusted_proxy_hops = 0
+if _trusted_proxy_hops:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, x_for=_trusted_proxy_hops, x_proto=_trusted_proxy_hops,
+        x_host=_trusted_proxy_hops, x_port=_trusted_proxy_hops,
+    )
+
 db.init_app(app)
 login_manager.init_app(app)
+
+
+@app.after_request
+def _security_headers(response: Any) -> Any:
+    """Defensive Standard-Header auf jeder Antwort (auch statische Dateien):
+    - nosniff: Browser darf den Content-Type nicht "erraten" (MIME-Sniffing-
+      Schutz).
+    - X-Frame-Options DENY: die App darf nicht in einen fremden <iframe>
+      eingebettet werden (Clickjacking-Schutz) - sie ist eine eigenständige
+      SPA, kein Widget.
+    - Referrer-Policy: bei Navigation zu externen Zielen nur die Origin (nicht
+      den vollen Pfad mit evtl. IDs) als Referrer senden.
+    Bewusst KEINE strenge Content-Security-Policy hier: das Frontend nutzt
+    Inline-Skripte/-Styles, eine CSP müsste sorgfältig auf das gesamte
+    Frontend abgestimmt und getestet werden (eigener Schritt)."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
 
 
 @login_manager.user_loader
@@ -859,6 +921,18 @@ def api_wortliste_add_manual() -> Any:
 @app.get("/")
 def index() -> Any:
     return send_from_directory(WEB_DIR, "index.html")
+
+
+@app.get("/vendor/<path:path>")
+def vendor_files(path: str) -> Any:
+    """Gebündelte Fremdbibliotheken (z. B. WanaKana) ausliefern – gleiche
+    Path-Traversal-Härtung wie `static_files()` (nur Dateien unterhalb von
+    VENDOR_DIR). Eigene Route statt web/, weil dieselben Dateien auch in den
+    Anki-Export eingebettet werden und deshalb außerhalb von web/ liegen."""
+    target = (VENDOR_DIR / path).resolve()
+    if not target.is_relative_to(VENDOR_DIR.resolve()) or not target.is_file():
+        abort(404)
+    return send_from_directory(VENDOR_DIR, path)
 
 
 @app.get("/<path:path>")

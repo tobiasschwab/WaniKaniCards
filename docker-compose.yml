@@ -48,6 +48,13 @@ services:
       # Erzeugen: python -c "from crypto import generate_master_key; print(generate_master_key())"
       WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
       WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}
+      # Hinter HTTPS-Terminierung (Reverse-Proxy) aktivieren, damit das
+      # Session-Cookie nur über HTTPS gesendet wird (siehe webapp.py):
+      # SESSION_COOKIE_SECURE: "1"
+      # Anzahl vertrauenswürdiger Reverse-Proxy-Hops davor (X-Forwarded-For),
+      # damit Rate-Limiting/Client-IP korrekt funktionieren - NUR setzen, wenn
+      # tatsächlich ein Proxy davor steht (siehe webapp.py ProxyFix):
+      # TRUST_PROXY: "1"
       # Optional: S3/MinIO statt lokalem Disk für PDFs/APKGs (siehe storage.py).
       # S3_BUCKET: shiori-outputs
       # S3_ENDPOINT_URL: http://minio:9000

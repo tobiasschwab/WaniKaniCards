@@ -440,3 +440,74 @@ def api_srs_stats() -> Any:
         "by_stage": by_stage,
         "total_cards": len(states),
     })
+
+
+@bp.get("/cards")
+@login_required
+def api_srs_cards() -> Any:
+    """Übersicht aller Karten in der Lernwarteschlange der aktiven Zielsprache
+    (Karten-Browser im Review-Screen) – gruppiert je `(card_type, card_id)`,
+    mit Vorschautext, Anzahl Prüfrichtungen, Summe der Wiederholungen, ob
+    gerade fällig und der nächsten Fälligkeit. Grundlage, um eine
+    versehentlich hinzugefügte Karte gezielt wieder zu entfernen (siehe
+    `/api/srs/remove`)."""
+    lang = _current_target_lang()
+    now = datetime.now(timezone.utc)
+    rows = models.ReviewState.query.filter_by(user_id=current_user.id, target_lang=lang).all()
+    fronts = _srs_resolve_fronts(rows)
+
+    def _aware(dt: datetime) -> datetime:
+        # SQLite liefert `due_at` zeitzonennaiv zurück (Postgres bewusst) -
+        # für den Vergleich/die Sortierung mit dem tz-bewussten `now`
+        # einheitlich als UTC interpretieren.
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in rows:
+        key = (r.card_type, r.card_id)
+        entry = grouped.setdefault(key, {
+            "card_type": r.card_type, "card_id": r.card_id,
+            "front": fronts.get(key, "?"), "items": 0, "reps": 0,
+            "due_now": False, "next_due": None,
+        })
+        due = _aware(r.due_at)
+        entry["items"] += 1
+        entry["reps"] += r.reps
+        if due <= now:
+            entry["due_now"] = True
+        if entry["next_due"] is None or due < entry["next_due"]:
+            entry["next_due"] = due
+
+    # Fällige zuerst, dann nach nächster Fälligkeit.
+    cards = sorted(grouped.values(), key=lambda c: (not c["due_now"], c["next_due"]))
+    for c in cards:
+        c["next_due"] = c["next_due"].isoformat() if c["next_due"] else None
+    return jsonify({"cards": cards, "total": len(cards)})
+
+
+@bp.post("/remove")
+@login_required
+def api_srs_remove() -> Any:
+    """Eine Karte (alle ihre Prüfrichtungen) aus der Lernwarteschlange der
+    aktiven Zielsprache entfernen – inklusive Lern-Log. Das Kartenobjekt
+    selbst (WaniKani-Subject bzw. Custom-/Dictionary-Karte) bleibt bestehen;
+    nur der SRS-Lernstand wird verworfen, die Karte kann später erneut
+    hinzugefügt werden."""
+    body = request.get_json(silent=True) or {}
+    card_type = str(body.get("card_type", ""))
+    card_id = str(body.get("card_id", ""))
+    if not card_type or not card_id:
+        return jsonify({"error": "card_type und card_id erforderlich."}), 400
+
+    lang = _current_target_lang()
+    removed = models.ReviewState.query.filter_by(
+        user_id=current_user.id, target_lang=lang, card_type=card_type, card_id=card_id,
+    ).delete()
+    models.ReviewLog.query.filter_by(
+        user_id=current_user.id, target_lang=lang, card_type=card_type, card_id=card_id,
+    ).delete()
+    db.session.commit()
+
+    if not removed:
+        return jsonify({"error": "Karte nicht in der Lernwarteschlange gefunden."}), 404
+    return jsonify({"ok": True, "removed": removed})

@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import models
 import webapp
 from models import User, UserSettings
 
@@ -138,3 +139,86 @@ def test_signup_is_rate_limited(db_session, monkeypatch):
         for i in range(6)
     ]
     assert any(r.status_code == 429 for r in responses)
+
+
+# --------------------------------------------------------------------------- #
+# Passwort ändern
+# --------------------------------------------------------------------------- #
+
+def test_change_password_success(db_session):
+    client = webapp.app.test_client()
+    client.post("/api/auth/signup", json={"email": "pw@example.com", "password": "supersecret123"})
+
+    r = client.post("/api/auth/change-password", json={
+        "current_password": "supersecret123", "new_password": "brandnewpass456",
+    })
+    assert r.status_code == 200
+
+    # Altes Passwort funktioniert nicht mehr, neues schon.
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/login", json={"email": "pw@example.com", "password": "supersecret123"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": "pw@example.com", "password": "brandnewpass456"}).status_code == 200
+
+
+def test_change_password_rejects_wrong_current(db_session):
+    client = webapp.app.test_client()
+    client.post("/api/auth/signup", json={"email": "pw2@example.com", "password": "supersecret123"})
+    r = client.post("/api/auth/change-password", json={
+        "current_password": "wrongwrong", "new_password": "brandnewpass456",
+    })
+    assert r.status_code == 403
+
+
+def test_change_password_rejects_short_new(db_session):
+    client = webapp.app.test_client()
+    client.post("/api/auth/signup", json={"email": "pw3@example.com", "password": "supersecret123"})
+    r = client.post("/api/auth/change-password", json={
+        "current_password": "supersecret123", "new_password": "short",
+    })
+    assert r.status_code == 400
+
+
+def test_change_password_requires_login(db_session):
+    client = webapp.app.test_client()
+    r = client.post("/api/auth/change-password", json={
+        "current_password": "x", "new_password": "brandnewpass456",
+    })
+    assert r.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# Konto löschen
+# --------------------------------------------------------------------------- #
+
+def test_delete_account_success_removes_user_and_data(db_session):
+    client = webapp.app.test_client()
+    client.post("/api/auth/signup", json={"email": "del@example.com", "password": "supersecret123"})
+    user = User.query.filter_by(email="del@example.com").first()
+    uid = user.id
+    # Etwas Nutzer-Inhalt anlegen, damit die Daten-Aufräumung geprüft wird.
+    client.post("/api/customcards", json={"front_html": "x", "back_html": "y", "tags": []})
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+
+    r = client.delete("/api/auth/account", json={"password": "supersecret123"})
+    assert r.status_code == 200
+
+    assert User.query.filter_by(email="del@example.com").first() is None
+    assert models.CustomCard.query.filter_by(user_id=uid).count() == 0
+    assert models.ReviewState.query.filter_by(user_id=uid).count() == 0
+    assert models.UserSettings.query.filter_by(user_id=uid).count() == 0
+    # Sitzung ist beendet.
+    assert client.get("/api/auth/me").get_json() == {"authenticated": False}
+
+
+def test_delete_account_rejects_wrong_password(db_session):
+    client = webapp.app.test_client()
+    client.post("/api/auth/signup", json={"email": "del2@example.com", "password": "supersecret123"})
+    r = client.delete("/api/auth/account", json={"password": "nope"})
+    assert r.status_code == 403
+    assert User.query.filter_by(email="del2@example.com").first() is not None
+
+
+def test_delete_account_requires_login(db_session):
+    client = webapp.app.test_client()
+    r = client.delete("/api/auth/account", json={"password": "x"})
+    assert r.status_code == 401

@@ -1581,6 +1581,56 @@ def test_api_srs_stats_isolated_between_target_languages(client):
 
 
 # --------------------------------------------------------------------------- #
+# SRS-Karten-Browser + Entfernen (/api/srs/cards, /api/srs/remove)
+# --------------------------------------------------------------------------- #
+
+def test_api_srs_cards_lists_grouped_by_card(client):
+    # 440 = Vokabel -> zwei Prüfrichtungen (meaning + reading) = EINE Karte.
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    r = client.get("/api/srs/cards")
+    data = r.get_json()
+    assert data["total"] == 1
+    card = data["cards"][0]
+    assert card["card_type"] == "wanikani"
+    assert card["card_id"] == "440"
+    assert card["items"] == 2  # meaning + reading zusammengefasst
+    assert card["due_now"] is True
+
+
+def test_api_srs_remove_deletes_card_from_queue(client):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    assert models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").count() == 2
+
+    r = client.post("/api/srs/remove", json={"card_type": "wanikani", "card_id": "440"})
+    assert r.status_code == 200
+    assert r.get_json()["removed"] == 2
+    assert models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").count() == 0
+    # Aus der Warteschlange verschwunden.
+    assert client.get("/api/srs/queue").get_json()["due_total"] == 0
+
+
+def test_api_srs_remove_unknown_card_returns_404(client):
+    r = client.post("/api/srs/remove", json={"card_type": "wanikani", "card_id": "99999"})
+    assert r.status_code == 404
+
+
+def test_api_srs_remove_requires_fields(client):
+    r = client.post("/api/srs/remove", json={"card_type": "wanikani"})
+    assert r.status_code == 400
+
+
+def test_api_srs_cards_isolated_between_users(client, db_session):
+    client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
+    other = webapp.app.test_client()
+    other.post("/api/auth/signup", json={"email": "srsother@example.com", "password": "supersecret123"})
+    assert other.get("/api/srs/cards").get_json()["total"] == 0
+    # Fremdes Entfernen findet die Karte nicht.
+    assert other.post("/api/srs/remove", json={"card_type": "wanikani", "card_id": "440"}).status_code == 404
+    # Eigentümer hat die Karte weiterhin.
+    assert client.get("/api/srs/cards").get_json()["total"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # Statische Datei-Route – Path-Traversal-Härtung
 # --------------------------------------------------------------------------- #
 
@@ -1602,3 +1652,35 @@ def test_static_files_rejects_encoded_path_traversal(client):
 def test_static_files_404_for_missing_file(client):
     r = client.get("/does-not-exist.xyz")
     assert r.status_code == 404
+
+
+def test_vendor_route_serves_wanakana(client):
+    r = client.get("/vendor/wanakana.min.js")
+    assert r.status_code == 200
+
+
+def test_vendor_route_rejects_path_traversal(client):
+    r = client.get("/vendor/../webapp.py")
+    assert r.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Security-Header (auf jeder Antwort, siehe webapp._security_headers)
+# --------------------------------------------------------------------------- #
+
+def test_security_headers_present_on_static_response(client):
+    r = client.get("/app.js")
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert r.headers.get("X-Frame-Options") == "DENY"
+    assert r.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+
+def test_security_headers_present_on_api_response(client):
+    r = client.get("/api/config")
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert r.headers.get("X-Frame-Options") == "DENY"
+
+
+def test_session_cookie_hardening_configured():
+    assert webapp.app.config["SESSION_COOKIE_HTTPONLY"] is True
+    assert webapp.app.config["SESSION_COOKIE_SAMESITE"] == "Lax"

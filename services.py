@@ -601,6 +601,28 @@ def _delete_srs_rows_for_card(user_id: int, card_type: str, card_id: str) -> Non
     models.ReviewLog.query.filter_by(user_id=user_id, card_type=card_type, card_id=card_id).delete()
 
 
+def delete_all_user_data(user_id: int) -> None:
+    """Sämtliche Daten eines Nutzers löschen – für die Konto-Löschung
+    (DELETE /api/auth/account). Die Fremdschlüssel auf `users.id` haben KEIN
+    `ON DELETE CASCADE`, deshalb müssen alle abhängigen Zeilen explizit und
+    portabel (SQLite/Postgres) entfernt werden, bevor die User-Zeile selbst
+    gelöscht werden kann – sonst schlüge der Delete unter Postgres mit einer
+    FK-Verletzung fehl (unter SQLite blieben die Zeilen verwaist).
+
+    Die auf Disk/S3 liegenden Job-Ausgabedateien (PDF/APKG) werden ebenfalls
+    weggeräumt, damit kein Nutzer-Inhalt zurückbleibt. Das eigentliche Löschen
+    der `User`-Zeile bleibt Aufgabe des Aufrufers (auth.py), inkl. `commit()`."""
+    for job in models.Job.query.filter_by(user_id=user_id).all():
+        storage.delete_output(OUTPUT_DIR, f"{job.id}.pdf")
+        storage.delete_output(OUTPUT_DIR, f"{job.id}.apkg")
+    for model in (
+        models.ReviewLog, models.ReviewState, models.Job, models.KanaCard,
+        models.CustomCard, models.KnownWord, models.UserLanguageSecrets,
+        models.UserSettings,
+    ):
+        model.query.filter_by(user_id=user_id).delete()
+
+
 # ---------- Render-Worker ---------------------------------------------------- #
 
 def _build_mixed_deck(

@@ -20,6 +20,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 
 from extensions import db, limiter
 from models import User, UserSettings
+from services import delete_all_user_data
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -93,6 +94,53 @@ def login():
 @login_required
 def logout():
     logout_user()
+    return jsonify({"ok": True})
+
+
+@bp.post("/change-password")
+@login_required
+@limiter.limit("10 per hour")
+def change_password():
+    """Passwort des eingeloggten Nutzers ändern – das aktuelle Passwort muss
+    korrekt mitgegeben werden (Schutz, falls jemand eine offene Sitzung an
+    einem fremden Gerät kapert). Rate-limitiert gegen Brute-Force des alten
+    Passworts über eine bestehende Sitzung."""
+    body = request.get_json(silent=True) or {}
+    current_password = str(body.get("current_password", ""))
+    new_password = str(body.get("new_password", ""))
+
+    if not current_user.check_password(current_password):
+        return jsonify({"error": "Aktuelles Passwort falsch."}), 403
+    if len(new_password) < _MIN_PASSWORD_LEN:
+        return jsonify({"error": f"Neues Passwort muss mindestens {_MIN_PASSWORD_LEN} Zeichen haben."}), 400
+    if new_password == current_password:
+        return jsonify({"error": "Das neue Passwort muss sich vom aktuellen unterscheiden."}), 400
+
+    current_user.set_password(new_password)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@bp.delete("/account")
+@login_required
+def delete_account():
+    """Konto und ALLE zugehörigen Daten unwiderruflich löschen (DSGVO-
+    „Recht auf Löschung"). Das aktuelle Passwort muss zur Bestätigung
+    mitgegeben werden, damit eine gekaperte oder versehentlich offene Sitzung
+    nicht das ganze Konto vernichten kann."""
+    body = request.get_json(silent=True) or {}
+    password = str(body.get("password", ""))
+    if not current_user.check_password(password):
+        return jsonify({"error": "Passwort falsch."}), 403
+
+    user_id = current_user.id
+    # Erst ausloggen (Session-Cookie invalidieren), dann die Daten löschen -
+    # danach existiert der `current_user` nicht mehr, ein späterer Zugriff
+    # darauf würde fehlschlagen.
+    logout_user()
+    delete_all_user_data(user_id)
+    db.session.delete(db.session.get(User, user_id))
+    db.session.commit()
     return jsonify({"ok": True})
 
 

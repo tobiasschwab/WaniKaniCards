@@ -195,6 +195,43 @@
               <div id="geminiStatus" class="status" style="margin-top:8px"></div>
             </div>
           </div>
+
+          <!-- Konto (Passwort ändern / Konto löschen) -->
+          <div class="settings-row" data-row="account">
+            <button type="button" class="settings-row-head">
+              <span class="settings-icon" style="background:#5a5a5a">👤</span>
+              <span class="settings-row-text">
+                <span class="settings-row-title" data-i18n="settings.account.title">Konto</span>
+                <span class="settings-row-desc" data-i18n="settings.account.desc">Passwort ändern &amp; Konto löschen</span>
+              </span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="settings-row-body hidden">
+              <label class="field">
+                <span class="label" data-i18n="settings.account.current_pw">Aktuelles Passwort</span>
+                <input id="accCurrentPw" type="password" autocomplete="current-password" spellcheck="false">
+              </label>
+              <label class="field" style="margin-top:10px">
+                <span class="label" data-i18n="settings.account.new_pw">Neues Passwort (mind. 8 Zeichen)</span>
+                <input id="accNewPw" type="password" autocomplete="new-password" spellcheck="false">
+              </label>
+              <div class="row gap">
+                <button id="accChangePw" class="btn primary" data-i18n="settings.account.change_pw_button">Passwort ändern</button>
+              </div>
+              <div id="accPwStatus" class="status" style="margin-top:8px"></div>
+
+              <hr style="margin:18px 0;border:none;border-top:1px solid var(--line)">
+              <p class="hint" data-i18n="settings.account.delete_warn">Konto und <strong>alle</strong> Daten (Karten, Lernstände, Verlauf) unwiderruflich löschen. Zur Bestätigung dein Passwort eingeben.</p>
+              <label class="field">
+                <span class="label" data-i18n="settings.account.confirm_pw">Passwort zur Bestätigung</span>
+                <input id="accDeletePw" type="password" autocomplete="current-password" spellcheck="false">
+              </label>
+              <div class="row gap">
+                <button id="accDelete" class="btn danger" data-i18n="settings.account.delete_button">Konto löschen</button>
+              </div>
+              <div id="accDeleteStatus" class="status" style="margin-top:8px"></div>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -492,6 +529,13 @@
             <div class="review-stat"><span id="statTotalCards" class="review-stat-num">0</span><span class="review-stat-label" data-i18n="review.stats.total_cards">Karten insgesamt</span></div>
           </div>
           <div id="reviewStageBar" class="review-stage-bar"></div>
+          <div class="row gap" style="margin-top:14px">
+            <button id="btnReviewManage" class="btn small" data-i18n="review.manage_button">Karten verwalten</button>
+          </div>
+          <div id="reviewCardsPanel" class="hidden" style="margin-top:12px">
+            <p class="hint" data-i18n="review.manage_hint">Hier kannst du versehentlich hinzugefügte Karten wieder aus dem Training entfernen. Die Karte selbst (WaniKani/eigene) bleibt erhalten.</p>
+            <div id="reviewCardsList" class="review-cards-list"></div>
+          </div>
         </div>
         <div id="reviewSession" class="hidden">
           <div id="reviewProgress" class="muted"></div>
@@ -506,11 +550,12 @@
               <div id="reviewFeedback" class="review-feedback"></div>
               <div id="reviewAccepted" class="review-accepted"></div>
               <div class="review-ratings row gap" style="margin-top:10px">
-                <button data-rating="again" class="btn rating-again" data-i18n="review.again">Nochmal</button>
-                <button data-rating="hard" class="btn rating-hard" data-i18n="review.hard">Schwer</button>
-                <button data-rating="good" class="btn rating-good" data-i18n="review.good">Gut</button>
-                <button data-rating="easy" class="btn rating-easy" data-i18n="review.easy">Leicht</button>
+                <button data-rating="again" class="btn rating-again"><kbd>1</kbd> <span data-i18n="review.again">Nochmal</span></button>
+                <button data-rating="hard" class="btn rating-hard"><kbd>2</kbd> <span data-i18n="review.hard">Schwer</span></button>
+                <button data-rating="good" class="btn rating-good"><kbd>3</kbd> <span data-i18n="review.good">Gut</span></button>
+                <button data-rating="easy" class="btn rating-easy"><kbd>4</kbd> <span data-i18n="review.easy">Leicht</span></button>
               </div>
+              <p class="hint muted" style="margin-top:8px" data-i18n="review.shortcut_hint">Tipp: Tasten 1–4 bewerten, Enter übernimmt den Vorschlag.</p>
             </div>
           </div>
         </div>
@@ -603,6 +648,9 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+  <!-- WanaKana: Romaji→Kana-Eingabe im Review-Screen (nur bei japanischen
+       Lesungen gebunden, siehe app.js showReviewCard). -->
+  <script src="/vendor/wanakana.min.js" defer></script>
   <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </body>

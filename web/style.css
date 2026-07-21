@@ -191,6 +191,8 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); border: 0; box-shadow: 0 6px 18px rgba(109,59,245,.28); }
 .btn.big { width: 100%; padding: 14px; font-size: 15.5px; margin-top: 4px; }
 .btn.small { padding: 8px 13px; font-size: 13px; }
+.btn.danger { border-color: rgba(220,38,38,.4); color: var(--err); }
+.btn.danger:hover { border-color: var(--err); background: rgba(220,38,38,.08); }
 .btn:disabled { opacity: .6; cursor: not-allowed; }
 
 .row { display: flex; align-items: center; }
@@ -453,3 +455,12 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .review-stage-bar .stage-learning { background: var(--warn); }
 .review-stage-bar .stage-review { background: var(--ok); }
 .review-stage-bar .stage-relearning { background: var(--err); }
+
+.review-cards-list { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; max-height: 320px; overflow-y: auto; }
+.review-card-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+.review-card-row:last-child { border-bottom: 0; }
+.review-card-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.review-card-front { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-card-meta { font-size: 12px; }
+
+.review-ratings kbd { display: inline-block; min-width: 16px; padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; font: 600 11px/1.4 ui-monospace, monospace; opacity: .75; }

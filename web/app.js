@@ -1599,6 +1599,7 @@ async function enterReviewMode() {
   $("#reviewIntro").classList.remove("hidden");
   $("#reviewSession").classList.add("hidden");
   $("#reviewDone").classList.add("hidden");
+  $("#reviewCardsPanel").classList.add("hidden");
   $("#reviewDueCount").textContent = data.due_total > 0
     ? `${data.due_total} ${t("review.due_suffix")}`
     : t("review.none_due");
@@ -1649,6 +1650,68 @@ async function loadReviewStats() {
   }
 }
 
+async function toggleReviewManage() {
+  const panel = $("#reviewCardsPanel");
+  if (panel.classList.contains("hidden")) {
+    panel.classList.remove("hidden");
+    await loadReviewCards();
+  } else {
+    panel.classList.add("hidden");
+  }
+}
+
+async function loadReviewCards() {
+  const list = $("#reviewCardsList");
+  list.innerHTML = `<div class="wl-row"><span class="muted">${escapeHtml(t("common.loading"))}</span></div>`;
+  let data;
+  try {
+    data = await api("/api/srs/cards");
+  } catch (e) {
+    list.innerHTML = `<div class="wl-row"><span class="status err">${escapeHtml(e.message)}</span></div>`;
+    return;
+  }
+  list.innerHTML = "";
+  if (!data.cards.length) {
+    list.innerHTML = `<div class="wl-row"><span class="muted">${escapeHtml(t("review.manage_empty"))}</span></div>`;
+    return;
+  }
+  for (const c of data.cards) {
+    const row = document.createElement("div");
+    row.className = "review-card-row";
+    const info = document.createElement("div");
+    info.className = "review-card-info";
+    const front = document.createElement("span");
+    front.className = "review-card-front";
+    front.textContent = c.front;
+    const meta = document.createElement("span");
+    meta.className = "review-card-meta muted";
+    const dueLabel = c.due_now ? t("review.manage_due") : t("review.manage_scheduled");
+    meta.textContent = `${dueLabel} · ${c.items} ${t("review.manage_directions")} · ${c.reps} ${t("review.manage_reps")}`;
+    info.append(front, meta);
+    const del = document.createElement("button");
+    del.className = "btn small danger";
+    del.textContent = t("review.manage_remove");
+    del.addEventListener("click", () => removeReviewCard(c.card_type, c.card_id));
+    row.append(info, del);
+    list.append(row);
+  }
+}
+
+async function removeReviewCard(cardType, cardId) {
+  if (!confirm(t("review.manage_remove_confirm"))) return;
+  try {
+    await api("/api/srs/remove", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_type: cardType, card_id: cardId }),
+    });
+    toast(t("review.manage_removed"));
+    await loadReviewCards();
+    // Zähler/Fällig-Anzeige aktualisieren.
+    await enterReviewMode();
+    $("#reviewCardsPanel").classList.remove("hidden");
+  } catch (e) { toast(e.message, true); }
+}
+
 function startReviewSession() {
   reviewIndex = 0;
   $("#reviewIntro").classList.add("hidden");
@@ -1683,12 +1746,33 @@ async function showReviewCard() {
     frontEl.textContent = item.front;
   }
 
-  $("#reviewInput").value = "";
+  const input = $("#reviewInput");
+  input.value = "";
+  applyKanaInput(item);
   $("#reviewInputWrap").classList.toggle("hidden", item.card_type === "custom");
   $("#btnReviewSubmit").textContent = t(item.card_type === "custom" ? "review.show_answer_button" : "review.submit_button");
   $("#reviewRevealWrap").classList.add("hidden");
   document.querySelectorAll(".review-ratings button").forEach((b) => b.classList.remove("suggested"));
-  if (item.card_type !== "custom") $("#reviewInput").focus();
+  if (item.card_type !== "custom") input.focus();
+}
+
+// WanaKana wandelt getippte Romaji live in Kana um - aber NUR bei japanischen
+// Lesungen sinnvoll. Bei Bedeutungen (englischer/deutscher Text) oder anderen
+// Zielsprachen muss die Bindung wieder gelöst werden, sonst würde die normale
+// Texteingabe ins Kana-Alphabet verfälscht. Da immer dasselbe #reviewInput
+// wiederverwendet wird, vor jeder Karte neu entscheiden.
+function applyKanaInput(item) {
+  const input = $("#reviewInput");
+  if (typeof wanakana === "undefined") return;  // Vendor-Skript nicht geladen
+  const activeLang = $("#activeTargetLangSelect").value || "ja";
+  const wantKana = activeLang === "ja" && item.item_type === "reading" && item.card_type !== "custom";
+  try {
+    if (wantKana) {
+      if (!input.dataset.kanaBound) { wanakana.bind(input); input.dataset.kanaBound = "1"; }
+    } else if (input.dataset.kanaBound) {
+      wanakana.unbind(input); delete input.dataset.kanaBound;
+    }
+  } catch (_) { /* WanaKana-Bindung ist optional, nie hart abbrechen */ }
 }
 
 function revealReview(correct, acceptedText) {
@@ -1948,6 +2032,32 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) { st.textContent = "Fehlgeschlagen: " + e.message; st.className = "status err"; }
   });
 
+  $("#accChangePw").addEventListener("click", async () => {
+    const st = $("#accPwStatus");
+    st.textContent = ""; st.className = "status";
+    try {
+      await api("/api/auth/change-password", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: $("#accCurrentPw").value, new_password: $("#accNewPw").value }),
+      });
+      $("#accCurrentPw").value = ""; $("#accNewPw").value = "";
+      toast("Passwort geändert");
+      st.textContent = t("settings.account.change_pw_ok"); st.className = "status ok";
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
+  });
+  $("#accDelete").addEventListener("click", async () => {
+    const st = $("#accDeleteStatus");
+    st.textContent = ""; st.className = "status";
+    if (!confirm(t("settings.account.delete_confirm"))) return;
+    try {
+      await api("/api/auth/account", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: $("#accDeletePw").value }),
+      });
+      location.reload();
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
+  });
+
   $("#btnLevel").addEventListener("click", async () => {
     const level = parseInt($("#level").value, 10);
     if (!isSample() && !(level >= 1 && level <= 60)) { showResolveError("Level 1–60 angeben."); return; }
@@ -2019,10 +2129,24 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#wlAddMeaning").addEventListener("keydown", (e) => { if (e.key === "Enter") addManualWortliste(); });
 
   $("#btnReviewStart").addEventListener("click", startReviewSession);
+  $("#btnReviewManage").addEventListener("click", toggleReviewManage);
   $("#btnReviewSubmit").addEventListener("click", onReviewSubmit);
   $("#reviewInput").addEventListener("keydown", (e) => { if (e.key === "Enter") onReviewSubmit(); });
   document.querySelectorAll(".review-ratings button").forEach((b) => {
     b.addEventListener("click", () => onReviewRate(b.dataset.rating));
+  });
+  // Tastatur-Shortcuts wie bei Anki: nach dem Aufdecken 1–4 = Nochmal/Schwer/
+  // Gut/Leicht, Enter übernimmt den vorgeschlagenen Wert. Nur aktiv, wenn der
+  // Review-Screen läuft UND die Antwort aufgedeckt ist - sonst würde das
+  // Tippen von Ziffern in andere Felder abgefangen.
+  const _ratingKeys = { "1": "again", "2": "hard", "3": "good", "4": "easy" };
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if ($("#modeReview").classList.contains("hidden")) return;
+    if ($("#reviewSession").classList.contains("hidden")) return;
+    if ($("#reviewRevealWrap").classList.contains("hidden")) return;
+    if (e.key in _ratingKeys) { e.preventDefault(); onReviewRate(_ratingKeys[e.key]); }
+    else if (e.key === "Enter" && reviewSuggestedRating) { e.preventDefault(); onReviewRate(reviewSuggestedRating); }
   });
 
   $("#checkAll").addEventListener("change", (e) => selectAll(e.target.checked));
