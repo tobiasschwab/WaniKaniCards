@@ -25,6 +25,7 @@ import pytest  # noqa: E402
 from flask_login import login_user  # noqa: E402
 
 import models  # noqa: E402
+import services  # noqa: E402
 import webapp  # noqa: E402
 from extensions import db  # noqa: E402
 
@@ -71,7 +72,7 @@ def _synchronous_enqueue(func, *args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _synchronous_render_queue(monkeypatch):
-    monkeypatch.setattr(webapp.render_queue, "enqueue", _synchronous_enqueue)
+    monkeypatch.setattr(services.render_queue, "enqueue", _synchronous_enqueue)
 
 
 @pytest.fixture(autouse=True)

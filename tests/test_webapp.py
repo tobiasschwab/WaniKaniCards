@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy.exc import IntegrityError
 
 import models  # noqa: E402
+import services  # noqa: E402
 import webapp  # noqa: E402
 from extensions import db  # noqa: E402
 
@@ -359,7 +360,7 @@ def test_get_or_create_language_secrets_survives_concurrent_insert_race(client, 
         return original_commit()
 
     monkeypatch.setattr(db.session, "commit", racy_commit)
-    row = webapp._get_or_create_language_secrets(client.test_user_id, "ja")
+    row = services._get_or_create_language_secrets(client.test_user_id, "ja")
     assert row is not None
     assert row.user_id == client.test_user_id
 
@@ -529,7 +530,7 @@ def test_api_create_kanacard_ai_stores_sentence_audio_url(client):
     })
     assert r.status_code == 200
     kid = r.get_json()["id"]
-    stored = webapp.read_kana_for_user(client.test_user_id, kid, "ja")
+    stored = services.read_kana_for_user(client.test_user_id, kid, "ja")
     assert stored["sentence_audio_url"] == "data:audio/wav;base64,AAAA"
 
 
@@ -544,7 +545,7 @@ def test_api_create_kanacard_persists_and_returns_descriptor(client, monkeypatch
     assert desc["meaning"] == "match; game"
     assert desc["kind"] == "Dict"
 
-    stored = webapp.read_kana_for_user(client.test_user_id, desc["id"], "ja")
+    stored = services.read_kana_for_user(client.test_user_id, desc["id"], "ja")
     assert stored["word"] == "しあい"
     assert stored["kanji_hint"] == "試合"
     assert stored["sentence_ja"] == "しあいがはじまりました。"
@@ -574,7 +575,7 @@ def test_api_kanacards_list_and_delete(client, monkeypatch):
 
     r = client.delete(f"/api/kanacards/{created['id']}")
     assert r.status_code == 200
-    assert webapp.read_kana_for_user(client.test_user_id, created["id"], "ja") is None
+    assert services.read_kana_for_user(client.test_user_id, created["id"], "ja") is None
 
     assert client.delete(f"/api/kanacards/{created['id']}").status_code == 404
 
@@ -696,7 +697,7 @@ def test_api_customcard_isolated_between_users(client, db_session):
 def test_api_wortliste_combines_wanikani_dictionary_and_manual(client):
     db.session.add(models.Job(id="a", user_id=client.test_user_id, status="done", params={"subject_ids": [2467]}))
     db.session.commit()
-    webapp.write_kana(
+    services.write_kana(
         {"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"]},
         user_id=client.test_user_id,
     )
@@ -726,7 +727,7 @@ def test_api_wortliste_combines_wanikani_dictionary_and_manual(client):
 
 
 def test_api_wortliste_ai_sourced_entry_shows_ki_kind_and_sentence_context(client):
-    webapp.write_kana(
+    services.write_kana(
         {
             "id": "aikana_x", "word": "入る", "reading": "はいる", "meaning": "hineingehen",
             "source": "ai", "tags": ["KI"], "sentence_ja": "高校に入りました。",
@@ -783,10 +784,10 @@ def test_api_wortliste_manually_known_wanikani_word_is_removable(client):
 
 def test_build_mixed_deck_combines_all_three_sources(logged_in_user):
     uid = logged_in_user.id
-    webapp.write_custom({"id": "free1", "front_html": "<b>x</b>", "back_html": "y", "tags": []}, user_id=uid)
-    webapp.write_kana({"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"]}, user_id=uid)
+    services.write_custom({"id": "free1", "front_html": "<b>x</b>", "back_html": "y", "tags": []}, user_id=uid)
+    services.write_kana({"id": "kana_x", "word": "しあい", "meaning": "match", "tags": ["Dictionary"]}, user_id=uid)
 
-    deck = webapp._build_mixed_deck(
+    deck = services._build_mixed_deck(
         {
             "subject_ids": [2467],  # 一 (Sample-Daten)
             "custom_ids": ["free1"],
@@ -801,16 +802,16 @@ def test_build_mixed_deck_combines_all_three_sources(logged_in_user):
 
 
 def test_build_mixed_deck_empty_params_returns_empty_deck(logged_in_user):
-    assert webapp._build_mixed_deck({}, logged_in_user.id) == []
+    assert services._build_mixed_deck({}, logged_in_user.id) == []
 
 
 def test_build_mixed_deck_skips_missing_custom_or_kana_ids(logged_in_user):
-    deck = webapp._build_mixed_deck({"custom_ids": ["missing"], "kana_ids": ["missing"]}, logged_in_user.id)
+    deck = services._build_mixed_deck({"custom_ids": ["missing"], "kana_ids": ["missing"]}, logged_in_user.id)
     assert deck == []
 
 
 def test_build_mixed_deck_applies_field_overrides(logged_in_user):
-    deck = webapp._build_mixed_deck(
+    deck = services._build_mixed_deck(
         {
             "subject_ids": [2467],  # 一 (Vokabel, Sample-Daten)
             "sample": True,
@@ -829,9 +830,9 @@ def test_build_mixed_deck_only_sees_own_custom_and_kana_cards(client, db_session
     other.set_password("x")
     db.session.add(other)
     db.session.commit()
-    webapp.write_custom({"id": "theirs", "front_html": "x", "back_html": "y", "tags": []}, user_id=other.id)
+    services.write_custom({"id": "theirs", "front_html": "x", "back_html": "y", "tags": []}, user_id=other.id)
 
-    deck = webapp._build_mixed_deck({"custom_ids": ["theirs"]}, client.test_user_id)
+    deck = services._build_mixed_deck({"custom_ids": ["theirs"]}, client.test_user_id)
     assert deck == []
 
 
@@ -849,7 +850,7 @@ def test_api_render_stores_field_overrides_in_job_params(client):
     )
     assert r.status_code == 202
     job_id = r.get_json()["id"]
-    job = webapp.read_job(job_id)
+    job = services.read_job(job_id)
     assert job["params"]["field_overrides"] == {"2467": {"meanings": ["Eigene Bedeutung"]}}
     assert job["user_id"] == client.test_user_id
 
@@ -859,7 +860,7 @@ def test_api_render_rejects_foreign_custom_id(client, db_session):
     other.set_password("x")
     db.session.add(other)
     db.session.commit()
-    webapp.write_custom({"id": "theirs", "front_html": "x", "back_html": "y", "tags": []}, user_id=other.id)
+    services.write_custom({"id": "theirs", "front_html": "x", "back_html": "y", "tags": []}, user_id=other.id)
 
     r = client.post("/api/render", json={"custom_ids": ["theirs"], "sample": True, "format": "pdf"})
     assert r.status_code == 404
@@ -871,7 +872,7 @@ def test_api_render_rejects_foreign_kana_id(client, db_session):
     other.set_password("x")
     db.session.add(other)
     db.session.commit()
-    webapp.write_kana({"id": "kana_theirs", "word": "x", "meaning": "y", "tags": []}, user_id=other.id)
+    services.write_kana({"id": "kana_theirs", "word": "x", "meaning": "y", "tags": []}, user_id=other.id)
 
     r = client.post("/api/render", json={"kana_ids": ["kana_theirs"], "sample": True, "format": "pdf"})
     assert r.status_code == 404
@@ -1175,7 +1176,7 @@ def test_api_create_kanacard_uses_gemini_fallback_for_non_japanese(client, monke
     assert desc["meaning"] == "house"
     assert desc["kind"] == "KI"
 
-    stored = webapp.read_kana_for_user(client.test_user_id, desc["id"], "es")
+    stored = services.read_kana_for_user(client.test_user_id, desc["id"], "es")
     assert stored["word"] == "casa"
     assert stored["source"] == "ai"
 

@@ -657,6 +657,28 @@ Spalten nicht auch böten.
 - `auth.py`: `POST /api/auth/signup`, `/login`, `/logout`, `GET /api/auth/me`
   – E-Mail/Passwort-Auth über `Flask-Login`-Sessions, Passwort-Hashing über
   `werkzeug.security` (kein zusätzlicher Auth-Dienst nötig).
+- **`webapp.py` in Blueprints aufgeteilt** (P2-Refactor: war auf ~2300 Zeilen
+  mit 10+ fachlichen Bereichen zu einem wachsenden „God File" geworden):
+  - `services.py`: geteilte Storage-/Domänen-Helfer OHNE eigene Flask-Routen
+    (Settings, Jobs, eigene/Dictionary-Karten, Render-Worker inkl.
+    `_build_mixed_deck`/`_run_render`) – von `webapp.py` UND den drei
+    Blueprints unten importiert (eine Richtung, kein Zirkelimport).
+  - `srs_api.py`: die SRS-Endpunkte (`/api/srs/add`/`queue`/`check`/`answer`/
+    `stats`), analog zu `auth.py` als eigener Blueprint. NICHT zu verwechseln
+    mit `srs.py` (dem FSRS-Scheduling-Wrapper, siehe unten) – ähnlicher Name,
+    andere Verantwortung.
+  - `cards_api.py`: CRUD für eigene Karten (`/api/customcards`) und
+    Dictionary-/KI-Karten (`/api/kanacards`).
+  - `jobs_api.py`: Rendern (`/api/render`) + Job-Verlauf (`/api/jobs/*`).
+  - Der RQ-Worker-Prozess (`rq worker renders`) importiert dadurch nur noch
+    `services.py`, nicht mehr das komplette `webapp.py` – `services._run_render`
+    importiert `webapp.app` bewusst ERST zur Laufzeit (innerhalb der Funktion),
+    da `webapp.py` beim Modulstart die drei Blueprints importiert und ein
+    Import von `webapp.py` auf Modulebene in `services.py` sonst ein
+    Zirkelimport wäre.
+  - `webapp.py` selbst enthält nur noch App-Setup, Auth-Verdrahtung und die
+    verbleibenden „Kern"-Endpunkte (Einstellungen, Sprachen, Auflisten/
+    Resolve, Text-Modus, Wortliste, Frontend-Auslieferung).
 - `crypto.py`: Fernet-Verschlüsselung für ruhende Secrets (WaniKani-Token,
   DeepL-/Gemini-Key) – im bisherigen Single-Tenant-Betrieb lagen diese im
   Klartext (akzeptabel, nur der Betreiber selbst betroffen); bei einer
@@ -828,6 +850,36 @@ rq worker renders --url redis://localhost:6379/0
 
 Mit Docker startet `docker compose up` automatisch einen `redis`- und einen
 `worker`-Service mit (siehe `docker-compose.yml`).
+
+### Migrationsdisziplin ab Produktivbetrieb
+
+Alle bisherigen Migrationen (`0983277a4bb3` … `0839f2a16194`) begründen ihr
+Vorgehen mit „kein Projekt mit Produktivdaten bislang, kein Backfill nötig".
+Das gilt nur bis zum ersten echten Nutzer – ab dann gelten für neue
+Migrationen andere Regeln:
+
+- **Additiv statt destruktiv**: neue Spalten `nullable=True` (oder mit
+  serverseitigem `default`) anlegen, NIE direkt `NOT NULL` ohne Default auf
+  eine Tabelle mit bestehenden Zeilen – das schlägt in Postgres sofort fehl
+  bzw. würde in SQLite alle Zeilen mit `NULL` befüllen.
+- **Backfill als eigener Schritt**: ein `NOT NULL`-Constraint erst NACH einem
+  Backfill (`op.execute("UPDATE … SET spalte = default WHERE spalte IS
+  NULL")`) in einer zweiten `alembic`-Revision ergänzen, nicht in derselben
+  Migration wie das Anlegen der Spalte – sonst gibt es kein sauberes
+  Zwischen-Deployment, in dem alter und neuer Code parallel laufen können
+  (Rolling-Deployment/Zero-Downtime).
+- **Kein Datenverlust durch Spalten-/Tabellen-Löschung** ohne vorherige
+  Rücksprache – vor dem Entfernen einer Spalte/Tabelle in `downgrade()`
+  *und* `upgrade()` prüfen, ob noch produktive Daten darin stehen, und im
+  Zweifel erst in einer separaten Migration deprecaten (Spalte behalten,
+  aber nicht mehr befüllen) statt sofort zu löschen.
+- **Migrationen lokal gegen eine Kopie der Produktions-Struktur testen**
+  (`alembic upgrade head` auf einer frischen SQLite-/Postgres-DB mit
+  Beispieldaten), bevor sie deployed werden – die Tests in `tests/` decken
+  nur das ORM-Modell ab, nicht den Migrationspfad selbst.
+- **Ein Rollback-Pfad pro Migration**: `downgrade()` muss tatsächlich
+  funktionieren (nicht nur `pass`), sobald die Migration produktive Daten
+  betrifft – vorher genügte das, weil es ohnehin nichts zurückzurollen gab.
 
 ## Multi-Language-Architektur
 
