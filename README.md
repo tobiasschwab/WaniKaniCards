@@ -602,6 +602,24 @@ docker compose up --build      # baut das Image, startet zusätzlich einen Postg
 # → Frontend auf http://localhost:9020
 ```
 
+**Kein Python 3 auf dem Host?** (z. B. QNAP/Synology-NAS mit nur Python 2):
+Ein Fernet-Master-Key ist einfach 32 Zufallsbytes, URL-safe base64-kodiert –
+beide Befehle erzeugen einen gleichwertigen, gültigen Key ganz ohne Python 3:
+
+```bash
+# Variante A: openssl (auf praktisch jedem NAS vorhanden)
+export WKCARDS_SECRET_KEY=$(openssl rand -base64 32 | tr '+/' '-_')
+# Variante B: auch mit Python 2.7 lauffähig
+export WKCARDS_SECRET_KEY=$(python -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)))")
+
+# Session-Secret (beliebiger langer Zufalls-Hex-String):
+export WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)
+```
+
+`crypto.py` direkt auszuführen braucht dagegen zwingend Python 3 + das
+`cryptography`-Paket (im Docker-Image beides enthalten) – unter Python 2
+scheitert schon der Import an der Syntax.
+
 Der Host-Ordner `./data` ist als Volume eingehängt (`./data:/data`), sodass
 PDFs/APKGs und API-Caches einen Neustart überdauern; Accounts/Einstellungen
 liegen im `db`-Postgres-Service (eigenes Volume). Im Browser zunächst ein

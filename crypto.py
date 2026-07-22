@@ -60,5 +60,12 @@ def decrypt_secret(ciphertext: str | None) -> str | None:
 def generate_master_key() -> str:
     """Hilfsfunktion für Setup/CLI: einen neuen Master-Key erzeugen (einmalig,
     dann als WKCARDS_SECRET_KEY hinterlegen – ein Rotieren macht alle
-    bestehenden verschlüsselten Secrets unlesbar, siehe `decrypt_secret()`)."""
+    bestehenden verschlüsselten Secrets unlesbar, siehe `decrypt_secret()`).
+
+    Braucht Python 3 + `cryptography`. Auf Hosts ohne Python 3 (z. B. NAS mit
+    nur Python 2) einen gleichwertigen Key ohne dieses Modul erzeugen – ein
+    Fernet-Key ist schlicht 32 Zufallsbytes, URL-safe base64-kodiert:
+
+        openssl rand -base64 32 | tr '+/' '-_'
+    """
     return Fernet.generate_key().decode("ascii")
