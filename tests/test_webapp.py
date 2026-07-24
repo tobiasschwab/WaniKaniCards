@@ -3,6 +3,8 @@
 `logged_in_user`-Fixtures kommen aus conftest.py."""
 from __future__ import annotations
 
+import json
+import logging
 import sys
 from pathlib import Path
 
@@ -68,6 +70,59 @@ def test_mark_exported_empty_history_leaves_everything_unmarked(logged_in_user):
     cards = [{"id": 1}, {"id": 2}]
     marked = webapp._mark_exported(cards)
     assert [c["already_exported"] for c in marked] == [False, False]
+
+
+# --------------------------------------------------------------------------- #
+# Strukturierte JSON-Logs (structlog) mit user_id-Kontext
+# --------------------------------------------------------------------------- #
+
+def _make_log_record(msg: str) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="shiori.test_logging", level=logging.INFO, pathname=__file__,
+        lineno=1, msg=msg, args=(), exc_info=None,
+    )
+
+
+def test_json_log_formatter_produces_expected_fields():
+    formatted = webapp._json_handler.format(_make_log_record("marker-plain"))
+    record = json.loads(formatted)
+    assert record["event"] == "marker-plain"
+    assert record["logger"] == "shiori.test_logging"
+    assert record["level"] == "info"
+    assert "timestamp" in record
+
+
+def test_json_log_formatter_includes_bound_user_id(logged_in_user):
+    import structlog
+
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(user_id=logged_in_user.id)
+    try:
+        formatted = webapp._json_handler.format(_make_log_record("marker-mit-user"))
+    finally:
+        structlog.contextvars.clear_contextvars()
+    record = json.loads(formatted)
+    assert record["user_id"] == logged_in_user.id
+
+
+def test_json_log_formatter_omits_user_id_without_bound_context():
+    import structlog
+
+    structlog.contextvars.clear_contextvars()
+    formatted = webapp._json_handler.format(_make_log_record("marker-ohne-user"))
+    record = json.loads(formatted)
+    assert "user_id" not in record
+
+
+def test_bind_request_log_context_sets_user_id_for_authenticated_user(client):
+    import structlog
+
+    with webapp.app.test_request_context():
+        from flask_login import login_user
+        user = db.session.get(models.User, client.test_user_id)
+        login_user(user)
+        webapp._bind_request_log_context()
+        assert structlog.contextvars.get_contextvars()["user_id"] == client.test_user_id
 
 
 # --------------------------------------------------------------------------- #

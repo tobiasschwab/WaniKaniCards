@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 import sentry_sdk
+import structlog
 from flasgger import Swagger
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from flask_login import current_user, login_required
@@ -79,37 +80,62 @@ from .services import (
     TARGET_LANGS as _TARGET_LANGS,
 )
 
-
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
 # im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
 # gunicorn/Flask fangen stdout ab, das reicht für `docker logs`.
 #
+# Strukturierte JSON-Logs statt Freitext: einfacher maschinell auswertbar
+# (z. B. in einem Log-Aggregator wie Loki/CloudWatch nach `user_id`/`logger`
+# filtern), ohne dass jede Log-Zeile im Code selbst JSON bauen müsste - alle
+# bestehenden `logging.getLogger(__name__).info(...)`-Aufrufe im ganzen
+# Projekt bleiben unverändert, `structlog.stdlib.ProcessorFormatter` rendert
+# sie am Ende der Verarbeitungskette als JSON.
+#
 # Jeder Log-Eintrag bekommt zusätzlich den eingeloggten Nutzer angehängt
 # (Multi-User-Betrieb: "wessen Request hat das ausgelöst" ist sonst aus den
-# Logs allein nicht ersichtlich) - "-" außerhalb eines Requests (z. B. im
-# RQ-Worker-Prozess, der Jobs verarbeitet).
-class _UserIdLogFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            from flask import has_request_context
-            record.user_id = current_user.id if (has_request_context() and current_user.is_authenticated) else "-"
-        except Exception:  # noqa: BLE001 - Logging darf nie selbst crashen
-            record.user_id = "-"
-        return True
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s [user=%(user_id)s]: %(message)s",
+# Logs allein nicht ersichtlich) - über `structlog.contextvars` statt eines
+# eigenen `logging.Filter` (siehe `_bind_request_log_context()` unten): ohne
+# gebundenen Kontext (z. B. im RQ-Worker-Prozess, der Jobs verarbeitet) fehlt
+# das Feld `user_id` im JSON schlicht, statt eines Platzhalters.
+# Diese Vorverarbeitungs-Schritte laufen für BEIDE Log-Quellen: echte
+# structlog-Logger UND die ganz normalen `logging.getLogger(...)`-Aufrufe im
+# Rest des Projekts (die als "foreign_pre_chain" unten eingehängt werden) -
+# nur die eigentliche Ziel-Formatierung (JSON) unterscheidet sich danach.
+_shared_log_processors: list[structlog.typing.Processor] = [
+    structlog.contextvars.merge_contextvars,
+    structlog.stdlib.add_logger_name,
+    structlog.stdlib.add_log_level,
+    structlog.processors.TimeStamper(fmt="iso"),
+    structlog.processors.StackInfoRenderer(),
+]
+structlog.configure(
+    processors=[*_shared_log_processors, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
 )
-# Als Filter auf dem Root-Handler (nicht auf dem Root-Logger!) registrieren:
-# Logger-Filter laufen nur für Records, die auf GENAU diesem Logger erzeugt
-# wurden, nicht für Records, die von Kind-Loggern (z. B. "werkzeug",
-# "gunicorn.error") zum Root propagiert werden – die würden sonst ohne
-# `user_id`-Attribut beim Root-Handler landen und die Format-String-
-# Auswertung mit ValueError crashen.
-for _h in logging.getLogger().handlers:
-    _h.addFilter(_UserIdLogFilter())
+_json_handler = logging.StreamHandler()
+_json_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
+    foreign_pre_chain=_shared_log_processors,
+    processors=[
+        structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+        structlog.processors.format_exc_info,
+        structlog.processors.JSONRenderer(),
+    ],
+))
+_root_logger = logging.getLogger()
+_root_logger.handlers = [_json_handler]
+_root_logger.setLevel(logging.INFO)
+
+
+def _bind_request_log_context() -> None:
+    """Vor jedem Request aufgerufen (siehe `app.before_request()` unten):
+    hängt `user_id` an ALLE Log-Zeilen an, die während dieses Requests auf
+    diesem Thread erzeugt werden (auch in aufgerufenen Modulen wie
+    `services.py`, die selbst nichts von Flask wissen müssen)."""
+    structlog.contextvars.clear_contextvars()
+    if current_user.is_authenticated:
+        structlog.contextvars.bind_contextvars(user_id=current_user.id)
 
 # Repo-Root (eine Ebene über dem `shiori`-Package) - web/, vendor/ (und die
 # anderen Nicht-Python-Assets: templates/, fonts/, migrations/) liegen bewusst
@@ -147,6 +173,7 @@ if _sentry_dsn:
     )
 
 app = Flask(__name__, static_folder=None)
+app.before_request(_bind_request_log_context)
 
 # 20 MB reicht für die allermeisten gescannten Lesehefte/Fotos bequem, ohne
 # dass ein versehentlich falscher Upload (Video, riesiger Bildband) den

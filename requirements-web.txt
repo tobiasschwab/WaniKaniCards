@@ -29,3 +29,6 @@ sentry-sdk[flask]>=2.0
 # Request-Body-Validierung für die sicherheitskritischen Endpunkte
 # (Auth, SRS, Settings), siehe schemas.py.
 pydantic>=2.0
+
+# Strukturierte JSON-Logs statt Freitext (siehe webapp.py Logging-Setup).
+structlog>=24.0

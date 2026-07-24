@@ -902,17 +902,19 @@ Betrieb & Recht), umgesetzt:**
   bereits pro Token/Nutzer gilt) ist die Render-Worker-Kapazität geteilte
   Infrastruktur – ein einzelner Nutzer soll sie nicht durch beliebig viele
   parallele Jobs blockieren können.
-- **Strukturiertes Logging mit `user_id`-Kontext**: jede Log-Zeile bekommt
-  automatisch den eingeloggten Nutzer angehängt
-  (`%(asctime)s %(levelname)s %(name)s [user=%(user_id)s]: %(message)s`),
-  über einen `logging.Filter`, der auf den **Root-Handler** registriert ist
-  (nicht auf den Root-Logger selbst – Logger-Filter greifen nur für Records,
-  die direkt auf diesem Logger erzeugt wurden, nicht für Records, die von
-  Kind-Loggern wie `werkzeug`/`gunicorn.error` dorthin propagiert werden;
-  ein Filter auf dem Root-*Logger* hätte solche Records ohne `user_id`
-  durchgelassen und beim Formatieren mit `ValueError` gecrasht – live
-  nachgestellt und gefixt). Außerhalb eines Requests (z. B. im RQ-Worker-
-  Prozess) steht `user_id` auf `"-"`.
+- **Strukturierte JSON-Logs mit `user_id`-Kontext ([structlog](https://www.structlog.org/))**:
+  jede Log-Zeile landet als ein JSON-Objekt auf stdout
+  (`{"event": "...", "logger": "...", "level": "info", "timestamp": "...", "user_id": 42}`)
+  statt als Freitext – maschinell auswertbar in einem Log-Aggregator
+  (Loki/CloudWatch/…). Alle bestehenden `logging.getLogger(__name__).info(...)`-
+  Aufrufe im ganzen Projekt bleiben unverändert; `structlog.stdlib.ProcessorFormatter`
+  rendert sie über eine `foreign_pre_chain` als JSON (siehe `webapp.py`
+  Logging-Setup). `user_id` wird über `structlog.contextvars` statt eines
+  eigenen `logging.Filter` angehängt: `app.before_request()` bindet ihn pro
+  Request in einen Kontext, der automatisch in JEDE Log-Zeile dieses Threads
+  einfließt – auch in aufgerufenen Modulen (`services.py` etc.), die selbst
+  nichts von Flask wissen müssen. Ohne gebundenen Kontext (z. B. im RQ-
+  Worker-Prozess) fehlt das Feld `user_id` schlicht, statt eines Platzhalters.
 - **Aufräum-Job für alten Job-Verlauf (`cleanup_worker.py`)**: ein eigener
   Prozess/Container (analog zum RQ-Worker), der periodisch `Job`-Zeilen ALLER
   Nutzer löscht, deren `finished_at` (bzw. `created_at`, falls nie fertig
