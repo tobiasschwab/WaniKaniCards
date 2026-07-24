@@ -71,8 +71,10 @@ def test_known_word_unique_per_user(db_session):
 
 
 def test_known_word_same_word_id_allowed_for_different_users(db_session):
-    u1 = User(email="d1@example.com"); u1.set_password("x")
-    u2 = User(email="d2@example.com"); u2.set_password("x")
+    u1 = User(email="d1@example.com")
+    u1.set_password("x")
+    u2 = User(email="d2@example.com")
+    u2.set_password("x")
     db_session.session.add_all([u1, u2])
     db_session.session.flush()
 
@@ -84,7 +86,8 @@ def test_known_word_same_word_id_allowed_for_different_users(db_session):
 
 
 def test_custom_card_gets_generated_id(db_session):
-    user = User(email="e@example.com"); user.set_password("x")
+    user = User(email="e@example.com")
+    user.set_password("x")
     db_session.session.add(user)
     db_session.session.flush()
 
@@ -99,7 +102,8 @@ def test_custom_card_gets_generated_id(db_session):
 def test_kana_card_requires_explicit_id(db_session):
     """KanaCard nutzt KEIN default=_new_id - die ID ist ein stabiler Hash des
     Worts (kc.kana_card_id()), damit derselbe Text-Fund dieselbe Karte trifft."""
-    user = User(email="f@example.com"); user.set_password("x")
+    user = User(email="f@example.com")
+    user.set_password("x")
     db_session.session.add(user)
     db_session.session.flush()
 
@@ -114,8 +118,10 @@ def test_kana_card_same_id_allowed_for_different_users(db_session):
     """Zusammengesetzter Primärschlüssel (user_id, id): zwei Nutzer, die
     dasselbe Wort als Karte anlegen, bekommen je eine eigene Zeile statt
     sich gegenseitig zu überschreiben (siehe KanaCard-Docstring)."""
-    u1 = User(email="k1@example.com"); u1.set_password("x")
-    u2 = User(email="k2@example.com"); u2.set_password("x")
+    u1 = User(email="k1@example.com")
+    u1.set_password("x")
+    u2 = User(email="k2@example.com")
+    u2.set_password("x")
     db_session.session.add_all([u1, u2])
     db_session.session.flush()
 
@@ -128,7 +134,8 @@ def test_kana_card_same_id_allowed_for_different_users(db_session):
 
 
 def test_job_stores_params_as_json(db_session):
-    user = User(email="g@example.com"); user.set_password("x")
+    user = User(email="g@example.com")
+    user.set_password("x")
     db_session.session.add(user)
     db_session.session.flush()
 
@@ -147,7 +154,8 @@ def test_review_state_composite_pk_allows_two_item_types_per_card(db_session):
     können, ohne sich zu überschreiben."""
     from shiori import srs
 
-    user = User(email="h@example.com"); user.set_password("x")
+    user = User(email="h@example.com")
+    user.set_password("x")
     db_session.session.add(user)
     db_session.session.flush()
 
@@ -173,7 +181,8 @@ def test_review_state_isolated_by_target_lang(db_session):
     braucht getrennte Lernstände."""
     from shiori import srs
 
-    user = User(email="i@example.com"); user.set_password("x")
+    user = User(email="i@example.com")
+    user.set_password("x")
     db_session.session.add(user)
     db_session.session.flush()
 

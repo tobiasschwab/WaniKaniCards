@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 # Anzeigenamen der Sprache in verschiedenen Muttersprachen - ergänzt bei
 # Bedarf; fällt für unbekannte Kombinationen auf den ISO-Code selbst zurück
 # (siehe LanguagePack.display_name()).

@@ -45,13 +45,8 @@ from flask import Flask, abort, g, jsonify, request, send_from_directory
 from flask_login import current_user, login_required
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import cards_api
-from . import jobs_api
+from . import cards_api, crypto, jobs_api, models, pdf_import, srs_api
 from . import kanji_cards as kc
-from . import crypto
-from . import models
-from . import pdf_import
-from . import srs_api
 from .auth import bp as auth_bp
 from .extensions import db, limiter, login_manager
 from .languages.registry import SUPPORTED_TARGET_LANGS, get_pack
@@ -77,8 +72,11 @@ from .services import (
     save_subject_override,
     set_active_language,
     srs_progress,
+)
+from .services import (
     TARGET_LANGS as _TARGET_LANGS,
 )
+
 
 # INFO-Logs (u. a. Gemini-Requests: Start, Dauer, Fehlerursache) landen sonst
 # im Nirwana, weil Python ohne explizite Konfiguration nur WARNING+ ausgibt –
@@ -212,7 +210,7 @@ def _security_headers(response: Any) -> Any:
 
 
 @login_manager.user_loader
-def _load_user(user_id: str) -> "models.User | None":
+def _load_user(user_id: str) -> models.User | None:
     return db.session.get(models.User, int(user_id))
 
 

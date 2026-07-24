@@ -8,8 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from shiori import gemini_client
-from shiori import pdf_import
+from shiori import gemini_client, pdf_import
 
 
 def _make_pdf_with_text(text: str) -> bytes:

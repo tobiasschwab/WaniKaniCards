@@ -8,13 +8,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import UTC
+
 from sqlalchemy.exc import IntegrityError
 
-from shiori import models  # noqa: E402
-from shiori import services  # noqa: E402
-from shiori import webapp  # noqa: E402
+from shiori import (
+    models,  # noqa: E402
+    services,  # noqa: E402
+    webapp,  # noqa: E402
+)
 from shiori.extensions import db  # noqa: E402
-
 
 # --------------------------------------------------------------------------- #
 # _already_exported_ids / _mark_exported (current_user-Scoping)
@@ -1145,7 +1148,7 @@ def test_api_languages_returns_japanese_capabilities_by_default(client):
     assert caps["reading_labels"] == ["Onyomi", "Kunyomi"]
     assert caps["has_furigana"] is True
     assert caps["has_offline_tokenizer"] is True
-    codes = {l["code"] for l in data["supported_target_langs"]}
+    codes = {lang["code"] for lang in data["supported_target_langs"]}
     assert {"ja", "en", "es"}.issubset(codes)
 
 
@@ -1365,7 +1368,8 @@ def test_api_srs_add_custom_card_creates_front_row(client):
 
 
 def test_api_srs_add_custom_card_rejects_foreign_ownership(client, db_session):
-    other = models.User(email="srsother@example.com"); other.set_password("x")
+    other = models.User(email="srsother@example.com")
+    other.set_password("x")
     db.session.add(other)
     db.session.commit()
     db.session.add(models.CustomCard(id="foreign1", user_id=other.id, front_html="x", back_html="y"))
@@ -1420,11 +1424,11 @@ def test_api_srs_queue_isolated_between_target_languages(client):
 
 
 def test_api_srs_queue_excludes_not_yet_due_cards(client, db_session):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
     rows = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id="440").all()
     for row in rows:
-        row.due_at = datetime.now(timezone.utc) + timedelta(days=5)
+        row.due_at = datetime.now(UTC) + timedelta(days=5)
     db_session.session.commit()
 
     r = client.get("/api/srs/queue")
@@ -1605,7 +1609,7 @@ def test_api_srs_answer_second_review_is_not_new(client):
     client.post("/api/srs/answer", json=body)  # zweite -> was_new False
 
     logs = models.ReviewLog.query.filter_by(user_id=client.test_user_id).order_by(models.ReviewLog.id).all()
-    assert [l.was_new for l in logs] == [True, False]
+    assert [log.was_new for log in logs] == [True, False]
 
 
 def test_api_srs_queue_respects_new_per_day_limit(client):
@@ -1733,6 +1737,7 @@ def test_api_srs_stats_isolated_between_target_languages(client):
 
 def test_compute_streak_counts_consecutive_days_ending_today():
     from datetime import date
+
     from shiori import srs_api
     today = date(2026, 7, 21)
     days = {"2026-07-21", "2026-07-20", "2026-07-19", "2026-07-16"}  # Lücke am 17./18.
@@ -1743,6 +1748,7 @@ def test_compute_streak_not_broken_by_missing_today():
     """Heute (noch) nichts gelernt bricht den Streak nicht - der Tag ist noch
     nicht vorbei (Duolingo-/WaniKani-Semantik)."""
     from datetime import date
+
     from shiori import srs_api
     today = date(2026, 7, 21)
     days = {"2026-07-20", "2026-07-19"}
@@ -1751,6 +1757,7 @@ def test_compute_streak_not_broken_by_missing_today():
 
 def test_compute_streak_zero_after_full_missed_day():
     from datetime import date
+
     from shiori import srs_api
     today = date(2026, 7, 21)
     days = {"2026-07-18", "2026-07-17"}  # vorgestern zuletzt gelernt
@@ -1758,25 +1765,25 @@ def test_compute_streak_zero_after_full_missed_day():
 
 
 def test_api_srs_stats_includes_streak_and_activity(client):
-    from datetime import datetime, timezone
+    from datetime import datetime
     client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
     client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good"})
 
     data = client.get("/api/srs/stats").get_json()
     assert data["streak_days"] == 1
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     assert data["activity"] == {today: 1}
 
 
 def test_api_srs_stats_streak_spans_yesterday(client, db_session):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     client.post("/api/srs/add", json={"subject_ids": [440], "sample": True})
     client.post("/api/srs/answer", json={"card_type": "wanikani", "card_id": "440", "item_type": "meaning", "rating": "good"})
     # Einen Log-Eintrag künstlich auf gestern zurückdatieren.
     log = models.ReviewLog(
         user_id=client.test_user_id, target_lang="ja", card_type="wanikani",
         card_id="440", item_type="reading", rating="good", was_new=True,
-        reviewed_at=datetime.now(timezone.utc) - timedelta(days=1),
+        reviewed_at=datetime.now(UTC) - timedelta(days=1),
     )
     db.session.add(log)
     db.session.commit()

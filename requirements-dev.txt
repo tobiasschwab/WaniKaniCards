@@ -1,0 +1,6 @@
+# Nur für lokale Entwicklung/CI nötig, nicht im Docker-Image (siehe Dockerfile).
+pytest>=8.0
+pytest-cov>=5.0
+ruff>=0.16
+mypy>=1.13
+pre-commit>=3.8

@@ -11,7 +11,6 @@ import pytest
 
 from shiori import storage
 
-
 # --------------------------------------------------------------------------- #
 # Lokaler Disk-Speicher (Default, kein S3_BUCKET gesetzt)
 # --------------------------------------------------------------------------- #

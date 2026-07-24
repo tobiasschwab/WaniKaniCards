@@ -8,49 +8,47 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from shiori import dictionary as dic
+from shiori import gemini_client
 from shiori.kanji_cards import (  # noqa: E402
     LAYOUTS,
     Card,
     CoverCard,
     CustomCard,
+    KanaCard,
     RadicalCard,
     VocabCard,
     WaniKaniClient,
-    build_card,
-    build_custom_card,
-    build_cover,
-    build_cover_radicals,
-    build_radical_card,
-    build_vocab_card,
-    build_kana_card,
-    build_generic_dictionary_card,
-    build_kana_card_from_dict,
-    build_ai_kana_card,
-    KanaCard,
-    collect_composition,
-    mirror_backside,
-    paginate,
     WaniKaniError,
-    pick_example_vocab,
-    resolve_composition,
-    resolve_subject_ids,
-    resolve_level,
-    annotate_text,
-    annotate_text_ai,
-    strip_markup,
-    lemmatize_text,
-    kana_card_id,
-    ai_kana_card_id,
+    _is_kana_only,
+    _load_sample_raw,
+    _reconcile_gemini_tokens,
     _resolve_audio_url,
     _split_sentences,
-    _is_kana_only,
-    _reconcile_gemini_tokens,
-    _load_sample_raw,
+    ai_kana_card_id,
+    annotate_text,
+    annotate_text_ai,
+    build_ai_kana_card,
+    build_card,
+    build_cover,
+    build_cover_radicals,
+    build_custom_card,
+    build_generic_dictionary_card,
+    build_kana_card,
+    build_kana_card_from_dict,
+    build_radical_card,
+    build_vocab_card,
+    collect_composition,
+    kana_card_id,
+    lemmatize_text,
+    mirror_backside,
+    paginate,
+    pick_example_vocab,
+    resolve_composition,
+    resolve_level,
+    resolve_subject_ids,
+    strip_markup,
 )
-
-from shiori import dictionary as dic
-from shiori import gemini_client
-
 
 # --------------------------------------------------------------------------- #
 # strip_markup
@@ -646,7 +644,7 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, response: "_FakeResponse"):
+    def __init__(self, response: _FakeResponse):
         self.response = response
         self.calls: list[str] = []
 
@@ -720,7 +718,7 @@ def test_annotate_text_reconstructs_lines_exactly():
     text = "大きい山に人が一人います。\n犬は口を大きく開けた。"
     lines = annotate_text(text, sample=True)
     assert len(lines) == 2
-    for original, segments in zip(text.split("\n"), lines):
+    for original, segments in zip(text.split("\n"), lines, strict=True):
         assert "".join(s["text"] for s in segments) == original
 
 

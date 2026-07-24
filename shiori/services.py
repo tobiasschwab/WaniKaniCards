@@ -17,9 +17,10 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import redis
 from flask import jsonify
@@ -28,10 +29,8 @@ from rq import Queue
 from sqlalchemy.exc import IntegrityError
 
 from . import anki_export as ae
-from . import crypto
+from . import crypto, models, storage
 from . import kanji_cards as kc
-from . import models
-from . import storage
 from .extensions import db
 from .languages.registry import get_pack
 
@@ -328,7 +327,7 @@ def _fetch_username(token: str) -> str:
 # ---------- Jobs (pro Nutzer, Postgres/SQLite statt jobs/*.json) ------------ #
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _job_to_dict(row: models.Job) -> dict[str, Any]:
@@ -532,7 +531,7 @@ def _kana_card_to_dict(row: models.KanaCard) -> dict[str, Any]:
     }
 
 
-def _get_kana_row(user_id: int, target_lang: str, kid: str) -> "models.KanaCard | None":
+def _get_kana_row(user_id: int, target_lang: str, kid: str) -> models.KanaCard | None:
     return models.KanaCard.query.filter_by(user_id=user_id, target_lang=target_lang, id=kid).first()
 
 

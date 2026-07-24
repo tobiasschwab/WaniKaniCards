@@ -11,26 +11,25 @@ Dritter Export-Weg neben PDF/Anki: Karten direkt in Shiori mit FSRS lernen.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
 from . import kanji_cards as kc
-from . import models
-from . import srs
+from . import models, srs
 from .extensions import db
 from .services import (
     _current_target_lang,
     _require_content_provider,
+    _strip_html,
     get_subject_overrides,
     load_settings,
     read_custom_for_user,
     read_custom_owned,
     read_kana_for_user,
     read_kana_owned,
-    _strip_html,
 )
 
 bp = Blueprint("srs_api", __name__, url_prefix="/api/srs")
@@ -149,7 +148,7 @@ def api_srs_add() -> Any:
     return jsonify({"ok": True, "added": added})
 
 
-def _srs_resolve_fronts(rows: list["models.ReviewState"]) -> dict[tuple[str, str], str]:
+def _srs_resolve_fronts(rows: list[models.ReviewState]) -> dict[tuple[str, str], str]:
     """Kurzer Vorschautext ("Vorderseite") je `(card_type, card_id)` für die
     Warteschlangen-Ansicht – WaniKani-Subjects gebündelt in einem Request
     aufgelöst (nutzt den bestehenden Disk-Cache aus kanji_cards.py, kein
@@ -244,7 +243,7 @@ def api_srs_queue() -> Any:
         description: Nicht eingeloggt.
     """
     lang = _current_target_lang()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         limit = min(max(int(request.args.get("limit", 50)), 1), 200)
     except (TypeError, ValueError):
@@ -296,7 +295,7 @@ def api_srs_queue() -> Any:
     return jsonify({"items": items, "due_total": due_total})
 
 
-def _get_review_row(card_type: str, card_id: str, item_type: str) -> "models.ReviewState | None":
+def _get_review_row(card_type: str, card_id: str, item_type: str) -> models.ReviewState | None:
     """Wie die anderen `*_owned()`-Helfer (siehe `read_job_owned()`): `None`
     sowohl wenn die Zeile nicht existiert als auch wenn sie einem anderen
     Nutzer gehört – der zusammengesetzte Primärschlüssel enthält bereits
@@ -367,7 +366,7 @@ def _fuzzy_correct(typed: str, accepted: list[str]) -> bool:
     return _match_quality(typed, accepted) is not None
 
 
-def _srs_load_card_data(row: "models.ReviewState") -> dict[str, Any] | None:
+def _srs_load_card_data(row: models.ReviewState) -> dict[str, Any] | None:
     """Lädt den zugrundeliegenden Karteninhalt EINER `ReviewState`-Zeile –
     der gemeinsame Ort für das `card_type`-Dispatch (wanikani/custom/kana)
     bei Einzelkarten-Lookups. Bewusst getrennt von `_srs_resolve_fronts()`
@@ -401,7 +400,7 @@ def _split_answer_synonyms(text: str) -> list[str]:
     return [part.strip() for part in text.split(";") if part.strip()]
 
 
-def _srs_accepted_answers(row: "models.ReviewState") -> list[str] | None:
+def _srs_accepted_answers(row: models.ReviewState) -> list[str] | None:
     """Akzeptierte Antworten für eine Prüfrichtung, oder `None`, wenn die
     Karte nicht automatisch prüfbar ist (Custom-Karten: freies HTML auf
     beiden Seiten, kein sinnvoller Textvergleich möglich – dort bewertet
@@ -617,7 +616,7 @@ def api_srs_stats() -> Any:
         description: Nicht eingeloggt.
     """
     lang = _current_target_lang()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     new_today, reviews_today = _srs_daily_counts(current_user.id, lang, now)
 
@@ -697,7 +696,7 @@ def api_srs_cards() -> Any:
         description: Nicht eingeloggt.
     """
     lang = _current_target_lang()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = models.ReviewState.query.filter_by(user_id=current_user.id, target_lang=lang).all()
     fronts = _srs_resolve_fronts(rows)
 
@@ -705,7 +704,7 @@ def api_srs_cards() -> Any:
         # SQLite liefert `due_at` zeitzonennaiv zurück (Postgres bewusst) -
         # für den Vergleich/die Sortierung mit dem tz-bewussten `now`
         # einheitlich als UTC interpretieren.
-        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for r in rows:

@@ -6,8 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from shiori import models
-from shiori import webapp
+from shiori import models, webapp
 from shiori.models import User, UserSettings
 
 
@@ -45,7 +44,7 @@ def test_api_languages_public_works_without_login(db_session):
     client = webapp.app.test_client()
     r = client.get("/api/languages/public")
     assert r.status_code == 200
-    codes = {l["code"] for l in r.get_json()["supported_target_langs"]}
+    codes = {lang["code"] for lang in r.get_json()["supported_target_langs"]}
     assert {"ja", "en", "es"}.issubset(codes)
 
 

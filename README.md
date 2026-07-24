@@ -1562,17 +1562,63 @@ Dictionary-Karten sowie rein manuelle Einträge ohne jede Karte/Subject
 (`manual_<hash>`-IDs, Anzeige-Daten aus `data/known_meta.json`, da es dafür
 keine andere Quelle gibt).
 
-## Tests
+## Entwicklungswerkzeuge
 
 ```bash
-pip install -r requirements.txt -r requirements-web.txt pytest
-pytest
+pip install -r requirements.txt -r requirements-web.txt -r requirements-dev.txt
 ```
 
 (Die Web-Requirements sind seit dem Multi-User-Fundament nötig, weil
 `webapp.py` jetzt beim Import auch `Flask-SQLAlchemy`/`Flask-Login`
 braucht – `tests/conftest.py` zeigt `DATABASE_URL` dabei automatisch auf eine
-temporäre SQLite-Datei, keine laufende Postgres-Instanz nötig zum Testen.)
+temporäre SQLite-Datei, keine laufende Postgres-Instanz nötig zum Testen.
+`requirements-dev.txt` bündelt reine Entwicklungswerkzeuge, die NICHT ins
+Docker-Image gehören: pytest, ruff, mypy, pre-commit.)
+
+### Linting/Formatierung (ruff)
+
+```bash
+ruff check .          # Lint (Konfiguration in pyproject.toml)
+ruff check . --fix    # Auto-Fixes anwenden
+```
+
+Bewusst **kein** `ruff format .` über den ganzen Baum: die HTML-/Anki-
+Notiztyp-Templates in `anki_export.py` bestehen aus mehrzeiligen String-
+Konkatenationen, deren exaktes Layout (Zeilenumbrüche innerhalb der
+Mustache-Templates) semantisch relevant ist – ein automatisches Reformat
+würde dort unnötiges Diff-Rauschen ohne funktionalen Nutzen erzeugen.
+Lint-Regeln (Bug-Erkennung: pyflakes, bugbear, pyupgrade, Import-Sortierung)
+sind dagegen risikofrei und laufen über den ganzen Baum.
+
+### Type-Checking (mypy)
+
+```bash
+mypy shiori/
+```
+
+Konfiguration in `pyproject.toml` (`[tool.mypy]`), pragmatisch statt
+`--strict`: `ignore_missing_imports` für Pakete ohne Stubs (z. B. `fsrs`,
+`genanki`), `check_untyped_defs` aktiv, damit auch nicht explizit annotierte
+Funktionskörper geprüft werden.
+
+### pre-commit-Hooks
+
+```bash
+pre-commit install   # einmalig – installiert den Git-Hook
+```
+
+Läuft `ruff check --fix` + `ruff format --check` (nur auf den jeweils
+geänderten Dateien, nicht auf den Templates in `anki_export.py`, siehe
+`.pre-commit-config.yaml`) vor jedem Commit. Der volle Testlauf (`pytest`,
+~85 s) läuft bewusst **nicht** als Pre-Commit-Hook (das würde jeden Commit
+spürbar verlangsamen), sondern manuell/in CI.
+
+## Tests
+
+```bash
+pytest                        # normal
+pytest --cov=shiori --cov-report=term-missing   # mit Coverage-Report
+```
 
 Abgedeckt sind die Kernfunktionen `pick_example_vocab`, `mirror_backside`,
 `paginate`, `build_card`, `strip_markup`, `lemmatize_text`/`annotate_text`

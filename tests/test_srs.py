@@ -3,7 +3,7 @@ DB, keine Flask-App nötig: reine Algorithmus-/Serialisierungslogik)."""
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,12 +11,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import fsrs
+
 from shiori import srs
 
 
 def test_new_review_state_is_due_immediately():
     state = srs.new_review_state()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert state["due_at"] <= now + timedelta(seconds=1)
     assert state["reps"] == 0
     assert state["lapses"] == 0
@@ -26,7 +27,7 @@ def test_new_review_state_is_due_immediately():
 
 def test_review_good_pushes_due_date_into_future_and_increments_reps():
     state = srs.new_review_state()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     updated = srs.review(state, "good", review_datetime=now)
     assert updated["due_at"] > now
     assert updated["reps"] == 1
@@ -53,7 +54,7 @@ def test_review_again_after_reaching_review_state_counts_as_lapse():
     "good" bewerten, bis die Karte den Review-Status erreicht (nicht mehr
     Learning), dann "again" - das MUSS einen Lapse zählen."""
     state = srs.new_review_state()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for _ in range(5):
         state = srs.review(state, "good", review_datetime=now)
         now = state["due_at"] + timedelta(seconds=1)
@@ -68,7 +69,7 @@ def test_review_again_after_reaching_review_state_counts_as_lapse():
 def test_review_hard_and_easy_produce_different_intervals():
     """Grobe Sanity-Check, dass die vier Bewertungen tatsächlich
     unterschiedliches Scheduling auslösen (keine Fake-/No-Op-Anbindung)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     hard_due = srs.review(srs.new_review_state(), "hard", review_datetime=now)["due_at"]
     easy_due = srs.review(srs.new_review_state(), "easy", review_datetime=now)["due_at"]
     assert easy_due > hard_due

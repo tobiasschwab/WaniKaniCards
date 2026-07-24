@@ -26,8 +26,9 @@ import re
 import shutil
 import tempfile
 import zlib
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from . import kanji_cards as kc
 

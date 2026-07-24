@@ -15,12 +15,11 @@ from flask import Blueprint, abort, jsonify, redirect, request, send_file
 from flask_login import current_user, login_required
 
 from . import kanji_cards as kc
-from . import models
-from . import storage
+from . import models, storage
 from .extensions import db, limiter
 from .services import (
-    OUTPUT_DIR,
     MAX_CONCURRENT_JOBS_PER_USER,
+    OUTPUT_DIR,
     _current_target_lang,
     _now,
     _run_render,

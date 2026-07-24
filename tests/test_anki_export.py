@@ -6,12 +6,13 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from shiori import anki_export as ae  # noqa: E402
 from shiori import kanji_cards as kc  # noqa: E402
-
 
 # --------------------------------------------------------------------------- #
 # Tag-Konvertierung
@@ -509,11 +510,8 @@ def test_onyomi_kunyomi_templates_bind_wanakana_to_typeans():
 
 def test_export_deck_skips_cover_and_raises_if_nothing_left():
     cover_only = [kc.CoverCard(title="X", subtitle="Y")]
-    try:
+    with pytest.raises(ae.AnkiExportError):
         ae.export_deck(cover_only, "/dev/null")
-        assert False, "sollte AnkiExportError werfen"
-    except ae.AnkiExportError:
-        pass
 
 
 def test_export_custom_uses_stable_card_id_guid(tmp_path):

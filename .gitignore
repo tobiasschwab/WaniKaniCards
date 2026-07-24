@@ -8,6 +8,9 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
 
 # Web-Frontend: dateibasierte Laufzeitdaten (Token, PDFs, Jobs)
 data/

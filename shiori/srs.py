@@ -17,14 +17,17 @@ Bibliothek (Default `desired_retention=0.9`, wie bei Anki) - keine
 Personalisierung pro Nutzer in dieser Phase."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import fsrs
 
+if TYPE_CHECKING:
+    from . import models
+
 _SCHEDULER = fsrs.Scheduler()
 
-_RATINGS: dict[str, "fsrs.Rating"] = {
+_RATINGS: dict[str, fsrs.Rating] = {
     "again": fsrs.Rating.Again,
     "hard": fsrs.Rating.Hard,
     "good": fsrs.Rating.Good,
@@ -37,7 +40,7 @@ class SrsError(Exception):
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def new_review_state() -> dict[str, Any]:
@@ -88,7 +91,7 @@ def review(state: dict[str, Any], rating: str, *, review_datetime: datetime | No
     }
 
 
-def state_from_row(row: "models.ReviewState") -> dict[str, Any]:
+def state_from_row(row: models.ReviewState) -> dict[str, Any]:
     """`ReviewState`-Zeile in die Dict-Form bringen, die `review()` erwartet."""
     return {
         "fsrs_state": row.fsrs_state,
@@ -99,7 +102,7 @@ def state_from_row(row: "models.ReviewState") -> dict[str, Any]:
     }
 
 
-def apply_state_to_row(row: "models.ReviewState", state: dict[str, Any]) -> None:
+def apply_state_to_row(row: models.ReviewState, state: dict[str, Any]) -> None:
     """Umgekehrte Richtung: Ergebnis von `new_review_state()`/`review()` auf
     eine (neue oder bestehende) `ReviewState`-Zeile übertragen. Committen
     bleibt Aufgabe des Aufrufers (konsistent mit dem restlichen Projekt,

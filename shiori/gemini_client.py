@@ -33,8 +33,9 @@ import os
 import re
 import struct
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import requests
 
@@ -179,7 +180,7 @@ class GeminiError(Exception):
 
 
 def _cache_path(sentence: str, model: str) -> Path:
-    key = hashlib.sha1(f"{model}\n{sentence}".encode("utf-8")).hexdigest()
+    key = hashlib.sha1(f"{model}\n{sentence}".encode()).hexdigest()
     return CACHE_DIR / f"{key}.json"
 
 
@@ -479,7 +480,7 @@ def _word_lookup_prompt(word: str, target_lang_name: str, native_lang_name: str,
 
 
 def _word_lookup_cache_path(word: str, model: str, target_lang_name: str) -> Path:
-    key = hashlib.sha1(f"{model}\n{target_lang_name}\n{word}".encode("utf-8")).hexdigest()
+    key = hashlib.sha1(f"{model}\n{target_lang_name}\n{word}".encode()).hexdigest()
     return _WORD_LOOKUP_CACHE_DIR / f"{key}.json"
 
 
@@ -601,7 +602,7 @@ _RATE_RE = re.compile(r"rate=(\d+)")
 
 
 def _tts_cache_path(text: str, model: str, voice: str) -> Path:
-    key = hashlib.sha1(f"{model}\n{voice}\n{text}".encode("utf-8")).hexdigest()
+    key = hashlib.sha1(f"{model}\n{voice}\n{text}".encode()).hexdigest()
     return _TTS_CACHE_DIR / f"{key}.wav"
 
 
