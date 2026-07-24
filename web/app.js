@@ -128,7 +128,6 @@ let pollTimer = null;
 // Kompositions-Modus: über mehrere Suchen hinweg angehängte Karten, bis der
 // Nutzer "Tabelle leeren" klickt oder neu startet.
 let composeAccum = [];
-let composeLabels = [];
 
 // Text-Modus: Subject-ID → {ja, en} – eigener Beispielsatz aus dem Text,
 // wird beim Rendern mitgeschickt und dort als erster Satz eingesetzt.
@@ -775,19 +774,15 @@ async function doSearch() {
 // Neue Kompositions-Ergebnisse an die bestehende Tabelle anhängen (dedupliziert
 // nach id), statt sie zu ersetzen – so lassen sich mehrere Vokabeln nacheinander
 // kombinieren, bis der Nutzer "Tabelle leeren" klickt.
-function appendComposition(newCards, label) {
+function appendComposition(newCards) {
   const seen = new Set(composeAccum.map((x) => String(x.id)));
   for (const item of newCards) {
     if (!seen.has(String(item.id))) { composeAccum.push(item); seen.add(String(item.id)); }
   }
-  if (label) composeLabels.push(label);
-  const title = composeLabels.length && composeLabels.length <= 4
-    ? `Komposition: ${composeLabels.join(", ")}`
-    : "Komposition";
-  renderTable(composeAccum, title, "subject");
+  renderTable(composeAccum, "Neue Karten", "subject");
 }
 function clearCompose() {
-  composeAccum = []; composeLabels = []; sentenceOverrides = {}; fieldOverrides = {};
+  composeAccum = []; sentenceOverrides = {}; fieldOverrides = {};
   cards = []; selected.clear();
   renderTable([], "Karten", "subject");
 }
@@ -851,6 +846,22 @@ function backToTextEdit() {
   $("#kiResultWrap").classList.add("hidden");
   $("#textInputWrap").classList.remove("hidden");
   closeWordPopup();
+}
+
+// "Tabelle leeren" im Text-/KI-Modus (#btnComposeClear2/3): anders als
+// "✎ Text bearbeiten" (backToTextEdit(), behält den Text zum Weiterbearbeiten)
+// soll dieser Button komplett zurücksetzen - sonst wirkt der Klick wie ein
+// Bug ("Tabelle leeren funktioniert nicht"), weil er zwar die weiter unten
+// liegende, separate Karten-Auswahltabelle (#tablePanel) leert, die
+// eigentlich sichtbare Text-/KI-Analyse darüber aber unverändert stehen
+// bleibt - genau das, worauf sich Nutzer mit "die Tabelle" fühlbar beziehen.
+function clearTextAnalysis() {
+  textLines = [];
+  kiRows = [];
+  $("#textInput").value = "";
+  localStorage.removeItem(KI_STORAGE_KEY);
+  backToTextEdit();
+  clearCompose();
 }
 
 function updateTextStats(stats) {
@@ -1227,6 +1238,12 @@ function renderKiTable(rows) {
 
     const pctCell = document.createElement("div"); pctCell.className = "ki-cell ki-pct"; pctCell.dataset.label = "Bekannt";
     pctCell.innerHTML = _pctBadgeHtml(knownCount, words.length);
+    // Referenz auf die eigene Prozent-Zelle - applySegChange() aktualisiert
+    // damit den Satz-Prozentwert direkt nach einem Bekannt-Toggle, ohne die
+    // komplette KI-Tabelle neu zu rendern (würde u. a. den Scroll-/Fokus-
+    // Zustand verlieren).
+    row._pctCell = pctCell;
+    row._words = words;
 
     const deCell = document.createElement("div");
     deCell.className = "ki-cell" + (kiBlurEnabled ? " ki-blur" : ""); deCell.dataset.label = "Deutsch";
@@ -1402,7 +1419,20 @@ function applySegChange(seg, patch) {
     span.className = "word-token " + span._seg.status.replace(/_/g, "-");
   });
   const stats = { known, total, percent: total ? Math.round((known / total) * 1000) / 10 : 0 };
-  if (isKi) { updateKiStats(stats); saveKiStateToStorage(); renderKiFrequencyList(); } else updateTextStats(stats);
+  if (isKi) {
+    updateKiStats(stats);
+    // Gesamt-Prozent (#kiStats) reicht nicht - der Nutzer sieht primär die
+    // Pro-Satz-Badge in der KI-Tabelle, die sonst erst nach einem kompletten
+    // Neu-Rendern der Tabelle nachziehen würde (siehe UI-Feedback: "Satz +
+    // Gesamt" sollen sich beide sofort aktualisieren).
+    const row = seg._row;
+    if (row && row._pctCell && row._words) {
+      const rowKnown = row._words.filter((s) => s.known).length;
+      row._pctCell.innerHTML = _pctBadgeHtml(rowKnown, row._words.length);
+    }
+    saveKiStateToStorage();
+    renderKiFrequencyList();
+  } else updateTextStats(stats);
 }
 
 async function toggleKnownFromPopup() {
@@ -1410,7 +1440,25 @@ async function toggleKnownFromPopup() {
   if (!seg) return;
   const makeKnown = !seg.manually_known;
   try {
-    await api(`/api/known/${seg.id}`, { method: makeKnown ? "POST" : "DELETE" });
+    if (makeKnown) {
+      // Zeichen/Bedeutung/Art als Metadaten mitschicken (siehe
+      // webapp._KNOWN_META_FIELDS) - sonst weiß die Wortliste für ein
+      // Dictionary-/KI-Wort, das nie als eigene Karte angelegt wurde, gar
+      // nicht, wie es heißt, und zeigt ersatzweise die rohe interne ID
+      // (z. B. "kana_ad3aa4…") statt des Worts an.
+      await api(`/api/known/${seg.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          characters: _wpLabel(seg),
+          meaning: seg.meaning || "",
+          kind: seg.kind || "",
+          level: seg.level ?? null,
+          source: seg.source || "",
+        }),
+      });
+    } else {
+      await api(`/api/known/${seg.id}`, { method: "DELETE" });
+    }
   } catch (e) { toast(e.message, true); return; }
   setSegManuallyKnown(seg, makeKnown);
   toast(makeKnown ? `${_wpLabel(seg)} als bekannt markiert` : `${_wpLabel(seg)} nicht mehr als bekannt markiert`);
@@ -2291,8 +2339,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btnSearch").addEventListener("click", doSearch);
   $("#searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
   $("#btnComposeClear").addEventListener("click", clearCompose);
-  $("#btnComposeClear2").addEventListener("click", clearCompose);
-  $("#btnComposeClear3").addEventListener("click", clearCompose);
+  $("#btnComposeClear2").addEventListener("click", clearTextAnalysis);
+  $("#btnComposeClear3").addEventListener("click", clearTextAnalysis);
   $("#btnTextProcess").addEventListener("click", doTextProcess);
   $("#btnTextUpload").addEventListener("click", () => $("#textUploadFile").click());
   $("#textUploadFile").addEventListener("change", (e) => {

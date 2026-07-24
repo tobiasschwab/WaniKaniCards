@@ -2,8 +2,9 @@
 """kanji_cards.py – erzeugt doppelseitig bedruckbare Kanji-Karteikarten (PDF)
 aus einem WaniKani-Level.
 
-Aufruf:
-    python kanji_cards.py <level> [--output cards.pdf]
+Reine Kartenbau-/Render-Bibliothek, genutzt von der Webapp (`webapp.py` u. a.
+Blueprints) und vom Anki-Export (`anki_export.py`) – kein eigenständiges CLI
+mehr (das war der ursprüngliche Ansatz vor der Webapp, siehe README).
 
 Vorderseite: nur das Kanji, groß und zentriert.
 Rückseite:   Bedeutungen, Lesungen (On/Kun), eine Beispielvokabel und ein
@@ -13,13 +14,11 @@ Siehe CLAUDE.md für Details zur Architektur.
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import logging
 import os
 import re
-import sys
 import time
 from dataclasses import dataclass, field, fields as dataclass_fields, asdict
 from pathlib import Path
@@ -2212,164 +2211,3 @@ def build_any_card(
     return build_card(subject, registry, image_fetcher, sentence_overrides)  # kanji
 
 
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="kanji_cards.py",
-        description="Erzeugt doppelseitig bedruckbare Kanji-Karteikarten (PDF) "
-        "aus einem WaniKani-Level.",
-    )
-    parser.add_argument(
-        "level",
-        nargs="?",
-        type=int,
-        help="WaniKani-Level (1–60). Ohne Level --sample verwenden.",
-    )
-    parser.add_argument(
-        "--output", "-o", default="cards.pdf", help="Ausgabedatei (Default: cards.pdf)"
-    )
-    parser.add_argument(
-        "--type",
-        choices=["kanji", "radicals"],
-        default="kanji",
-        dest="deck_type",
-        help="Welcher Stapel: 'kanji' (Default) oder 'radicals'.",
-    )
-    parser.add_argument(
-        "--duplex",
-        choices=["long-edge", "short-edge"],
-        default="long-edge",
-        help="Wende-Kante für den Duplexdruck (Default: long-edge).",
-    )
-    parser.add_argument(
-        "--layout",
-        choices=list(LAYOUTS),
-        default="a6",
-        help="Druck-Layout: 'a6' = eine Karte pro A6-Seite, direkt auf "
-        "A6-Karten drucken (Default, kein Schneiden); 'a4-4up' = 4 Karten pro "
-        "A4-Blatt (quer) zum Schneiden.",
-    )
-    parser.add_argument(
-        "--paper",
-        choices=["a4", "letter", "a6"],
-        default="a4",
-        help="Papierformat für Layout 'a4-4up' (Default: a4). Bei '--layout a6' "
-        "ohne Wirkung.",
-    )
-    parser.add_argument(
-        "--font",
-        default=str(DEFAULT_KANJI_FONT),
-        help="Pfad zur Kanji-Schrift (TTF/OTF).",
-    )
-    parser.add_argument(
-        "--no-cache", action="store_true", help="API-Cache unter .cache/ umgehen."
-    )
-    parser.add_argument(
-        "--no-cut-marks", action="store_true", help="Keine Schnittmarken zeichnen."
-    )
-    parser.add_argument(
-        "--hole",
-        action="store_true",
-        help="Lochbereich/Loch-Markierung reservieren (Default: aus).",
-    )
-    parser.add_argument(
-        "--no-cover",
-        action="store_true",
-        help="Keine Deckkarte (Titel + Kanji-Übersicht) voranstellen.",
-    )
-    parser.add_argument(
-        "--sample",
-        action="store_true",
-        help="Beispieldaten ohne API-Token verwenden (Demo).",
-    )
-    parser.add_argument(
-        "--anki",
-        action="store_true",
-        help="Statt PDF ein Anki-Paket (.apkg) erzeugen, zum lokalen Import in "
-        "Anki (Datei → Importieren). Kein Docker/Anki-Netzwerk nötig; --output "
-        "bekommt automatisch die Endung .apkg.",
-    )
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if not args.sample and args.level is None:
-        parser.error("Bitte ein Level angeben oder --sample verwenden.")
-
-    radicals = args.deck_type == "radicals"
-    kind = "Radicals" if radicals else "Kanji"
-    try:
-        deck = build_deck(
-            args.level,
-            args.deck_type,
-            use_cache=not args.no_cache,
-            with_cover=not args.no_cover and not args.anki,
-            sample=args.sample,
-        )
-    except WaniKaniError as exc:
-        print(f"Fehler: {exc}", file=sys.stderr)
-        return 1
-
-    if not deck:
-        print("Keine Karten zu erzeugen.", file=sys.stderr)
-        return 1
-
-    if args.anki:
-        import anki_export
-
-        output = args.output
-        if Path(output).suffix.lower() != ".apkg":
-            output = str(Path(output).with_suffix(".apkg"))
-        label = args.level if args.level is not None else 1
-        try:
-            out, n = anki_export.export_deck(
-                deck, output, deck_name=f"WaniKani Level {label} · {kind}"
-            )
-        # Hinweis: anki_export importiert kanji_cards separat als eigenes Modul
-        # (nicht als __main__), daher hier explizit dessen Fehlerklasse fangen –
-        # ein bloßes `except WaniKaniError` (an die __main__-Klasse gebunden)
-        # würde die Instanz aus anki_export sonst nicht erkennen.
-        except anki_export.AnkiExportError as exc:
-            print(f"Fehler: {exc}", file=sys.stderr)
-            return 1
-        print(f"{n} {kind}-Karten → Anki-Paket {out} (in Anki: Datei → Importieren).")
-        return 0
-
-    out = render_deck(
-        deck,
-        args.output,
-        layout=args.layout,
-        paper=args.paper,
-        duplex=args.duplex,
-        cut_marks=not args.no_cut_marks,
-        hole=args.hole,
-        kanji_font=args.font,
-    )
-    profile = LAYOUTS[args.layout]
-    per_page = profile["cols"] * profile["rows"]
-    n_sheets = ((len(deck) + per_page - 1) // per_page) * 2
-    cover_note = "" if args.no_cover else " inkl. Deckkarte"
-    paper_label = (args.paper if args.layout == "a4-4up" else profile["paper"]).upper()
-    print(
-        f"{len(deck)} {kind}-Karten{cover_note} → {out} ({n_sheets} Seiten, "
-        f"{per_page}/Seite, {paper_label} quer, Duplex: {args.duplex})."
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    # Als Skript ausgeführt landet dieses Modul unter dem Namen "__main__", nicht
-    # "kanji_cards" – ein `import kanji_cards` (z. B. aus anki_export.py für den
-    # --anki-Zweig) würde die Datei sonst ein zweites Mal unter dem Namen
-    # "kanji_cards" laden. Die Folge: zwei nicht-identische Klassenobjekte
-    # (__main__.Card vs. kanji_cards.Card), sodass isinstance()-Prüfungen in
-    # anki_export.py fälschlich fehlschlagen. Fix: den bereits geladenen
-    # __main__-Modulcode unter dem Namen "kanji_cards" zwischenspeichern.
-    sys.modules.setdefault("kanji_cards", sys.modules["__main__"])
-    raise SystemExit(main())

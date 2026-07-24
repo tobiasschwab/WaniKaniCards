@@ -1,11 +1,13 @@
 # WaniKani Kanji-Karteikarten
 
-CLI-Tool (Python 3) **und Web-Frontend**, das aus einem **WaniKani-Level**
-doppelseitig bedruckbare **Karteikarten als PDF** erzeugt – wahlweise für die
-**Kanji** oder die **Radicals** des Levels (`--type`).
+Web-Frontend (Python 3/Flask, **Shiori**), das aus einem **WaniKani-Level**
+doppelseitig bedruckbare **Karteikarten als PDF** (oder als Anki-Paket) erzeugt
+– wahlweise für die **Kanji** oder die **Radicals** des Levels.
 
-> **Web-Frontend & Docker:** Für die grafische Oberfläche (API-Token setzen,
-> Level wählen, Download, Verlauf) siehe [Shiori (Docker)](#web-frontend-shiori-docker).
+> Ursprünglich als reines CLI-Tool begonnen (`python kanji_cards.py <level>`);
+> das Skript ist inzwischen eine reine Kartenbau-/Render-Bibliothek, die nur
+> noch von der Webapp genutzt wird – siehe [Shiori (Docker)](#web-frontend-shiori-docker)
+> für die grafische Oberfläche (API-Token setzen, Level wählen, Download, Verlauf).
 
 **Kanji-Karten**
 
@@ -310,22 +312,23 @@ WaniKani-/Dictionary-Karte oder **manuell direkt hier** hinzugekommen sind:
   WaniKani-Wörter (noch) nicht verfügbar, da dort kein eigener Satz-Kontext
   mitgespeichert wird.
 
-## Druck-Layouts (`--layout`)
+## Druck-Layouts
 
 | Layout | Beschreibung |
 |---|---|
 | `a6` (Default) | **Eine Karte pro A6-Seite** (quer). Zum **direkten Bedrucken von A6-Karten** – kein Schneiden. |
 | `a4-4up` | 4 Karten pro **A4-Blatt** (quer). Nur die mittige Kreuzlinie wird geschnitten → 4 Karten. |
 
-Weitere Eigenschaften:
+Weitere Eigenschaften (alle als Toggle/Auswahl im Web-Frontend, siehe
+„Weitere Druckoptionen"):
 
-- **Optionales Stanzloch** (Default **aus**; `--hole` bzw. Toggle im Web): oben
-  links auf der Vorderseite, mit dezenter Loch-Markierung zum Aufhängen an einem
-  Ring. Der Bereich ist auf der Rückseite spiegelbildlich reserviert, sodass ein
-  einziges Loch durch beide Seiten passt.
+- **Optionales Stanzloch** (Default **aus**): oben links auf der Vorderseite,
+  mit dezenter Loch-Markierung zum Aufhängen an einem Ring. Der Bereich ist
+  auf der Rückseite spiegelbildlich reserviert, sodass ein einziges Loch durch
+  beide Seiten passt.
 - Beim `a4-4up`-Layout wird die mittige Kreuzlinie als einzige Schnittkante
-  gedruckt (abschaltbar mit `--no-cut-marks`).
-- Jedes Layout funktioniert mit allen Kartentypen – mit `--layout a6` lässt sich
+  gedruckt (per „Schnittmarken"-Toggle abschaltbar).
+- Jedes Layout funktioniert mit allen Kartentypen – Layout `a6` lässt sich
   jede Karte einzeln **ohne Schneiden** direkt auf A6-Karten drucken.
 - Die Rückseite wird für den Duplexdruck automatisch gespiegelt, sodass
   Vorder- und Rückseite exakt zusammenpassen.
@@ -396,48 +399,42 @@ Die japanischen Schriften (Noto Serif JP / Noto Sans JP) liegen bereits unter
 
 ## Verwendung
 
+Siehe [Web-Frontend: Shiori (Docker)](#web-frontend-shiori-docker) für den
+kompletten Start (Docker Compose empfohlen). Kurzfassung ohne Docker:
+
 ```bash
-# WaniKani-Token holen: wanikani.com → Settings → API Tokens (read-only genügt)
-export WANIKANI_API_TOKEN="…"
-
-python kanji_cards.py 5                 # Level 5 → cards.pdf
-python kanji_cards.py 5 -o level5.pdf   # eigener Dateiname
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python webapp.py    # http://localhost:8000
 ```
 
-Alternativ kann der Token in einer `.env`-Datei stehen:
-
-```
-WANIKANI_API_TOKEN=…
-```
+Der WaniKani-Token (wanikani.com → Settings → API Tokens, read-only genügt)
+wird **nach dem Login in den Einstellungen** hinterlegt, nicht als
+Umgebungsvariable – jeder Nutzer hat seinen eigenen Token (siehe
+[Multi-User-Architektur](#multi-user-architektur-umbau-in-arbeit)).
 
 ### Ohne Token ausprobieren
 
-```bash
-python kanji_cards.py --sample                    # A4, Kanji (Level 1)
-python kanji_cards.py --sample --type radicals    # Radicals statt Kanji
-python kanji_cards.py --sample --layout a6        # A6, eine Karte pro Seite
-```
+Der „Demo (ohne Token)"-Schalter in den Einstellungen liefert Beispieldaten
+für Level 1 (Kanji/Radicals/Vokabeln) – keine WaniKani-Anmeldung nötig, um die
+Oberfläche und den Kartenaufbau auszuprobieren.
 
-### Optionen
+### Optionen im Web-Frontend
 
 | Option | Default | Beschreibung |
 |---|---|---|
-| `level` | – | WaniKani-Level (1–60) |
-| `--output`, `-o` | `cards.pdf` | Ausgabedatei |
-| `--type {kanji,radicals}` | `kanji` | Welcher Stapel exportiert wird |
-| `--layout {a4-4up,a6}` | `a4-4up` | Druck-Layout (A4 4-fach mit Schnitt / A6 pro Karte) |
-| `--duplex {long-edge,short-edge}` | `long-edge` | Wende-Kante für den Duplexdruck |
-| `--paper {a4,letter}` | `a4` | Papierformat (nur für `a4-4up`) |
-| `--font PFAD` | `fonts/NotoSerifJP-SemiBold.ttf` | Schrift für das große Kanji |
-| `--no-cache` | – | API-Cache unter `.cache/` umgehen |
-| `--no-cut-marks` | – | Kreuz-Schnittlinien weglassen |
-| `--hole` | – | Stanzloch-Bereich reservieren (Default: aus) |
-| `--no-cover` | – | keine Deckkarte voranstellen (CLI-only) |
-| `--sample` | – | Beispieldaten ohne API-Token verwenden |
-| `--anki` | – | Anki-Paket (`.apkg`) statt PDF erzeugen, siehe [Anki-Export](#anki-export) |
+| Level | – | WaniKani-Level (1–60) |
+| Stapel | Kanji | Kanji, Radicals oder Vokabeln |
+| Layout | A6 · 1/Seite | Druck-Layout (A6 pro Karte / A4 4-fach mit Schnitt) |
+| Duplex | Lang | Wende-Kante für den Duplexdruck |
+| Papier | A4 | Papierformat (nur für A4 · 4/Seite) |
+| Schnittmarken | an | Kreuz-Schnittlinien zeichnen |
+| Stanzloch | aus | Stanzloch-Bereich reservieren |
+| Demo (ohne Token) | aus | Beispieldaten ohne API-Token verwenden |
+| Format | PDF · Drucken | PDF oder Anki-Paket (`.apkg`), siehe [Anki-Export](#anki-export) |
 
-> Hinweis: Die **Deckkarte** gibt es nur noch im CLI (Default an, `--no-cover`
-> zum Abschalten). Das Web-Frontend erzeugt bewusst **keine** Deckkarte.
+> Hinweis: Die **Deckkarte** (Titel + Kanji-/Radical-Übersicht) gab es nur im
+> früheren CLI-Tool. Das Web-Frontend erzeugt bewusst **keine** Deckkarte.
 
 ## Drucken
 
@@ -484,11 +481,6 @@ verbunden sein:** Der Export passiert komplett offline mit
 den Browser heruntergeladen und in Anki ganz normal importiert
 (**Datei → Importieren**) – keine Netzwerkverbindung zwischen Container und
 lokalem Anki, kein AnkiConnect nötig.
-
-```bash
-python kanji_cards.py 5 --anki -o level5.apkg
-python kanji_cards.py --sample --anki              # Demo, cards.apkg
-```
 
 Im Web-Frontend: bei **Format** auf **„Anki · .apkg“** umschalten (ersetzt die
 druckspezifischen Optionen) und wie gewohnt **erzeugen**.
@@ -648,11 +640,10 @@ export WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)
 > ```
 >
 > `.env` steht bereits in `.gitignore` – landet also nicht versehentlich im
-> Repo. Dort können auch andere Variablen wie `WANIKANI_API_TOKEN` stehen
-> (falls für eigene Skripte/Tools genutzt) – für die Web-App selbst genügt
-> aber der WaniKani-Token in den Einstellungen nach dem ersten Login,
-> `WANIKANI_API_TOKEN` als Umgebungsvariable ist nur für das CLI-Skript
-> (`kanji_cards.py`) relevant.
+> Repo. Für die Web-App selbst genügt der WaniKani-Token in den Einstellungen
+> nach dem ersten Login – `WANIKANI_API_TOKEN` als Umgebungsvariable wird von
+> der Web-App nicht mehr gebraucht (nur noch ein ungenutzter Fallback in
+> `kanji_cards._make_client()` aus der Zeit vor dem Web-Frontend).
 >
 > Kurz zusammengefasst, als ein Block zum Kopieren:
 >
@@ -848,10 +839,10 @@ zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
   (eine **prozessglobale** Variable, unter echter Nebenläufigkeit mehrerer
   Nutzer-Requests im selben Worker ein Race-Condition-Risiko – ein Request
   hätte potenziell mit dem gerade von einem ANDEREN Nutzer gesetzten Token
-  laufen können). `WANIKANI_API_TOKEN` bleibt weiterhin der Fallback fürs
-  CLI (`python kanji_cards.py <level>`), wo pro Prozessaufruf ohnehin nur
-  ein Nutzer relevant ist – `_make_client()` liest die Variable nur, wenn
-  kein `token` explizit übergeben wurde.
+  laufen können). `WANIKANI_API_TOKEN` bleibt als reiner Fallback in
+  `_make_client()` erhalten (liest die Variable nur, wenn kein `token`
+  explizit übergeben wurde) – seit Entfernung des CLI-Tools ohne praktische
+  Verwendung mehr, aber harmlos.
 
 **Testbarkeit**: `tests/conftest.py` stellt dafür die Fixtures `db_session`
 (frische Tabellen pro Test), `client` (Testclient mit frisch registriertem

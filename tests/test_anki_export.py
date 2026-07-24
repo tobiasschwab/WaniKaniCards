@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sqlite3
-import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -515,31 +514,6 @@ def test_export_deck_skips_cover_and_raises_if_nothing_left():
         assert False, "sollte AnkiExportError werfen"
     except ae.AnkiExportError:
         pass
-
-
-# --------------------------------------------------------------------------- #
-# CLI: `python kanji_cards.py --anki` (Regression für den __main__-Modul-
-# Identitäts-Bug: als Skript ausgeführt landen die Card-Klassen unter dem
-# Modulnamen "__main__" statt "kanji_cards" – ohne den sys.modules-Alias vor
-# main() würde anki_export.py's isinstance()-Dispatch beim Import als eigenes
-# Modul stillschweigend keine einzige Karte erkennen.)
-# --------------------------------------------------------------------------- #
-
-def test_cli_anki_flag_produces_apkg(tmp_path):
-    out = tmp_path / "cards.pdf"  # Endung wird bei --anki automatisch auf .apkg korrigiert
-    result = subprocess.run(
-        [sys.executable, "kanji_cards.py", "--sample", "--anki", "-o", str(out)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert result.returncode == 0, result.stderr
-    apkg = out.with_suffix(".apkg")
-    assert apkg.is_file()
-    assert "Anki-Paket" in result.stdout
-    with zipfile.ZipFile(apkg) as z:
-        assert "collection.anki2" in z.namelist()
 
 
 def test_export_custom_uses_stable_card_id_guid(tmp_path):

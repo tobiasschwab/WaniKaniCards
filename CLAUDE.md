@@ -4,14 +4,16 @@ Anleitung für Claude Code für dieses Projekt. Bitte vor jeder Implementierung 
 
 ## Projektziel
 
+> **Historischer Ursprung dieses Dokuments:** Der Rest dieses Abschnitts
+> beschreibt den ursprünglichen Plan als reines CLI-Tool. Das Projekt ist
+> seitdem zu einer Multi-User-Webapp (**Shiori**, Flask) gewachsen; das CLI
+> (`kanji_cards.py`-Aufruf mit `argparse`) wurde entfernt, `kanji_cards.py`
+> selbst lebt als reine Kartenbau-/Render-Bibliothek weiter (siehe README
+> "Architektur" für den aktuellen Stand). Die Kartenlogik/Layout-Ziele unten
+> gelten unverändert.
+
 CLI-Tool (Python 3), das aus einem **WaniKani-Level** doppelseitig bedruckbare
 **Kanji-Karteikarten als PDF** erzeugt – **6 Karten pro Seite** (2 Spalten × 3 Zeilen).
-
-Aufruf:
-
-```bash
-python kanji_cards.py <level> [--output cards.pdf]
-```
 
 **Vorderseite:** nur das Kanji, groß und zentriert.
 **Rückseite:**
@@ -30,11 +32,10 @@ Ziel ist ein *sehr sauberes, druckfertiges* Layout – Ästhetik zählt, nicht n
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-export WANIKANI_API_TOKEN="…"      # Read-only Token reicht (Settings → API Tokens)
-python kanji_cards.py 5            # erzeugt cards.pdf für Level 5
+python webapp.py    # Webapp unter http://localhost:8000, Token nach Login in den Einstellungen
 ```
 
-- Token **niemals** hardcoden. Nur aus `WANIKANI_API_TOKEN` (optional `.env` via `python-dotenv`).
+- Token **niemals** hardcoden – wird nach dem Login pro Nutzer in den Einstellungen hinterlegt.
 - `.env`, `*.pdf` und `.cache/` gehören in `.gitignore`.
 
 ---
