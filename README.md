@@ -1266,6 +1266,19 @@ Einstellungs-Panel unter „Konto".
   akzeptierte-Antworten-Zeile (`renderReviewBackside()` in `web/app.js`,
   nutzt denselben `/api/card-detail`-Datensatz wie der Editiermodus).
 
+## API-Dokumentation
+
+Alle `/api/*`-Endpunkte sind per [flasgger](https://github.com/flasgger/flasgger)
+als interaktive Swagger-UI unter **`/api/docs/`** dokumentiert (OpenAPI-Spec
+unter `/apispec_1.json`). Die Doku steckt direkt als YAML-Block in der
+Docstring jeder Route (`--- \n tags: ... \n parameters: ... \n responses: ...`)
+– Code und Doku liegen damit nebeneinander in derselben Datei statt in einer
+separat gepflegten Spec. Die meisten Endpunkte brauchen eine eingeloggte
+Session (Cookie-Auth über `/api/auth/login`); zum Ausprobieren in der
+Swagger-UI vorher im normalen Web-Frontend einloggen (teilt sich das Cookie).
+`tests/test_webapp.py::test_openapi_spec_has_no_undocumented_routes` hält
+neue Endpunkte ehrlich – ein Route ohne YAML-Doku lässt den Test fehlschlagen.
+
 ## Architektur
 
 **Ordnerstruktur:** Der komplette Anwendungscode liegt im `shiori/`-Package

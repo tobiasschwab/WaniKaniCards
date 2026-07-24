@@ -72,7 +72,38 @@ def api_srs_add() -> Any:
     Lernwarteschlange aufnehmen. Kanji/Vokabel bekommen zwei Zeilen (Meaning
     + Reading, wie WaniKani selbst), Radicals/Custom-Karten nur eine
     (Radicals haben keine Lesung); Dictionary-/KI-Karten bekommen eine
-    Reading-Zeile nur, wenn die Karte selbst eine Lesung hat."""
+    Reading-Zeile nur, wenn die Karte selbst eine Lesung hat.
+    ---
+    tags:
+      - srs
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            subject_ids: {type: array, items: {type: integer}}
+            custom_ids: {type: array, items: {type: string}}
+            kana_ids: {type: array, items: {type: string}}
+            sample: {type: boolean, default: false}
+    responses:
+      200:
+        description: Anzahl neu hinzugefügter Prüfrichtungen (bereits vorhandene Karten bleiben unverändert).
+        schema:
+          type: object
+          properties:
+            ok: {type: boolean}
+            added: {type: integer}
+      400:
+        description: Keine Karten ausgewählt.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Eigene/Dictionary-Karte nicht gefunden.
+      502:
+        description: WaniKani-API-Fehler.
+    """
     body = request.get_json(silent=True) or {}
     subject_ids = [int(i) for i in (body.get("subject_ids") or [])]
     custom_ids = [str(i) for i in (body.get("custom_ids") or [])]
@@ -181,7 +212,37 @@ def api_srs_queue() -> Any:
     `srs_new_per_day`/`srs_reviews_per_day`) begrenzen, wie viele NEUE
     Karten (`reps == 0`) und wie viele Reviews insgesamt heute noch
     ausgeliefert werden – bereits Fällige, die das Tageslimit sprengen,
-    bleiben einfach für morgen liegen (kein Datenverlust, nur Verzögerung)."""
+    bleiben einfach für morgen liegen (kein Datenverlust, nur Verzögerung).
+    ---
+    tags:
+      - srs
+    parameters:
+      - name: limit
+        in: query
+        type: integer
+        default: 50
+        description: Max. Anzahl gelieferter Karten (1-200).
+    responses:
+      200:
+        description: Fällige Karten (nach Tageslimit gedeckelt) + Gesamtzahl.
+        schema:
+          type: object
+          properties:
+            due_total: {type: integer}
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  card_type: {type: string, enum: [wanikani, custom, kana]}
+                  card_id: {type: string}
+                  item_type: {type: string, enum: [meaning, reading, front]}
+                  front: {type: string}
+                  due_at: {type: string, format: date-time}
+                  is_new: {type: boolean}
+      401:
+        description: Nicht eingeloggt.
+    """
     lang = _current_target_lang()
     now = datetime.now(timezone.utc)
     try:
@@ -378,7 +439,36 @@ def api_srs_check() -> Any:
     NICHTS am FSRS-Lernstand (das passiert erst in `/api/srs/answer`, wenn
     der Nutzer den Vorschlag bestätigt oder überschrieben hat). Bei nicht
     automatisch prüfbaren Karten (Custom) bleibt `correct`/`suggested_rating`
-    `None` – der Nutzer bewertet sich dort rein selbst."""
+    `None` – der Nutzer bewertet sich dort rein selbst.
+    ---
+    tags:
+      - srs
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [card_type, card_id, item_type, answer]
+          properties:
+            card_type: {type: string, enum: [wanikani, custom, kana]}
+            card_id: {type: string}
+            item_type: {type: string, enum: [meaning, reading, front]}
+            answer: {type: string}
+    responses:
+      200:
+        description: Prüfergebnis + Bewertungs-Vorschlag (ändert nichts am Lernstand).
+        schema:
+          type: object
+          properties:
+            correct: {type: boolean}
+            accepted_answers: {type: array, items: {type: string}}
+            suggested_rating: {type: string, enum: [again, hard, good]}
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht in der Lernwarteschlange.
+    """
     body = request.get_json(silent=True) or {}
     card_type = str(body.get("card_type", ""))
     card_id = str(body.get("card_id", ""))
@@ -411,7 +501,32 @@ def api_srs_answer() -> Any:
     eine Karte übernehmen und den FSRS-Lernstand fortschreiben. Der Nutzer
     hat die Bewertung ggf. gegenüber dem Vorschlag aus `/api/srs/check`
     überschrieben – dieser Endpunkt vertraut der übergebenen Bewertung,
-    ohne selbst nochmal zu prüfen."""
+    ohne selbst nochmal zu prüfen.
+    ---
+    tags:
+      - srs
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [card_type, card_id, item_type, rating]
+          properties:
+            card_type: {type: string, enum: [wanikani, custom, kana]}
+            card_id: {type: string}
+            item_type: {type: string, enum: [meaning, reading, front]}
+            rating: {type: string, enum: [again, hard, good, easy]}
+    responses:
+      200:
+        description: FSRS-Lernstand fortgeschrieben, Log-Eintrag erstellt.
+      400:
+        description: Ungültige Bewertung.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht in der Lernwarteschlange.
+    """
     body = request.get_json(silent=True) or {}
     card_type = str(body.get("card_type", ""))
     card_id = str(body.get("card_id", ""))
@@ -481,7 +596,26 @@ def api_srs_stats() -> Any:
     Karten heute, Retention der letzten 7 Tage (Anteil NICHT "again"
     bewerteter Reviews – Standarddefinition bei Anki/FSRS), die Anzahl
     Karten je Lernstufe, der aktuelle Lern-Streak sowie die Tagesaktivität
-    der letzten ~26 Wochen (Kalender-Heatmap im Frontend)."""
+    der letzten ~26 Wochen (Kalender-Heatmap im Frontend).
+    ---
+    tags:
+      - srs
+    responses:
+      200:
+        description: Statistik-Dashboard-Daten.
+        schema:
+          type: object
+          properties:
+            reviews_today: {type: integer}
+            new_today: {type: integer}
+            retention_7d: {type: number, description: "Prozent, null ohne Reviews in den letzten 7 Tagen"}
+            total_cards: {type: integer}
+            by_stage: {type: object}
+            streak_days: {type: integer}
+            activity: {type: object, description: "Reviews je Kalendertag (YYYY-MM-DD -> Anzahl)"}
+      401:
+        description: Nicht eingeloggt.
+    """
     lang = _current_target_lang()
     now = datetime.now(timezone.utc)
 
@@ -536,7 +670,32 @@ def api_srs_cards() -> Any:
     mit Vorschautext, Anzahl Prüfrichtungen, Summe der Wiederholungen, ob
     gerade fällig und der nächsten Fälligkeit. Grundlage, um eine
     versehentlich hinzugefügte Karte gezielt wieder zu entfernen (siehe
-    `/api/srs/remove`)."""
+    `/api/srs/remove`).
+    ---
+    tags:
+      - srs
+    responses:
+      200:
+        description: Alle Karten der Lernwarteschlange, gruppiert je Karte.
+        schema:
+          type: object
+          properties:
+            total: {type: integer}
+            cards:
+              type: array
+              items:
+                type: object
+                properties:
+                  card_type: {type: string}
+                  card_id: {type: string}
+                  front: {type: string}
+                  items: {type: integer}
+                  reps: {type: integer}
+                  due_now: {type: boolean}
+                  next_due: {type: string, format: date-time}
+      401:
+        description: Nicht eingeloggt.
+    """
     lang = _current_target_lang()
     now = datetime.now(timezone.utc)
     rows = models.ReviewState.query.filter_by(user_id=current_user.id, target_lang=lang).all()
@@ -578,7 +737,28 @@ def api_srs_remove() -> Any:
     aktiven Zielsprache entfernen – inklusive Lern-Log. Das Kartenobjekt
     selbst (WaniKani-Subject bzw. Custom-/Dictionary-Karte) bleibt bestehen;
     nur der SRS-Lernstand wird verworfen, die Karte kann später erneut
-    hinzugefügt werden."""
+    hinzugefügt werden.
+    ---
+    tags:
+      - srs
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [card_type, card_id]
+          properties:
+            card_type: {type: string, enum: [wanikani, custom, kana]}
+            card_id: {type: string}
+    responses:
+      200:
+        description: Karte aus der Lernwarteschlange entfernt.
+      400:
+        description: card_type/card_id fehlt.
+      401:
+        description: Nicht eingeloggt.
+    """
     body = request.get_json(silent=True) or {}
     card_type = str(body.get("card_type", ""))
     card_id = str(body.get("card_id", ""))

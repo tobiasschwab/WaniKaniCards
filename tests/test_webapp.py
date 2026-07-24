@@ -1906,3 +1906,27 @@ def test_security_headers_present_on_api_response(client):
 def test_session_cookie_hardening_configured():
     assert webapp.app.config["SESSION_COOKIE_HTTPONLY"] is True
     assert webapp.app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
+
+
+# --------------------------------------------------------------------------- #
+# API-Dokumentation (Swagger/OpenAPI, siehe flasgger)
+# --------------------------------------------------------------------------- #
+
+def test_swagger_ui_served(client):
+    r = client.get("/api/docs/")
+    assert r.status_code == 200
+    assert b"swagger" in r.data.lower()
+
+
+def test_openapi_spec_has_no_undocumented_routes(client):
+    """Jede Route soll eine YAML-Docstring haben (siehe die einzelnen
+    Endpunkte) - dieser Test verhindert, dass ein künftiger Endpunkt
+    versehentlich ohne Doku bleibt."""
+    spec = client.get("/apispec_1.json").get_json()
+    undocumented = [
+        f"{method.upper()} {path}"
+        for path, methods in spec["paths"].items()
+        for method, info in methods.items()
+        if not info.get("summary") and not info.get("description")
+    ]
+    assert not undocumented, f"Undokumentierte Endpunkte: {undocumented}"

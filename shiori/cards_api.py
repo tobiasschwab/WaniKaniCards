@@ -41,12 +41,39 @@ bp = Blueprint("cards_api", __name__)
 @bp.get("/api/customcards")
 @login_required
 def api_customcards() -> Any:
+    """Kurzfassungen aller eigenen ("Frei erstellen") Karten der aktiven Zielsprache.
+    ---
+    tags:
+      - cards
+    responses:
+      200:
+        description: Liste der Kartenbeschreibungen.
+      401:
+        description: Nicht eingeloggt.
+    """
     return jsonify([_custom_descriptor(c) for c in list_customs()])
 
 
 @bp.get("/api/customcards/<cid>")
 @login_required
 def api_customcard(cid: str) -> Any:
+    """Volle Felder (front_html/back_html/tags) einer eigenen Karte.
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: cid
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Karten-Felder.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht gefunden oder gehört einem anderen Nutzer.
+    """
     card = read_custom_owned(cid)
     if card is None:
         abort(404)
@@ -56,6 +83,29 @@ def api_customcard(cid: str) -> Any:
 @bp.post("/api/customcards")
 @login_required
 def api_save_customcard() -> Any:
+    """Eigene Karte anlegen (ohne `id`) oder aktualisieren (mit `id`).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            id: {type: string, description: "weglassen zum Neuanlegen"}
+            front_html: {type: string}
+            back_html: {type: string}
+            tags: {type: array, items: {type: string}}
+    responses:
+      200:
+        description: Gespeicherte Karte.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: "id gesetzt, aber Karte nicht gefunden/fremd (IDOR-Schutz)."
+    """
     body = request.get_json(silent=True) or {}
     cid = body.get("id")
     if cid:
@@ -79,6 +129,23 @@ def api_save_customcard() -> Any:
 @bp.delete("/api/customcards/<cid>")
 @login_required
 def api_delete_customcard(cid: str) -> Any:
+    """Eigene Karte löschen (inkl. SRS-Lernstand, falls im Vokabeltrainer).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: cid
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Gelöscht.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht gefunden oder gehört einem anderen Nutzer.
+    """
     if read_custom_owned(cid) is None:
         abort(404)
     models.CustomCard.query.filter_by(id=cid, user_id=current_user.id).delete()
@@ -92,6 +159,16 @@ def api_delete_customcard(cid: str) -> Any:
 @bp.get("/api/kanacards")
 @login_required
 def api_kanacards() -> Any:
+    """Kurzfassungen aller Dictionary-/KI-Karten der aktiven Zielsprache.
+    ---
+    tags:
+      - cards
+    responses:
+      200:
+        description: Liste der Kartenbeschreibungen.
+      401:
+        description: Nicht eingeloggt.
+    """
     return jsonify([_kana_descriptor(c) for c in list_kana()])
 
 
@@ -100,7 +177,23 @@ def api_kanacards() -> Any:
 def api_kanacard(kid: str) -> Any:
     """Volle Felder EINER Dictionary-/KI-Karte – Grundlage für den vollen
     Rückseiten-Reveal und den Editiermodus im Vokabeltrainer-Review (analog
-    zu `/api/customcards/<cid>`)."""
+    zu `/api/customcards/<cid>`).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: kid
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Karten-Felder.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht gefunden oder gehört einem anderen Nutzer.
+    """
     card = read_kana_owned(kid)
     if card is None:
         abort(404)
@@ -126,7 +219,34 @@ def api_create_kanacard() -> Any:
     wird nie automatisch für alle KI-erkannten Wörter eine Karte erzeugt.
 
     Satzübersetzung in beiden Fällen optional per DeepL, wenn ein Key
-    hinterlegt ist (sonst bleibt die Karte trotzdem gültig)."""
+    hinterlegt ist (sonst bleibt die Karte trotzdem gültig).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [word]
+          properties:
+            word: {type: string}
+            sentence: {type: string}
+            sentence_audio_url: {type: string}
+            source: {type: string, enum: [dictionary, ai], default: dictionary}
+            meaning: {type: string, description: "nur bei source=ai"}
+            reading: {type: string, description: "nur bei source=ai"}
+    responses:
+      200:
+        description: Angelegte Karte.
+      400:
+        description: Kein Wort/keine KI-Bedeutung angegeben, oder kein Gemini-Key hinterlegt.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Wort im Wörterbuch/von der KI nicht erkannt.
+    """
     body = request.get_json(silent=True) or {}
     word = str(body.get("word", "")).strip()
     sentence_raw = body.get("sentence")
@@ -184,7 +304,35 @@ def api_edit_kanacard(kid: str) -> Any:
     """Bestehende Dictionary-/KI-Karte direkt überschreiben (Editiermodus im
     Vokabeltrainer-Review, siehe README-Feature-Feedback) – anders als
     `POST /api/kanacards` wird hier NICHTS neu aus dem Wörterbuch/der KI
-    hergeleitet, sondern nur die übergebenen Felder 1:1 übernommen."""
+    hergeleitet, sondern nur die übergebenen Felder 1:1 übernommen.
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: kid
+        in: path
+        type: string
+        required: true
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [fields]
+          properties:
+            fields:
+              type: object
+              description: "Teilmenge von word/kanji_hint/reading/meaning/meaning_extra/sentence_ja/sentence_translation"
+    responses:
+      200:
+        description: Aktualisierte Kartenbeschreibung.
+      400:
+        description: fields fehlt oder ist kein Objekt.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht gefunden oder gehört einem anderen Nutzer.
+    """
     card = read_kana_owned(kid)
     if card is None:
         abort(404)
@@ -204,6 +352,23 @@ def api_edit_kanacard(kid: str) -> Any:
 @bp.delete("/api/kanacards/<kid>")
 @login_required
 def api_delete_kanacard(kid: str) -> Any:
+    """Dictionary-/KI-Karte löschen (inkl. SRS-Lernstand, falls im Vokabeltrainer).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: kid
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Gelöscht.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Karte nicht gefunden oder gehört einem anderen Nutzer.
+    """
     if read_kana_owned(kid) is None:
         abort(404)
     models.KanaCard.query.filter_by(id=kid, user_id=current_user.id).delete()

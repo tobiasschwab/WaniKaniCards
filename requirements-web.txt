@@ -19,3 +19,6 @@ Flask-Limiter>=3.5
 # SRS-Vokabeltrainer (Fundament, siehe README-Roadmap): FSRS-Scheduling-
 # Algorithmus statt einer eigenen SM-2-Nachimplementierung.
 fsrs>=6.0
+
+# API-Dokumentation (Swagger/OpenAPI-UI unter /api/docs, siehe webapp.py).
+flasgger>=0.9.7

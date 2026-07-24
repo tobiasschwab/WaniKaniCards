@@ -39,6 +39,46 @@ bp = Blueprint("jobs_api", __name__)
 @login_required
 @limiter.limit("10 per minute")
 def api_render() -> Any:
+    """PDF- oder Anki-Export als asynchronen Job einreihen (RQ-Worker
+    verarbeitet ihn im Hintergrund, siehe services._run_render). Karten aus
+    WaniKani-Subjects, eigenen und/oder Dictionary-Karten können in einem
+    gemeinsamen Export kombiniert werden.
+    ---
+    tags:
+      - render
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            subject_ids: {type: array, items: {type: integer}}
+            custom_ids: {type: array, items: {type: string}}
+            kana_ids: {type: array, items: {type: string}}
+            format: {type: string, enum: [pdf, anki], default: pdf}
+            layout: {type: string, enum: [a6, a4-4up], default: a6}
+            paper: {type: string, enum: [a4, letter, a6], default: a4}
+            duplex: {type: string, enum: ["long-edge", "short-edge"], default: "long-edge"}
+            cut_marks: {type: boolean, default: true}
+            hole: {type: boolean, default: false}
+            no_cache: {type: boolean, default: false}
+            sample: {type: boolean, default: false}
+            title: {type: string}
+            sentence_overrides: {type: object}
+            field_overrides: {type: object}
+    responses:
+      202:
+        description: Job eingereiht (Status "queued").
+      400:
+        description: Keine Karten ausgewählt oder ungültiges Format/Layout.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Eigene/Dictionary-Karte nicht gefunden.
+      429:
+        description: Zu viele gleichzeitig laufende Jobs dieses Nutzers.
+    """
     body = request.get_json(silent=True) or {}
     subject_ids = body.get("subject_ids") or []
     custom_ids = body.get("custom_ids") or []
@@ -113,12 +153,39 @@ def api_render() -> Any:
 @bp.get("/api/jobs")
 @login_required
 def api_jobs() -> Any:
+    """Job-Verlauf des eingeloggten Nutzers (neueste zuerst).
+    ---
+    tags:
+      - render
+    responses:
+      200:
+        description: Liste der Jobs.
+      401:
+        description: Nicht eingeloggt.
+    """
     return jsonify(list_jobs())
 
 
 @bp.get("/api/jobs/<job_id>")
 @login_required
 def api_job(job_id: str) -> Any:
+    """Status eines einzelnen Render-Jobs (zum Pollen nach dem Einreihen).
+    ---
+    tags:
+      - render
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Job-Objekt (status queued/running/done/error).
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Job nicht gefunden oder gehört einem anderen Nutzer.
+    """
     job = read_job_owned(job_id)
     if job is None:
         abort(404)
@@ -128,6 +195,23 @@ def api_job(job_id: str) -> Any:
 @bp.delete("/api/jobs/<job_id>")
 @login_required
 def api_delete_job(job_id: str) -> Any:
+    """Job (samt evtl. erzeugter PDF-/APKG-Datei) aus dem Verlauf löschen.
+    ---
+    tags:
+      - render
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Gelöscht.
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Job nicht gefunden oder gehört einem anderen Nutzer.
+    """
     if read_job_owned(job_id) is None:
         abort(404)
     storage.delete_output(OUTPUT_DIR, f"{job_id}.pdf")
@@ -168,10 +252,63 @@ def _serve_job_output(job_id: str, *, suffix: str, mimetype: str) -> Any:
 @bp.get("/api/jobs/<job_id>/pdf")
 @login_required
 def api_job_pdf(job_id: str) -> Any:
+    """Fertiges PDF eines abgeschlossenen Jobs herunterladen (oder Redirect
+    auf eine signierte S3-URL, falls Object Storage konfiguriert ist).
+    ---
+    tags:
+      - render
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+      - name: download
+        in: query
+        type: string
+        enum: ["1"]
+        description: "gesetzt = Content-Disposition: attachment statt inline"
+    produces:
+      - application/pdf
+    responses:
+      200:
+        description: PDF-Datei.
+      302:
+        description: Redirect auf eine signierte Download-URL (S3/MinIO).
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Job nicht fertig, nicht gefunden oder gehört einem anderen Nutzer.
+    """
     return _serve_job_output(job_id, suffix=".pdf", mimetype="application/pdf")
 
 
 @bp.get("/api/jobs/<job_id>/apkg")
 @login_required
 def api_job_apkg(job_id: str) -> Any:
+    """Fertiges Anki-Paket (.apkg) eines abgeschlossenen Jobs herunterladen
+    (oder Redirect auf eine signierte S3-URL, siehe `/api/jobs/<job_id>/pdf`).
+    ---
+    tags:
+      - render
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+      - name: download
+        in: query
+        type: string
+        enum: ["1"]
+    produces:
+      - application/octet-stream
+    responses:
+      200:
+        description: APKG-Datei.
+      302:
+        description: Redirect auf eine signierte Download-URL (S3/MinIO).
+      401:
+        description: Nicht eingeloggt.
+      404:
+        description: Job nicht fertig, nicht gefunden oder gehört einem anderen Nutzer.
+    """
     return _serve_job_output(job_id, suffix=".apkg", mimetype="application/octet-stream")

@@ -43,7 +43,32 @@ def signup():
 
     Öffentliche Instanz = offenes Self-Signup (siehe Design-Entscheidung
     "Zielgruppe"); für eine invite-only-Variante würde man hier zusätzlich
-    einen Einladungscode prüfen."""
+    einen Einladungscode prüfen.
+    ---
+    tags:
+      - auth
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [email, password]
+          properties:
+            email: {type: string, example: du@beispiel.de}
+            password: {type: string, format: password, minLength: 8}
+            native_lang: {type: string, example: de}
+            active_target_lang: {type: string, example: ja}
+    responses:
+      201:
+        description: Konto angelegt, Session-Cookie gesetzt.
+      400:
+        description: Ungültige E-Mail oder zu kurzes Passwort.
+      409:
+        description: E-Mail-Adresse bereits vergeben.
+      429:
+        description: Rate-Limit (5 pro Stunde und IP) überschritten.
+    """
     body = request.get_json(silent=True) or {}
     email = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
@@ -75,6 +100,28 @@ def signup():
 @bp.post("/login")
 @limiter.limit("10 per minute;30 per hour")
 def login():
+    """Mit E-Mail/Passwort einloggen (Session-Cookie).
+    ---
+    tags:
+      - auth
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [email, password]
+          properties:
+            email: {type: string}
+            password: {type: string, format: password}
+    responses:
+      200:
+        description: Eingeloggt, Session-Cookie gesetzt.
+      401:
+        description: E-Mail oder Passwort falsch.
+      429:
+        description: Rate-Limit überschritten.
+    """
     body = request.get_json(silent=True) or {}
     email = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
@@ -93,6 +140,16 @@ def login():
 @bp.post("/logout")
 @login_required
 def logout():
+    """Ausloggen (Session-Cookie invalidieren).
+    ---
+    tags:
+      - auth
+    responses:
+      200:
+        description: Ausgeloggt.
+      401:
+        description: Nicht eingeloggt.
+    """
     logout_user()
     return jsonify({"ok": True})
 
@@ -104,7 +161,32 @@ def change_password():
     """Passwort des eingeloggten Nutzers ändern – das aktuelle Passwort muss
     korrekt mitgegeben werden (Schutz, falls jemand eine offene Sitzung an
     einem fremden Gerät kapert). Rate-limitiert gegen Brute-Force des alten
-    Passworts über eine bestehende Sitzung."""
+    Passworts über eine bestehende Sitzung.
+    ---
+    tags:
+      - auth
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [current_password, new_password]
+          properties:
+            current_password: {type: string, format: password}
+            new_password: {type: string, format: password, minLength: 8}
+    responses:
+      200:
+        description: Passwort geändert.
+      400:
+        description: Neues Passwort zu kurz oder identisch mit dem alten.
+      401:
+        description: Nicht eingeloggt.
+      403:
+        description: Aktuelles Passwort falsch.
+      429:
+        description: Rate-Limit überschritten.
+    """
     body = request.get_json(silent=True) or {}
     current_password = str(body.get("current_password", ""))
     new_password = str(body.get("new_password", ""))
@@ -127,7 +209,27 @@ def delete_account():
     """Konto und ALLE zugehörigen Daten unwiderruflich löschen (DSGVO-
     „Recht auf Löschung"). Das aktuelle Passwort muss zur Bestätigung
     mitgegeben werden, damit eine gekaperte oder versehentlich offene Sitzung
-    nicht das ganze Konto vernichten kann."""
+    nicht das ganze Konto vernichten kann.
+    ---
+    tags:
+      - auth
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [password]
+          properties:
+            password: {type: string, format: password}
+    responses:
+      200:
+        description: Konto und alle Daten gelöscht.
+      401:
+        description: Nicht eingeloggt.
+      403:
+        description: Passwort falsch.
+    """
     body = request.get_json(silent=True) or {}
     password = str(body.get("password", ""))
     if not current_user.check_password(password):
@@ -147,7 +249,21 @@ def delete_account():
 @bp.get("/me")
 def me():
     """Aktuellen Login-Status abfragen – fürs Frontend, um beim Laden zu
-    entscheiden, ob Login-Formular oder App gezeigt wird."""
+    entscheiden, ob Login-Formular oder App gezeigt wird.
+    ---
+    tags:
+      - auth
+    responses:
+      200:
+        description: Login-Status (immer 200, auch wenn nicht eingeloggt).
+        schema:
+          type: object
+          properties:
+            authenticated: {type: boolean}
+            email: {type: string}
+            native_lang: {type: string}
+            active_target_lang: {type: string}
+    """
     if not current_user.is_authenticated:
         return jsonify({"authenticated": False})
     settings = current_user.settings

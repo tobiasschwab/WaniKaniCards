@@ -40,6 +40,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from flasgger import Swagger
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from flask_login import current_user, login_required
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -227,6 +228,42 @@ app.register_blueprint(srs_api.bp)
 app.register_blueprint(cards_api.bp)
 app.register_blueprint(jobs_api.bp)
 
+# API-Dokumentation (Swagger/OpenAPI, siehe flasgger). Liest die YAML-
+# Docstrings der einzelnen Routen ein und rendert daraus eine interaktive
+# Swagger-UI unter /api/docs - rein informativ/read-only, keine eigene
+# Authentifizierung nötig (Session-Cookie-Login bleibt unverändert der
+# einzige Weg, echte Requests abzusetzen).
+app.config["SWAGGER"] = {
+    "title": "Shiori API",
+    "uiversion": 3,
+    "specs_route": "/api/docs/",
+}
+Swagger(
+    app,
+    template={
+        "info": {
+            "title": "Shiori API",
+            "description": (
+                "REST-API des Shiori-Web-Frontends (WaniKani-/Dictionary-"
+                "Karteikarten, Vokabeltrainer). Die meisten Endpunkte "
+                "brauchen eine eingeloggte Session (siehe /api/auth/login) - "
+                "die Swagger-UI selbst führt keinen eigenen Login durch, "
+                "zum Ausprobieren daher vorher im normalen Web-Frontend "
+                "einloggen (teilt sich das Session-Cookie)."
+            ),
+            "version": "1.0.0",
+        },
+        "tags": [
+            {"name": "auth", "description": "Konto-Verwaltung (Signup/Login/Logout/Passwort/Löschen)"},
+            {"name": "settings", "description": "Nutzer-Einstellungen, API-Keys, Sprachen"},
+            {"name": "cards", "description": "Karten auflisten/auflösen/anpassen (WaniKani/Dictionary/eigene)"},
+            {"name": "text", "description": "Text-/KI-Modus: Text analysieren, Wörter markieren"},
+            {"name": "render", "description": "PDF-/Anki-Export-Jobs"},
+            {"name": "srs", "description": "Vokabeltrainer (Spaced Repetition, FSRS)"},
+        ],
+    },
+)
+
 
 @app.before_request
 def _reset_login_cache() -> None:
@@ -297,6 +334,17 @@ _KNOWN_META_FIELDS = ("characters", "meaning", "kind", "level", "source")
 @app.get("/api/config")
 @login_required
 def api_config() -> Any:
+    """Statische Auswahllisten fürs Render-Formular (Layouts/Typen/Formate/
+    Papierformate/Duplex) + die aktuell gespeicherten Default-Werte.
+    ---
+    tags:
+      - settings
+    responses:
+      200:
+        description: Auswahllisten + Defaults.
+      401:
+        description: Nicht eingeloggt.
+    """
     return jsonify(
         {
             "layouts": list(kc.LAYOUTS),
@@ -312,6 +360,18 @@ def api_config() -> Any:
 @app.get("/api/settings")
 @login_required
 def api_get_settings() -> Any:
+    """Einstellungen des eingeloggten Nutzers. Secrets (Token/API-Keys) werden
+    NIE im Klartext zurückgegeben - nur `*_set` (ob hinterlegt) und `*_hint`
+    (maskierter Ausschnitt, siehe `_mask()`).
+    ---
+    tags:
+      - settings
+    responses:
+      200:
+        description: Einstellungen (Secrets maskiert).
+      401:
+        description: Nicht eingeloggt.
+    """
     s = load_settings()
     token = s.get("token", "")
     deepl_key = s.get("deepl_key", "")
@@ -338,6 +398,40 @@ def api_get_settings() -> Any:
 @app.post("/api/settings")
 @login_required
 def api_post_settings() -> Any:
+    """Einstellungen teilweise aktualisieren - nur übergebene Felder ändern
+    sich, alle anderen bleiben unverändert (JSON-Merge, kein Voll-Ersatz).
+    ---
+    tags:
+      - settings
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            token: {type: string, description: "WaniKani-API-Token"}
+            deepl_key: {type: string}
+            gemini_key: {type: string}
+            gemini_model: {type: string}
+            target_lang: {type: string, description: "DeepL-Zielsprache, z. B. DE"}
+            defaults:
+              type: object
+              description: "Render-Defaults, u. a. srs_new_per_day/srs_reviews_per_day"
+    responses:
+      200:
+        description: Gespeichert.
+        schema:
+          type: object
+          properties:
+            ok: {type: boolean}
+            token_set: {type: boolean}
+            username: {type: string}
+      400:
+        description: Ungültiger Wert (z. B. Tageslimit keine ganze Zahl).
+      401:
+        description: Nicht eingeloggt.
+    """
     body = request.get_json(silent=True) or {}
     s = load_settings()
     if isinstance(body.get("token"), str):
@@ -376,7 +470,19 @@ def api_languages_public() -> Any:
     `current_user`, dessen Muttersprache/Zielsprache abfragbar wäre).
     Liefert bewusst keine nutzerspezifischen Daten, nur die statische Liste
     unterstützter Zielsprachen - `?native_lang=` steuert nur die
-    Anzeigesprache der Namen (Default Deutsch)."""
+    Anzeigesprache der Namen (Default Deutsch).
+    ---
+    tags:
+      - settings
+    parameters:
+      - name: native_lang
+        in: query
+        type: string
+        default: de
+    responses:
+      200:
+        description: Unterstützte Zielsprachen.
+    """
     native_lang = (request.args.get("native_lang") or "de").strip().lower()[:10]
     return jsonify({
         "supported_target_langs": [
@@ -392,7 +498,16 @@ def api_languages() -> Any:
     """Verfügbare Zielsprachen + Capabilities des jeweiligen `LanguagePack`
     (siehe languages/base.py) - treibt den Sprachwechsler und blendet im
     Frontend Modi ein/aus, die für die aktive Sprache keinen Sinn ergeben
-    (z. B. „Level-Stapel"/„Suche" nur bei `has_content_provider`)."""
+    (z. B. „Level-Stapel"/„Suche" nur bei `has_content_provider`).
+    ---
+    tags:
+      - settings
+    responses:
+      200:
+        description: Sprachen + Capabilities des eingeloggten Nutzers.
+      401:
+        description: Nicht eingeloggt.
+    """
     s = load_settings()
     return jsonify({
         "native_lang": s.get("native_lang", "de"),
@@ -409,7 +524,27 @@ def api_languages() -> Any:
 @login_required
 def api_post_language() -> Any:
     """Muttersprache und/oder aktive Zielsprache wechseln (Sprachwechsler) -
-    unabhängig voneinander, beide optional im Body."""
+    unabhängig voneinander, beide optional im Body.
+    ---
+    tags:
+      - settings
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            native_lang: {type: string}
+            active_target_lang: {type: string}
+    responses:
+      200:
+        description: Gewechselt.
+      400:
+        description: Nicht unterstützte Sprache.
+      401:
+        description: Nicht eingeloggt.
+    """
     body = request.get_json(silent=True) or {}
     native_lang = body.get("native_lang")
     active_target_lang = body.get("active_target_lang")
@@ -431,7 +566,27 @@ def api_gemini_models() -> Any:
     """Verfügbare Gemini-Modelle live per API abrufen (ListModels), statt eine
     hartcodierte Liste zu pflegen – akzeptiert optional einen noch nicht
     gespeicherten Key aus dem Formular (analog zu /api/test-token), sonst den
-    in den Einstellungen hinterlegten."""
+    in den Einstellungen hinterlegten.
+    ---
+    tags:
+      - settings
+    parameters:
+      - name: body
+        in: body
+        schema:
+          type: object
+          properties:
+            key: {type: string, description: "optional, sonst der gespeicherte Key"}
+    responses:
+      200:
+        description: Verfügbare Modelle + Default.
+      400:
+        description: Kein Key angegeben (weder im Body noch gespeichert).
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: Gemini-API-Fehler (ungültiger Key/Netzwerk) oder keine passenden Modelle.
+    """
     key = (request.get_json(silent=True) or {}).get("key") or load_settings().get("gemini_key", "")
     if not key:
         return jsonify({"error": "Kein Gemini-API-Key angegeben."}), 400
@@ -451,7 +606,29 @@ def api_gemini_tts() -> Any:
     eine data-URI zurück, die sich sowohl direkt im Browser abspielen als
     auch beim Erstellen einer KI-Karte einbetten lässt (siehe
     `gemini_client.synthesize_speech()`, nutzt denselben Gemini-Key wie die
-    Satzanalyse statt einen separaten Google-Cloud-TTS-Zugang zu brauchen)."""
+    Satzanalyse statt einen separaten Google-Cloud-TTS-Zugang zu brauchen).
+    ---
+    tags:
+      - text
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [text]
+          properties:
+            text: {type: string}
+    responses:
+      200:
+        description: "audio_data_uri (data:audio/wav;base64,...)."
+      400:
+        description: Kein Text angegeben oder kein Gemini-Key hinterlegt.
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: Sprachausgabe fehlgeschlagen.
+    """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", "")).strip()
     if not text:
@@ -475,7 +652,30 @@ def api_gemini_generate_image() -> Any:
     eine data-URI zurück, die im Frontend direkt als Vorschau angezeigt und
     bei „Übernehmen" als `field_overrides[id].image_data_uri` gespeichert
     wird (siehe FIELD_SCHEMAS in web/app.js). Bewusst pro Klick ein neuer,
-    ungecachter Request – „Neu generieren" soll ein anderes Ergebnis liefern."""
+    ungecachter Request – „Neu generieren" soll ein anderes Ergebnis liefern.
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [word]
+          properties:
+            word: {type: string}
+            meaning: {type: string}
+    responses:
+      200:
+        description: "image_data_uri (data:<mime>;base64,...)."
+      400:
+        description: Kein Wort angegeben oder kein Gemini-Key hinterlegt.
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: Bildgenerierung fehlgeschlagen.
+    """
     body = request.get_json(silent=True) or {}
     word = str(body.get("word", "")).strip()
     if not word:
@@ -495,6 +695,27 @@ def api_gemini_generate_image() -> Any:
 @app.post("/api/test-token")
 @login_required
 def api_test_token() -> Any:
+    """WaniKani-Token testen und Benutzernamen für den Kartenaufdruck merken.
+    ---
+    tags:
+      - settings
+    parameters:
+      - name: body
+        in: body
+        schema:
+          type: object
+          properties:
+            token: {type: string, description: "optional, sonst der gespeicherte Token"}
+    responses:
+      200:
+        description: "{ok: true, username, level}."
+      400:
+        description: Kein Token angegeben (weder im Body noch gespeichert).
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: WaniKani-API-Fehler (ungültiger Token).
+    """
     if (blocked := _require_content_provider()) is not None:
         return blocked
     token = (request.get_json(silent=True) or {}).get("token") or load_settings().get(
@@ -522,6 +743,32 @@ def api_resolve() -> Any:
     """Quelle in eine Kartenliste (Tabelle) auflösen.
 
     body.mode: "level" | "search" | "compose"
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [mode]
+          properties:
+            mode: {type: string, enum: [level, search, compose]}
+            sample: {type: boolean, default: false}
+            level: {type: integer, description: "nur mode=level"}
+            types: {type: array, items: {type: string}, description: "nur mode=level, z. B. [kanji, radical, vocabulary]"}
+            q: {type: string, description: "nur mode=search"}
+            subject_ids: {type: array, items: {type: integer}, description: "nur mode=compose"}
+    responses:
+      200:
+        description: Aufgelöste Kartenliste (Kurzfassung je Karte).
+      400:
+        description: Unbekannter Modus oder ungültige Eingabe.
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: WaniKani-API-Fehler.
     """
     if (blocked := _require_content_provider()) is not None:
         return blocked
@@ -557,6 +804,28 @@ def api_card_detail() -> Any:
     Kartentabelle. Die Tabelle selbst (`/api/resolve`) zeigt nur eine
     Kurzfassung (Zeichen/Bedeutung/Level), zum Bearbeiten braucht das
     Frontend aber alle Felder (Lesungen, Beispielvokabel/-satz, Merkhilfen …).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [subject_ids]
+          properties:
+            subject_ids: {type: array, items: {type: integer}}
+            sample: {type: boolean, default: false}
+    responses:
+      200:
+        description: "cards: {subject_id (als String): volle Felder}."
+      400:
+        description: Ungültige Eingabe.
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: WaniKani-API-Fehler.
     """
     if (blocked := _require_content_provider()) is not None:
         return blocked
@@ -584,7 +853,30 @@ def api_save_subject_overrides() -> Any:
     Review) geänderte WaniKani-Karten-Felder dauerhaft für den eigenen Account
     speichern (siehe `models.SubjectFieldOverride`) – gilt NIE global, nur für
     diesen Nutzer, und fließt automatisch in künftige PDF-/Anki-Exports
-    dieses Nutzers ein (`services._build_mixed_deck()`)."""
+    dieses Nutzers ein (`services._build_mixed_deck()`).
+    ---
+    tags:
+      - cards
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [subject_id, fields]
+          properties:
+            subject_id: {type: integer}
+            fields:
+              type: object
+              description: "Feldname -> neuer Wert; ein Wert von null löscht genau dieses Feld wieder"
+    responses:
+      200:
+        description: Gespeichert (gemergt mit evtl. bereits vorhandenen Overrides).
+      400:
+        description: Ungültige subject_id oder fields.
+      401:
+        description: Nicht eingeloggt.
+    """
     body = request.get_json(silent=True) or {}
     subject_id = kc._int_or_none(body.get("subject_id"))
     if subject_id is None:
@@ -603,7 +895,30 @@ def api_translate() -> Any:
     Englisch) per DeepL in die in den Einstellungen hinterlegte Zielsprache
     übersetzen – für den „Felder manuell anpassen"-Dialog (dortiger
     🌐-Button). `source_lang` per Default "EN", da WaniKani-Texte englisch
-    sind; für japanische Beispielsätze übergibt das Frontend "JA"."""
+    sind; für japanische Beispielsätze übergibt das Frontend "JA".
+    ---
+    tags:
+      - text
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [text]
+          properties:
+            text: {type: string}
+            source_lang: {type: string, default: EN}
+    responses:
+      200:
+        description: Übersetzter Text + Zielsprache.
+      400:
+        description: Kein Text angegeben oder kein DeepL-Key hinterlegt.
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: Übersetzung fehlgeschlagen.
+    """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", "")).strip()
     if not text:
@@ -656,6 +971,28 @@ def api_text_annotate() -> Any:
     Nur verfügbar, wenn die aktive Zielsprache einen Offline-Tokenizer hat
     (aktuell nur Japanisch/Janome) - für andere Sprachen siehe
     `/api/text-annotate-ai` (Gemini-gestützt, funktioniert sprachunabhängig).
+    ---
+    tags:
+      - text
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [text]
+          properties:
+            text: {type: string}
+            sample: {type: boolean, default: false}
+    responses:
+      200:
+        description: Annotierte Zeilen + Bekannt-Prozent-Statistik.
+      400:
+        description: Aktive Zielsprache hat keinen Offline-Tokenizer.
+      401:
+        description: Nicht eingeloggt.
+      502:
+        description: WaniKani-API-Fehler.
     """
     if not _current_pack().has_offline_tokenizer:
         return jsonify({"error": "Dieser Modus ist nur für Japanisch verfügbar. Bitte „Mit KI“ verwenden."}), 400
@@ -719,6 +1056,30 @@ def api_text_annotate_ai() -> Any:
     wie `source: "dictionary"` über `kanacards/` (dieselbe Karten-
     Infrastruktur, nur mit KI- statt JMdict-Bedeutung; eine Karte entsteht
     aber erst, wenn der Nutzer sie manuell über `/api/kanacards` anlegt).
+    ---
+    tags:
+      - text
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [text]
+          properties:
+            text: {type: string}
+            sample: {type: boolean, default: false}
+    responses:
+      200:
+        description: Satzweise Analyse (Übersetzung, Grammatik, Wort-Segmente).
+      400:
+        description: Kein Gemini-Key in den Einstellungen hinterlegt.
+      401:
+        description: Nicht eingeloggt.
+      429:
+        description: Rate-Limit überschritten.
+      502:
+        description: WaniKani-API-Fehler.
     """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", ""))
@@ -793,6 +1154,28 @@ def api_text_extract() -> Any:
     PDF-Seiten mit Textlayer werden kostenlos direkt ausgelesen; Seiten ohne
     Textlayer (Scans) und Bilder brauchen für die Texterkennung einen in
     den Einstellungen hinterlegten Gemini-Key.
+    ---
+    tags:
+      - text
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: "PDF oder Bild, max. 20 MB"
+    responses:
+      200:
+        description: Extrahierter Text.
+      400:
+        description: Keine/leere/zu große Datei, oder Extraktion fehlgeschlagen.
+      401:
+        description: Nicht eingeloggt.
+      422:
+        description: Kein Text gefunden (Scan/Bild ohne Gemini-Key).
+      429:
+        description: Rate-Limit überschritten.
     """
     file = request.files.get("file")
     if not file or not file.filename:
@@ -829,6 +1212,34 @@ def api_text_extract() -> Any:
 @app.post("/api/known/<string:word_id>")
 @login_required
 def api_mark_known(word_id: str) -> Any:
+    """Ein Wort manuell als „bekannt" markieren – unabhängig davon, ob dafür
+    bereits eine Karte existiert. `word_id` ist entweder eine numerische
+    WaniKani-Subject-ID oder eine `kana_.../aikana_.../manual_...`-ID.
+    ---
+    tags:
+      - text
+    parameters:
+      - name: word_id
+        in: path
+        type: string
+        required: true
+      - name: body
+        in: body
+        schema:
+          type: object
+          description: "Anzeige-Metadaten für die Wortliste (characters/meaning/kind/level/source) - nötig, wenn noch keine Karte existiert."
+          properties:
+            characters: {type: string}
+            meaning: {type: string}
+            kind: {type: string}
+            level: {type: integer}
+            source: {type: string}
+    responses:
+      200:
+        description: Als bekannt markiert.
+      401:
+        description: Nicht eingeloggt.
+    """
     coerced = _coerce_known_id(word_id)
     body = request.get_json(silent=True) or {}
     fields = {k: body[k] for k in _KNOWN_META_FIELDS if k in body}
@@ -839,6 +1250,21 @@ def api_mark_known(word_id: str) -> Any:
 @app.delete("/api/known/<string:word_id>")
 @login_required
 def api_unmark_known(word_id: str) -> Any:
+    """Bekannt-Markierung eines Worts wieder entfernen.
+    ---
+    tags:
+      - text
+    parameters:
+      - name: word_id
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: Markierung entfernt.
+      401:
+        description: Nicht eingeloggt.
+    """
     coerced = _coerce_known_id(word_id)
     _remove_known_word(str(coerced))
     return jsonify({"ok": True, "id": coerced, "known": False})
@@ -852,7 +1278,21 @@ def api_wortliste() -> Any:
     """Vereinigte Liste aller bekannten Wörter: WaniKani (exportiert oder
     manuell markiert), Dictionary (Karte erstellt oder manuell markiert) und
     rein manuelle Einträge ohne Karte/Subject. Volltextsuche/Filter passiert
-    clientseitig (Liste ist überschaubar, keine Server-Roundtrips nötig)."""
+    clientseitig (Liste ist überschaubar, keine Server-Roundtrips nötig).
+    ---
+    tags:
+      - text
+    parameters:
+      - name: sample
+        in: query
+        type: string
+        enum: ["1", "true", "True"]
+    responses:
+      200:
+        description: Vereinigte Wortliste.
+      401:
+        description: Nicht eingeloggt.
+    """
     sample = request.args.get("sample") in ("1", "true", "True")
     exported = _already_exported_ids()
     manual = load_known()
@@ -937,7 +1377,28 @@ def api_wortliste() -> Any:
 @login_required
 def api_wortliste_add_manual() -> Any:
     """Rein manuellen Eintrag (ohne WaniKani-Subject/Dictionary-Treffer) zur
-    Wortliste hinzufügen – z. B. ein Wort, das man von woanders schon kann."""
+    Wortliste hinzufügen – z. B. ein Wort, das man von woanders schon kann.
+    ---
+    tags:
+      - text
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required: [characters]
+          properties:
+            characters: {type: string}
+            meaning: {type: string}
+    responses:
+      200:
+        description: Angelegter Eintrag.
+      400:
+        description: Kein Wort angegeben.
+      401:
+        description: Nicht eingeloggt.
+    """
     body = request.get_json(silent=True) or {}
     characters = str(body.get("characters", "")).strip()
     meaning = str(body.get("meaning", "")).strip()
