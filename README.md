@@ -790,6 +790,8 @@ zurück – **nur** für Demo/Entwicklung geeignet, nicht für einen echten
 | `WKCARDS_SESSION_SECRET` | Flasks Session-Signing-Key (`SECRET_KEY`) – bewusst **eine andere** Variable als `WKCARDS_SECRET_KEY`: unterschiedliche Rotationsanforderungen/Formate. |
 | `SESSION_COOKIE_SECURE` | `1` = Session-Cookie nur über HTTPS senden. In Produktion hinter HTTPS-Terminierung setzen; in der lokalen `http://localhost`-Entwicklung weglassen (sonst wird das Cookie nicht gesetzt und der Login schlägt fehl). |
 | `TRUST_PROXY` | Anzahl vertrauenswürdiger Reverse-Proxy-Hops davor (meist `1`). Aktiviert `ProxyFix`, damit `X-Forwarded-For` ausgewertet wird und Rate-Limiting/Client-IP hinter einem Proxy stimmen. **Nur setzen, wenn wirklich ein Proxy davor steht** – sonst könnte ein Client die Header fälschen und das per-IP-Limit umgehen. |
+| `SENTRY_DSN` | Aktiviert Error-Tracking via [Sentry](https://sentry.io) für Web-App **und** Render-Worker (`FlaskIntegration`/`RqIntegration`). Ohne gesetzt: kein Sentry-Import-Overhead, keine Netzwerkaufrufe – lokale Entwicklung/Tests laufen komplett ohne. `send_default_pii` ist bewusst deaktiviert (keine Cookies/Auth-Header im Report, da dort WaniKani-/DeepL-/Gemini-Keys landen könnten). |
+| `SENTRY_ENVIRONMENT` | Freitext-Label für die Sentry-Environment (z. B. `production`, `staging`). Default: `production`. Nur relevant, wenn `SENTRY_DSN` gesetzt ist. |
 
 **Aktueller Stand – Phase 2 (Datenmigration & Autorisierung), umgesetzt:**
 

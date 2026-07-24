@@ -18,9 +18,8 @@ Der WaniKani-Token des jeweils eingeloggten Nutzers wird dabei explizit als
 Phase 2 zunächst – über die prozessglobale Umgebungsvariable
 `WANIKANI_API_TOKEN`), damit unter echter Nebenläufigkeit mehrerer Nutzer im
 selben Worker kein Request versehentlich den Token eines anderen Nutzers
-verwendet. `WANIKANI_API_TOKEN` bleibt nur der Fallback fürs CLI
-(`python kanji_cards.py <level>`), wo es ohnehin nur einen Nutzer pro
-Prozessaufruf gibt.
+verwendet. `WANIKANI_API_TOKEN` bleibt nur ein ungenutzter Fallback in
+`kanji_cards._make_client()` aus der Zeit vor dem Web-Frontend.
 
 **Architektur (P2-Refactor, siehe README "Migrationsdisziplin"/"Architektur"):**
 Storage-/Domänen-Helfer (Settings, Jobs, eigene/Dictionary-Karten, Render-
@@ -40,9 +39,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+import sentry_sdk
 from flasgger import Swagger
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 from flask_login import current_user, login_required
+from sentry_sdk.integrations.flask import FlaskIntegration
+from sentry_sdk.integrations.rq import RqIntegration
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import cards_api, crypto, jobs_api, models, pdf_import, srs_api
@@ -122,6 +124,27 @@ WEB_DIR = REPO_ROOT / "web"
 VENDOR_DIR = REPO_ROOT / "vendor"
 
 logger = logging.getLogger(__name__)
+
+# Error-Tracking (Sentry) - bewusst NUR aktiv, wenn eine SENTRY_DSN gesetzt
+# ist (lokale Entwicklung/Tests laufen ohne Sentry-Projekt, kein Rauschen
+# beim Import). RqIntegration erfasst auch Fehler im Render-Worker-Prozess
+# (siehe services._run_render()), nicht nur im Webserver.
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[FlaskIntegration(), RqIntegration()],
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+        # Traces/Profiling bewusst aus (0.0) - hier geht es um Fehler-
+        # Tracking, nicht um Performance-Monitoring; ein zusätzliches
+        # Sampling-Kontingent für Traces bräuchte eine bewusste Entscheidung
+        # (Kosten/Datenschutz), keinen stillen Default.
+        traces_sample_rate=0.0,
+        # Session-/Anfrage-Daten (Cookies, Auth-Header) nie an Sentry
+        # senden - WaniKani-/DeepL-/Gemini-Keys landen sonst potenziell
+        # in einem Fehlerbericht.
+        send_default_pii=False,
+    )
 
 app = Flask(__name__, static_folder=None)
 

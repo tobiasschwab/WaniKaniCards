@@ -22,3 +22,6 @@ fsrs>=6.0
 
 # API-Dokumentation (Swagger/OpenAPI-UI unter /api/docs, siehe webapp.py).
 flasgger>=0.9.7
+
+# Error-Tracking (nur aktiv, wenn SENTRY_DSN gesetzt ist, siehe webapp.py).
+sentry-sdk[flask]>=2.0

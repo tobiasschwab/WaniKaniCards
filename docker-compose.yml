@@ -63,6 +63,9 @@ services:
       # Optional: S3/MinIO statt lokalem Disk für PDFs/APKGs (siehe storage.py).
       # S3_BUCKET: shiori-outputs
       # S3_ENDPOINT_URL: http://minio:9000
+      # Optional: Error-Tracking via Sentry, siehe webapp.py.
+      # SENTRY_DSN: https://xxx@xxx.ingest.sentry.io/xxx
+      # SENTRY_ENVIRONMENT: production
     volumes:
       # PDFs/Anki-Exporte + API-Caches liegen weiterhin dateibasiert im Host-
       # Ordner ./data, solange kein S3_BUCKET gesetzt ist (siehe storage.py).
@@ -88,6 +91,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
       WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}
+      # Optional: Error-Tracking via Sentry, erfasst auch Fehler in Render-Jobs
+      # (RqIntegration), siehe webapp.py.
+      # SENTRY_DSN: https://xxx@xxx.ingest.sentry.io/xxx
+      # SENTRY_ENVIRONMENT: production
     volumes:
       - ./data:/data
     restart: unless-stopped
