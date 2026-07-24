@@ -595,6 +595,16 @@ data/
 
 ### Mit Docker starten (empfohlen)
 
+> ⚠️ **Host mit nur Python 2 (z. B. QNAP/Synology-NAS)?** Die Befehle unten
+> mit `python3 -c "from crypto import ..."` funktionieren dort **nicht** –
+> `crypto.py` nutzt Python-3-Syntax (f-Strings, Type Hints) und das
+> `cryptography`-Paket, beides gibt es unter Python 2 nicht. Das ist auch
+> **keine Encoding-Frage** – ein `# -*- coding: utf-8 -*-`-Header in `crypto.py`
+> würde daran nichts ändern, der `SyntaxError` kommt von der Sprachversion,
+> nicht von der Zeichenkodierung. Lies stattdessen direkt weiter unten bei
+> „Kein Python 3 auf dem Host?" – dort erzeugst du denselben Key ganz ohne
+> `crypto.py` auszuführen, z. B. rein mit `openssl`.
+
 ```bash
 export WKCARDS_SECRET_KEY=$(python3 -c "from crypto import generate_master_key; print(generate_master_key())")
 export WKCARDS_SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
@@ -602,23 +612,28 @@ docker compose up --build      # baut das Image, startet zusätzlich einen Postg
 # → Frontend auf http://localhost:9020
 ```
 
-**Kein Python 3 auf dem Host?** (z. B. QNAP/Synology-NAS mit nur Python 2):
+**Kein Python 3 auf dem Host?** (z. B. QNAP/Synology-NAS mit nur Python 2.7):
 Ein Fernet-Master-Key ist einfach 32 Zufallsbytes, URL-safe base64-kodiert –
-beide Befehle erzeugen einen gleichwertigen, gültigen Key ganz ohne Python 3:
+beide Befehle erzeugen einen gleichwertigen, gültigen Key ganz ohne Python 3
+und ohne `crypto.py` je auszuführen:
 
 ```bash
-# Variante A: openssl (auf praktisch jedem NAS vorhanden)
+# Variante A: openssl (auf praktisch jedem NAS vorhanden, empfohlen)
 export WKCARDS_SECRET_KEY=$(openssl rand -base64 32 | tr '+/' '-_')
-# Variante B: auch mit Python 2.7 lauffähig
+echo "$WKCARDS_SECRET_KEY"   # aufschreiben/sichern - bei Verlust sind gespeicherte Keys unlesbar
+
+# Variante B: falls kein openssl vorhanden ist, tut's auch das System-Python 2.7
 export WKCARDS_SECRET_KEY=$(python -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)))")
 
-# Session-Secret (beliebiger langer Zufalls-Hex-String):
+# Session-Secret (beliebiger langer Zufalls-Hex-String, kein Fernet-Key nötig):
 export WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)
 ```
 
-`crypto.py` direkt auszuführen braucht dagegen zwingend Python 3 + das
-`cryptography`-Paket (im Docker-Image beides enthalten) – unter Python 2
-scheitert schon der Import an der Syntax.
+Diese beiden `export`-Zeilen ersetzen die zwei `python3 -c "..."`-Zeilen im
+Codeblock oben 1:1 – der Rest (`docker compose up --build`) bleibt gleich.
+`crypto.py` selbst muss auf dem NAS-Host **nie** ausgeführt werden; der Key
+wird nur als Umgebungsvariable an den Docker-Container weitergereicht, in dem
+Python 3 + `cryptography` bereits enthalten sind (siehe `Dockerfile`).
 
 Der Host-Ordner `./data` ist als Volume eingehängt (`./data:/data`), sodass
 PDFs/APKGs und API-Caches einen Neustart überdauern; Accounts/Einstellungen
