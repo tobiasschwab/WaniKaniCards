@@ -405,7 +405,7 @@ kompletten Start (Docker Compose empfohlen). Kurzfassung ohne Docker:
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python webapp.py    # http://localhost:8000
+python -m shiori.webapp    # http://localhost:8000
 ```
 
 Der WaniKani-Token (wanikani.com → Settings → API Tokens, read-only genügt)
@@ -588,7 +588,7 @@ data/
 ### Mit Docker starten (empfohlen)
 
 > ⚠️ **Host mit nur Python 2 (z. B. QNAP/Synology-NAS)?** Die Befehle unten
-> mit `python3 -c "from crypto import ..."` funktionieren dort **nicht** –
+> mit `python3 -c "from shiori.crypto import ..."` funktionieren dort **nicht** –
 > `crypto.py` nutzt Python-3-Syntax (f-Strings, Type Hints) und das
 > `cryptography`-Paket, beides gibt es unter Python 2 nicht. Das ist auch
 > **keine Encoding-Frage** – ein `# -*- coding: utf-8 -*-`-Header in `crypto.py`
@@ -598,7 +598,7 @@ data/
 > `crypto.py` auszuführen, z. B. rein mit `openssl`.
 
 ```bash
-export WKCARDS_SECRET_KEY=$(python3 -c "from crypto import generate_master_key; print(generate_master_key())")
+export WKCARDS_SECRET_KEY=$(python3 -c "from shiori.crypto import generate_master_key; print(generate_master_key())")
 export WKCARDS_SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 docker compose up --build      # baut das Image, startet zusätzlich einen Postgres-Service
 # → Frontend auf http://localhost:9020
@@ -697,14 +697,14 @@ Konto registrieren (E-Mail/Passwort), danach oben rechts auf ⚙ klicken, den
 
 ```bash
 pip install -r requirements.txt -r requirements-web.txt
-python webapp.py               # http://localhost:8000  (Entwicklungsserver, SQLite-Fallback)
+python -m shiori.webapp        # http://localhost:8000  (Entwicklungsserver, SQLite-Fallback)
 # produktiv:
-gunicorn -b 0.0.0.0:8000 -w 2 --timeout 600 webapp:app
+gunicorn -b 0.0.0.0:8000 -w 2 --timeout 600 shiori.webapp:app
 ```
 
-Der Token wird über die Oberfläche gesetzt und landet in `data/settings.json`
-(nicht im Repo – `data/` ist in `.gitignore`). Alternativ funktioniert weiter
-`WANIKANI_API_TOKEN` als Umgebungsvariable fürs CLI.
+Der Token wird über die Oberfläche gesetzt und landet verschlüsselt in der
+Datenbank (pro Nutzer, siehe [Multi-User-Architektur](#multi-user-architektur-umbau-in-arbeit)),
+nicht in einer Datei.
 
 ## Multi-User-Architektur (Umbau in Arbeit)
 
@@ -769,7 +769,7 @@ Spalten nicht auch böten.
   Klartext (akzeptabel, nur der Betreiber selbst betroffen); bei einer
   öffentlichen Instanz mit fremden Nutzern nicht mehr. Braucht einen
   serverseitigen Master-Key (`WKCARDS_SECRET_KEY`, erzeugen mit
-  `python -c "from crypto import generate_master_key; print(generate_master_key())"`).
+  `python -c "from shiori.crypto import generate_master_key; print(generate_master_key())"`).
 - `migrations/` (Alembic): versioniertes Schema-Management für Postgres.
   `alembic upgrade head` (läuft automatisch beim Container-Start, siehe
   `docker-entrypoint.sh`) statt `db.create_all()` in Produktion – Letzteres
@@ -1268,7 +1268,36 @@ Einstellungs-Panel unter „Konto".
 
 ## Architektur
 
-Ein Skript (`kanji_cards.py`), klar in Funktionen getrennt:
+**Ordnerstruktur:** Der komplette Anwendungscode liegt im `shiori/`-Package
+(statt einzelner `.py`-Dateien im Projekt-Root) – Docker-Volumes, Alembic-
+Migrationen und die statischen Frontend-Assets brauchen ihre bekannten
+Repo-Root-Pfade, deshalb bleiben `web/`, `templates/`, `fonts/`, `vendor/`,
+`migrations/`, `data/` und `tests/` bewusst außerhalb des Packages:
+
+```
+shiori/                  # kompletter Anwendungscode (ein Package)
+├── webapp.py             # Flask-App + Kern-Routen (Entry Point: shiori.webapp:app)
+├── auth.py, srs_api.py, cards_api.py, jobs_api.py   # Blueprints
+├── services.py           # geteilte Domänen-/Storage-Logik + Render-Worker
+├── models.py, extensions.py
+├── kanji_cards.py         # Kartenbau/PDF-Rendering (keine Flask-Abhängigkeit)
+├── anki_export.py, dictionary.py, gemini_client.py, crypto.py, storage.py,
+│   srs.py, pdf_import.py
+└── languages/             # Sprachpaket-Abstraktion (LanguagePack)
+web/                      # statisches Frontend (HTML/CSS/JS, kein Build-Schritt)
+templates/                # Jinja2-Template fürs PDF-Rendering
+migrations/               # Alembic (Schema-Historie)
+tests/
+```
+
+Innerhalb von `shiori/` referenzieren sich die Module über relative Imports
+(`from . import services`, `from .extensions import db`, …). Nicht-Python-
+Assets (Schriften/Templates/Vendor-JS) werden relativ zum **Repo-Root**
+adressiert (`Path(__file__).resolve().parent.parent`), nicht relativ zum
+Package – siehe die `REPO_ROOT`-Konstanten in `webapp.py`/`kanji_cards.py`/
+`anki_export.py`/`services.py`.
+
+Innerhalb des Packages: ein Kern-Modul (`kanji_cards.py`), klar in Funktionen getrennt:
 
 - **WaniKani-Client** – `fetch_kanji(level)`, `fetch_vocab(ids)` (Batch + Cache),
   `_request()` mit Auth-/Revision-Header und 429/5xx-Backoff.

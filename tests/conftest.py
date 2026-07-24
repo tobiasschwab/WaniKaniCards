@@ -24,10 +24,8 @@ os.environ.setdefault("WKCARDS_SECRET_KEY", "dN4DNC08zC7HtrKO0MDE7QGp5LLxLb4yFD0
 import pytest  # noqa: E402
 from flask_login import login_user  # noqa: E402
 
-import models  # noqa: E402
-import services  # noqa: E402
-import webapp  # noqa: E402
-from extensions import db  # noqa: E402
+from shiori import models, services, webapp  # noqa: E402
+from shiori.extensions import db  # noqa: E402
 
 
 @pytest.fixture

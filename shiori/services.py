@@ -27,18 +27,22 @@ from flask_login import current_user
 from rq import Queue
 from sqlalchemy.exc import IntegrityError
 
-import anki_export as ae
-import crypto
-import kanji_cards as kc
-import models
-import storage
-from extensions import db
-from languages.registry import get_pack
+from . import anki_export as ae
+from . import crypto
+from . import kanji_cards as kc
+from . import models
+from . import storage
+from .extensions import db
+from .languages.registry import get_pack
 
 logger = logging.getLogger(__name__)
 
-HERE = Path(__file__).resolve().parent
-DATA_DIR = Path(os.environ.get("WKCARDS_DATA", HERE / "data")).resolve()
+# Repo-Root (eine Ebene über dem `shiori`-Package) - der lokale Dev-Fallback
+# für DATA_DIR ohne gesetztes WKCARDS_DATA (Docker setzt es immer auf /data)
+# soll weiterhin im vom README/.gitignore erwarteten `data/`-Ordner neben dem
+# Package landen, nicht innerhalb von `shiori/`.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ.get("WKCARDS_DATA", REPO_ROOT / "data")).resolve()
 OUTPUT_DIR = DATA_DIR / "output"
 for _d in (DATA_DIR, OUTPUT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
@@ -742,7 +746,7 @@ def _run_render(job_id: str) -> None:
     importieren, ein Import von webapp.py auf Modulebene wäre also ein
     Zirkelimport. Zur Ausführungszeit dieser Funktion (als RQ-Job, lange
     nach dem Start) ist webapp.py garantiert schon vollständig geladen."""
-    from webapp import app
+    from .webapp import app
 
     with app.app_context():
         job = read_job(job_id)

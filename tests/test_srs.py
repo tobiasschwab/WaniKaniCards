@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import fsrs
-import srs
+from shiori import srs
 
 
 def test_new_review_state_is_due_immediately():

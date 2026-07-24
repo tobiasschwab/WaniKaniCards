@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import models
-import webapp
-from models import User, UserSettings
+from shiori import models
+from shiori import webapp
+from shiori.models import User, UserSettings
 
 
 def test_signup_creates_user_and_settings_and_logs_in(db_session):

@@ -29,11 +29,13 @@ import zlib
 from pathlib import Path
 from typing import Any, Sequence
 
-import kanji_cards as kc
+from . import kanji_cards as kc
 
-HERE = Path(__file__).resolve().parent
-FONT_DIR = HERE / "fonts"
-VENDOR_DIR = HERE / "vendor"
+# Repo-Root (eine Ebene über dem `shiori`-Package) - fonts/ und vendor/ liegen
+# dort, nicht im Package (siehe webapp.py REPO_ROOT-Kommentar).
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FONT_DIR = REPO_ROOT / "fonts"
+VENDOR_DIR = REPO_ROOT / "vendor"
 
 # Unterstrich-Präfix: schützt die Dateien in Anki vor "Nicht verwendete
 # Medien löschen" (Anki scannt dafür nur Feld-HTML, keine CSS @font-face-

@@ -8,11 +8,12 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Projekt-Root importierbar machen (models.py liegt dort, nicht unter migrations/).
+# Projekt-Root importierbar machen (das `shiori`-Package liegt dort, nicht
+# unter migrations/).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import models  # noqa: E402  – nur der Import registriert alle Tabellen an db.metadata
-from extensions import db  # noqa: E402
+from shiori import models  # noqa: E402  – nur der Import registriert alle Tabellen an db.metadata
+from shiori.extensions import db  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

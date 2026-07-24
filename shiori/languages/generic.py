@@ -11,7 +11,7 @@ sprachspezifisches Wörterbuch wie JMdict (siehe README "Multi-Language-
 Architektur", Entscheidung 3)."""
 from __future__ import annotations
 
-from languages.base import LanguagePack
+from .base import LanguagePack
 
 
 def generic_pack(code: str) -> LanguagePack:

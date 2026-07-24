@@ -14,11 +14,11 @@ from typing import Any
 from flask import Blueprint, abort, jsonify, redirect, request, send_file
 from flask_login import current_user, login_required
 
-import kanji_cards as kc
-import models
-import storage
-from extensions import db, limiter
-from services import (
+from . import kanji_cards as kc
+from . import models
+from . import storage
+from .extensions import db, limiter
+from .services import (
     OUTPUT_DIR,
     MAX_CONCURRENT_JOBS_PER_USER,
     _current_target_lang,

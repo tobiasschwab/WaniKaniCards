@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import kanji_cards as kc
+from shiori import kanji_cards as kc
 
 
 def _fetcher():

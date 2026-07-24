@@ -10,10 +10,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy.exc import IntegrityError
 
-import models  # noqa: E402
-import services  # noqa: E402
-import webapp  # noqa: E402
-from extensions import db  # noqa: E402
+from shiori import models  # noqa: E402
+from shiori import services  # noqa: E402
+from shiori import webapp  # noqa: E402
+from shiori.extensions import db  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -198,7 +198,7 @@ def test_api_text_annotate_marks_manually_known_words(client):
 
 
 def test_api_text_annotate_classifies_dictionary_words(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
 
     r = client.post("/api/text-annotate", json={"text": "しあいがはじまりました。", "sample": True})
@@ -213,7 +213,7 @@ def test_api_text_annotate_classifies_dictionary_words(client, monkeypatch):
 
 
 def test_api_text_annotate_ready_true_when_dictionary_card_already_created(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
 
     first = client.post("/api/text-annotate", json={"text": "しあいがはじまりました。", "sample": True}).get_json()
@@ -281,7 +281,7 @@ def test_api_text_annotate_ai_passes_settings_key_and_model(client, monkeypatch)
         seen["gemini_model"] = gemini_model
         return []
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc, "annotate_text_ai", fake_annotate_text_ai)
 
     r = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
@@ -302,7 +302,7 @@ def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(client, monkey
         seen["gemini_model"] = gemini_model
         return []
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc, "annotate_text_ai", fake_annotate_text_ai)
 
     r = client.post("/api/text-annotate-ai", json={"text": "x", "sample": True})
@@ -313,7 +313,7 @@ def test_api_text_annotate_ai_trusts_any_stored_gemini_model_name(client, monkey
 def test_api_text_annotate_ai_word_stats_and_ai_source_uses_kanacards(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
 
     def fake_annotate_text_ai(text, *, gemini_key=None, gemini_model=None, use_cache=True, sample=False, token=None, **kwargs):
         return [{
@@ -447,7 +447,7 @@ def test_api_gemini_models_uses_stored_key_when_none_provided(client, monkeypatc
         seen["key"] = key
         return ["gemini-flash-latest", "gemini-3-pro-preview"]
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "list_models", fake_list_models)
 
     r = client.post("/api/gemini/models", json={})
@@ -467,7 +467,7 @@ def test_api_gemini_models_prefers_explicit_key_over_stored(client, monkeypatch)
         seen["key"] = key
         return ["gemini-flash-latest"]
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "list_models", fake_list_models)
 
     r = client.post("/api/gemini/models", json={"key": "explicitkey"})
@@ -476,7 +476,7 @@ def test_api_gemini_models_prefers_explicit_key_over_stored(client, monkeypatch)
 
 
 def test_api_gemini_models_returns_502_on_invalid_key(client, monkeypatch):
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "list_models", lambda key, **kw: None)
 
     r = client.post("/api/gemini/models", json={"key": "badkey"})
@@ -484,7 +484,7 @@ def test_api_gemini_models_returns_502_on_invalid_key(client, monkeypatch):
 
 
 def test_api_gemini_models_returns_502_on_empty_result(client, monkeypatch):
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "list_models", lambda key, **kw: [])
 
     r = client.post("/api/gemini/models", json={"key": "somekey"})
@@ -505,7 +505,7 @@ def test_api_gemini_tts_requires_stored_key(client):
 def test_api_gemini_tts_returns_data_uri(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "synthesize_speech", lambda text, key, **kw: b"RIFF....WAVEfmt ")
 
     r = client.post("/api/gemini/tts", json={"text": "大きい山です。"})
@@ -516,7 +516,7 @@ def test_api_gemini_tts_returns_data_uri(client, monkeypatch):
 def test_api_gemini_tts_returns_502_on_synthesis_failure(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "synthesize_speech", lambda text, key, **kw: None)
 
     r = client.post("/api/gemini/tts", json={"text": "大きい山です。"})
@@ -537,7 +537,7 @@ def test_api_gemini_generate_image_requires_stored_key(client):
 def test_api_gemini_generate_image_returns_data_uri(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "generate_image", lambda word, meaning, key, **kw: (b"pngbytes", "image/png"))
 
     r = client.post("/api/gemini/generate-image", json={"word": "家", "meaning": "Haus"})
@@ -548,7 +548,7 @@ def test_api_gemini_generate_image_returns_data_uri(client, monkeypatch):
 def test_api_gemini_generate_image_returns_502_on_failure(client, monkeypatch):
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "generate_image", lambda word, meaning, key, **kw: None)
 
     r = client.post("/api/gemini/generate-image", json={"word": "家", "meaning": "Haus"})
@@ -571,7 +571,7 @@ def test_api_create_kanacard_ai_stores_sentence_audio_url(client):
 
 
 def test_api_create_kanacard_persists_and_returns_descriptor(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match; game"}})
 
     r = client.post("/api/kanacards", json={"word": "しあい", "sentence": "しあいがはじまりました。"})
@@ -588,7 +588,7 @@ def test_api_create_kanacard_persists_and_returns_descriptor(client, monkeypatch
 
 
 def test_api_create_kanacard_404_when_not_in_dictionary(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {})
 
     r = client.post("/api/kanacards", json={"word": "ぜんぜんちがう"})
@@ -601,7 +601,7 @@ def test_api_create_kanacard_requires_word(client):
 
 
 def test_api_kanacards_list_and_delete(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
 
     created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
@@ -621,7 +621,7 @@ def test_api_delete_kanacard_cleans_up_review_state_and_log(client, monkeypatch)
     Datenleiche in ReviewState/ReviewLog hinterlassen - sonst würde sie in
     der Review-Queue als "fällig" weitergeführt, obwohl sie gar nicht mehr
     existiert."""
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
     created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
     kid = created["id"]
@@ -637,7 +637,7 @@ def test_api_delete_kanacard_cleans_up_review_state_and_log(client, monkeypatch)
 
 
 def test_api_kanacards_isolated_between_users(client, db_session, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
     created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
 
@@ -652,7 +652,7 @@ def test_api_kanacards_same_word_different_users_no_collision(client, db_session
     """Zwei Nutzer legen dieselbe Vokabel als Karte an - der zusammengesetzte
     Primärschlüssel (user_id, id) in KanaCard verhindert, dass sich die
     beiden gegenseitig überschreiben (siehe models.KanaCard-Docstring)."""
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {})
 
     r1 = client.post("/api/kanacards", json={"word": "テスト", "source": "ai", "meaning": "Alice meaning"})
@@ -1079,7 +1079,7 @@ def test_api_resolve_passes_stored_token_explicitly(client, monkeypatch):
         seen["token"] = token
         return []
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc, "resolve_level", fake_resolve_level)
 
     r = client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": False})
@@ -1096,7 +1096,7 @@ def test_api_resolve_sample_mode_passes_no_token(client, monkeypatch):
         seen["token"] = token
         return []
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc, "resolve_level", fake_resolve_level)
 
     r = client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": True})
@@ -1120,7 +1120,7 @@ def test_two_users_render_with_their_own_tokens_not_each_others(client, db_sessi
         seen_tokens.append(token)
         return []
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc, "resolve_level", fake_resolve_level)
 
     client.post("/api/resolve", json={"mode": "level", "level": 1, "types": ["kanji"], "sample": False})
@@ -1216,7 +1216,7 @@ def test_target_lang_isolates_known_words_between_languages(client):
 
 
 def test_target_lang_isolates_kana_cards_between_languages(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
 
     created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
@@ -1272,7 +1272,7 @@ def test_api_create_kanacard_uses_gemini_fallback_for_non_japanese(client, monke
     client.post("/api/settings/language", json={"active_target_lang": "es"})
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
 
     def fake_lookup(word, api_key, *, model=None, session=None, use_cache=True, target_lang_name="", native_lang_name="", has_reading=False):
         assert target_lang_name == "Spanisch"
@@ -1303,7 +1303,7 @@ def test_api_create_kanacard_404_when_gemini_finds_nothing_for_non_japanese(clie
     client.post("/api/settings/language", json={"active_target_lang": "es"})
     client.post("/api/settings", json={"gemini_key": "mykey"})
 
-    import kanji_cards as kc
+    from shiori import kanji_cards as kc
     monkeypatch.setattr(kc.gemini_client, "lookup_word", lambda *a, **k: None)
 
     r = client.post("/api/kanacards", json={"word": "qwxyz"})
@@ -1376,7 +1376,7 @@ def test_api_srs_add_custom_card_rejects_foreign_ownership(client, db_session):
 
 
 def test_api_srs_add_kana_card_reading_depends_on_record(client, monkeypatch):
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"しあい": {"kanji": "試合", "meaning": "match"}})
     created = client.post("/api/kanacards", json={"word": "しあい"}).get_json()
 
@@ -1498,7 +1498,7 @@ def test_api_srs_check_kana_card_splits_semicolon_separated_synonyms(client, mon
     getrennten Synonymen (z. B. "Kuchen; Torte; Biskuit; Backwerk") darf nicht
     als EINE Antwort verlangt werden - jedes einzelne Synonym muss für sich
     als richtig zählen (siehe _split_answer_synonyms())."""
-    import dictionary as dic
+    from shiori import dictionary as dic
     monkeypatch.setattr(dic, "_index_cache", {"けーき": {"kanji": None, "meaning": "Kuchen; Torte; Biskuit; Backwerk"}})
     created = client.post("/api/kanacards", json={"word": "けーき"}).get_json()
     client.post("/api/srs/add", json={"kana_ids": [created["id"]]})
@@ -1733,7 +1733,7 @@ def test_api_srs_stats_isolated_between_target_languages(client):
 
 def test_compute_streak_counts_consecutive_days_ending_today():
     from datetime import date
-    import srs_api
+    from shiori import srs_api
     today = date(2026, 7, 21)
     days = {"2026-07-21", "2026-07-20", "2026-07-19", "2026-07-16"}  # Lücke am 17./18.
     assert srs_api._compute_streak(days, today) == 3
@@ -1743,7 +1743,7 @@ def test_compute_streak_not_broken_by_missing_today():
     """Heute (noch) nichts gelernt bricht den Streak nicht - der Tag ist noch
     nicht vorbei (Duolingo-/WaniKani-Semantik)."""
     from datetime import date
-    import srs_api
+    from shiori import srs_api
     today = date(2026, 7, 21)
     days = {"2026-07-20", "2026-07-19"}
     assert srs_api._compute_streak(days, today) == 2
@@ -1751,7 +1751,7 @@ def test_compute_streak_not_broken_by_missing_today():
 
 def test_compute_streak_zero_after_full_missed_day():
     from datetime import date
-    import srs_api
+    from shiori import srs_api
     today = date(2026, 7, 21)
     days = {"2026-07-18", "2026-07-17"}  # vorgestern zuletzt gelernt
     assert srs_api._compute_streak(days, today) == 0

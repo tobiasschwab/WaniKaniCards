@@ -32,7 +32,7 @@ Ziel ist ein *sehr sauberes, druckfertiges* Layout – Ästhetik zählt, nicht n
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python webapp.py    # Webapp unter http://localhost:8000, Token nach Login in den Einstellungen
+python -m shiori.webapp    # Webapp unter http://localhost:8000, Token nach Login in den Einstellungen
 ```
 
 - Token **niemals** hardcoden – wird nach dem Login pro Nutzer in den Einstellungen hinterlegt.

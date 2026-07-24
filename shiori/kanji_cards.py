@@ -26,8 +26,8 @@ from typing import Any, Iterable, Sequence
 
 import requests
 
-import dictionary
-import gemini_client
+from . import dictionary
+from . import gemini_client
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,11 @@ WK_REVISION = "20170710"
 CACHE_DIR = Path(os.environ.get("WKCARDS_CACHE_DIR", ".cache"))
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_TEMPLATE_DIR = HERE / "templates"
-DEFAULT_FONT_DIR = HERE / "fonts"
+# Repo-Root (eine Ebene über dem `shiori`-Package) - templates/ und fonts/
+# liegen dort, nicht im Package (siehe webapp.py REPO_ROOT-Kommentar).
+REPO_ROOT = HERE.parent
+DEFAULT_TEMPLATE_DIR = REPO_ROOT / "templates"
+DEFAULT_FONT_DIR = REPO_ROOT / "fonts"
 
 # Standard-Schriften (im Repo unter fonts/ abgelegt)
 DEFAULT_KANJI_FONT = DEFAULT_FONT_DIR / "NotoSerifJP-SemiBold.ttf"
@@ -1237,7 +1240,7 @@ def render_pdf(
     }
     HTML(
         string=html_str,
-        base_url=str(HERE),
+        base_url=str(REPO_ROOT),
         url_fetcher=_make_safe_url_fetcher(allowed_font_paths),
     ).write_pdf(str(out_path))
     return out_path

@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kanji_cards import (  # noqa: E402
+from shiori.kanji_cards import (  # noqa: E402
     LAYOUTS,
     Card,
     CoverCard,
@@ -48,8 +48,8 @@ from kanji_cards import (  # noqa: E402
     _load_sample_raw,
 )
 
-import dictionary as dic
-import gemini_client
+from shiori import dictionary as dic
+from shiori import gemini_client
 
 
 # --------------------------------------------------------------------------- #
@@ -1087,7 +1087,7 @@ def _word_segments(text: str) -> list[dict]:
 
 
 def test_resolve_subject_deck_threads_sentence_overrides():
-    from kanji_cards import resolve_subject_deck
+    from shiori.kanji_cards import resolve_subject_deck
 
     text = "大きい山に人が一人います。"
     words = _word_segments(text)
@@ -1103,7 +1103,7 @@ def test_resolve_subject_deck_threads_sentence_overrides():
 
 def test_resolve_subject_deck_normalizes_string_keyed_overrides():
     """Overrides kommen über JSON (Web-API) mit String-Keys an – muss trotzdem greifen."""
-    from kanji_cards import resolve_subject_deck
+    from shiori.kanji_cards import resolve_subject_deck
 
     text = "大きい山に人が一人います。"
     words = _word_segments(text)
@@ -1121,7 +1121,7 @@ def test_resolve_subject_deck_normalizes_string_keyed_overrides():
 def test_resolve_subject_deck_applies_field_overrides():
     """Manuell im Web-Frontend geänderte Felder (Felder-anpassen-Dialog)
     überschreiben gezielt einzelne Karten-Felder nach dem Bau."""
-    from kanji_cards import resolve_subject_deck
+    from shiori.kanji_cards import resolve_subject_deck
 
     raw = _load_sample_raw()
     kanji_id = int(raw["kanji"][0]["id"])
@@ -1134,7 +1134,7 @@ def test_resolve_subject_deck_applies_field_overrides():
 
 
 def test_resolve_subject_deck_field_overrides_ignore_unknown_keys():
-    from kanji_cards import resolve_subject_deck
+    from shiori.kanji_cards import resolve_subject_deck
 
     raw = _load_sample_raw()
     kanji_id = int(raw["kanji"][0]["id"])
@@ -1149,7 +1149,7 @@ def test_resolve_subject_deck_field_overrides_ignore_unknown_keys():
 
 
 def test_card_details_for_ids_returns_all_fields_with_kind():
-    from kanji_cards import card_details_for_ids
+    from shiori.kanji_cards import card_details_for_ids
 
     raw = _load_sample_raw()
     kanji_id = int(raw["kanji"][0]["id"])
@@ -1162,7 +1162,7 @@ def test_card_details_for_ids_returns_all_fields_with_kind():
 
 
 def test_card_details_for_ids_skips_unknown_ids():
-    from kanji_cards import card_details_for_ids
+    from shiori.kanji_cards import card_details_for_ids
 
     details = card_details_for_ids([999999999], sample=True)
     assert details == {}
@@ -1323,7 +1323,7 @@ def test_build_kana_card_from_dict_roundtrip_with_sentence_audio_url():
 
 
 def test_card_to_dict_serializes_kana_card():
-    from kanji_cards import _card_to_dict
+    from shiori.kanji_cards import _card_to_dict
 
     card = KanaCard(
         word="しあい", kanji_hint="試合", meaning="match", sentence_ja="文。",
@@ -1337,7 +1337,7 @@ def test_card_to_dict_serializes_kana_card():
 
 
 def test_card_to_dict_serializes_vocab_image_fields():
-    from kanji_cards import _card_to_dict
+    from shiori.kanji_cards import _card_to_dict
 
     card = VocabCard(
         vocab="家", readings=["いえ"], meanings=["Haus"],
@@ -1350,7 +1350,7 @@ def test_card_to_dict_serializes_vocab_image_fields():
 
 
 def test_card_to_dict_vocab_image_fields_default_none_and_false():
-    from kanji_cards import _card_to_dict
+    from shiori.kanji_cards import _card_to_dict
 
     card = VocabCard(vocab="家", readings=["いえ"], meanings=["Haus"])
     d = _card_to_dict(card)
@@ -1364,7 +1364,7 @@ def test_card_to_dict_vocab_image_fields_default_none_and_false():
 # --------------------------------------------------------------------------- #
 
 def test_make_client_uses_explicit_token_over_env_var(monkeypatch):
-    from kanji_cards import _make_client
+    from shiori.kanji_cards import _make_client
 
     monkeypatch.setenv("WANIKANI_API_TOKEN", "env-token")
     client = _make_client(token="explicit-token")
@@ -1372,7 +1372,7 @@ def test_make_client_uses_explicit_token_over_env_var(monkeypatch):
 
 
 def test_make_client_falls_back_to_env_var_without_explicit_token(monkeypatch):
-    from kanji_cards import _make_client
+    from shiori.kanji_cards import _make_client
 
     monkeypatch.setenv("WANIKANI_API_TOKEN", "env-token")
     client = _make_client()
@@ -1380,7 +1380,7 @@ def test_make_client_falls_back_to_env_var_without_explicit_token(monkeypatch):
 
 
 def test_make_client_raises_without_token_or_env_var(monkeypatch):
-    from kanji_cards import _make_client
+    from shiori.kanji_cards import _make_client
 
     monkeypatch.delenv("WANIKANI_API_TOKEN", raising=False)
     with pytest.raises(WaniKaniError):
@@ -1391,7 +1391,7 @@ def test_make_client_two_explicit_tokens_do_not_interfere(monkeypatch):
     """Kernfrage des Fixes: zwei "gleichzeitige" Aufrufe mit unterschiedlichen
     Tokens dürfen sich nicht über eine gemeinsame Umgebungsvariable
     beeinflussen - jeder Client behält seinen eigenen Token."""
-    from kanji_cards import _make_client
+    from shiori.kanji_cards import _make_client
 
     monkeypatch.delenv("WANIKANI_API_TOKEN", raising=False)
     client_a = _make_client(token="token-a")

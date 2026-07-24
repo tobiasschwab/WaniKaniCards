@@ -2,9 +2,9 @@
 Package für den Rest der App."""
 from __future__ import annotations
 
-from languages.base import LanguagePack
-from languages.generic import generic_pack
-from languages.japanese import JapanesePack
+from .base import LanguagePack
+from .generic import generic_pack
+from .japanese import JapanesePack
 
 _SPECIALIZED: dict[str, LanguagePack] = {
     "ja": JapanesePack,

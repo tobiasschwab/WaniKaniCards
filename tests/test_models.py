@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from models import CustomCard, Job, KanaCard, KnownWord, ReviewState, User, UserSettings
+from shiori.models import CustomCard, Job, KanaCard, KnownWord, ReviewState, User, UserSettings
 
 
 def test_user_password_hash_roundtrip(db_session):
@@ -145,7 +145,7 @@ def test_review_state_composite_pk_allows_two_item_types_per_card(db_session):
     """Ein WaniKani-Kanji bekommt zwei unabhängige Zeilen (meaning/reading,
     siehe ReviewState-Docstring) - beide müssen nebeneinander existieren
     können, ohne sich zu überschreiben."""
-    import srs
+    from shiori import srs
 
     user = User(email="h@example.com"); user.set_password("x")
     db_session.session.add(user)
@@ -171,7 +171,7 @@ def test_review_state_isolated_by_target_lang(db_session):
     """Dieselbe card_id in zwei Zielsprachen (z. B. Custom-Karten-IDs sind
     pro Sprache eigenständig, siehe README "Multi-Language-Architektur")
     braucht getrennte Lernstände."""
-    import srs
+    from shiori import srs
 
     user = User(email="i@example.com"); user.set_password("x")
     db_session.session.add(user)

@@ -17,11 +17,11 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
-import kanji_cards as kc
-import models
-import srs
-from extensions import db
-from services import (
+from . import kanji_cards as kc
+from . import models
+from . import srs
+from .extensions import db
+from .services import (
     _current_target_lang,
     _require_content_provider,
     get_subject_overrides,

@@ -44,17 +44,17 @@ from flask import Flask, abort, g, jsonify, request, send_from_directory
 from flask_login import current_user, login_required
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-import cards_api
-import jobs_api
-import kanji_cards as kc
-import crypto
-import models
-import pdf_import
-import srs_api
-from auth import bp as auth_bp
-from extensions import db, limiter, login_manager
-from languages.registry import SUPPORTED_TARGET_LANGS, get_pack
-from services import (
+from . import cards_api
+from . import jobs_api
+from . import kanji_cards as kc
+from . import crypto
+from . import models
+from . import pdf_import
+from . import srs_api
+from .auth import bp as auth_bp
+from .extensions import db, limiter, login_manager
+from .languages.registry import SUPPORTED_TARGET_LANGS, get_pack
+from .services import (
     DATA_DIR,
     _already_exported_ids,
     _coerce_known_id,
@@ -110,20 +110,17 @@ logging.basicConfig(
 for _h in logging.getLogger().handlers:
     _h.addFilter(_UserIdLogFilter())
 
-HERE = Path(__file__).resolve().parent
-# Einstellungen/bekannte Wörter/eigene-/Dictionary-Karten/Jobs liegen seit
-# Phase 2 des Multi-User-Umbaus in der Datenbank (siehe models.py) statt als
-# Dateien - nur die generierten PDFs/APKGs selbst bleiben dateibasiert
-# (Binärdaten, für die eine Objekt-Storage-Anbindung sinnvoller ist als eine
-# DB-Spalte, siehe README-Roadmap "Jobs/Dateien SaaS-tauglich machen").
-# `DATA_DIR`/`OUTPUT_DIR` selbst leben in services.py (auch vom Render-Worker
-# gebraucht) - hier nur für den SQLite-Fallback der DATABASE_URL gebraucht.
-WEB_DIR = HERE / "web"
+# Repo-Root (eine Ebene über dem `shiori`-Package) - web/, vendor/ (und die
+# anderen Nicht-Python-Assets: templates/, fonts/, migrations/) liegen bewusst
+# NICHT im Package, sondern daneben (Docker-Volumes/Alembic-Konventionen
+# erwarten sie dort, siehe Dockerfile/migrations/env.py).
+REPO_ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = REPO_ROOT / "web"
 # Gebündelte Fremdbibliotheken (z. B. WanaKana für die Romaji→Kana-Eingabe im
 # Review-Screen). Liegen bewusst außerhalb von web/ (werden auch in den Anki-
 # Export eingebettet, siehe anki_export.py) und über eine eigene Route
 # ausgeliefert.
-VENDOR_DIR = HERE / "vendor"
+VENDOR_DIR = REPO_ROOT / "vendor"
 
 logger = logging.getLogger(__name__)
 

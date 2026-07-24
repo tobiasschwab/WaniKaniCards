@@ -9,7 +9,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import gemini_client as gc  # noqa: E402
+from shiori import gemini_client as gc  # noqa: E402
 
 
 class _FakeResp:

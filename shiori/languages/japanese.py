@@ -10,7 +10,7 @@ Mehrwert, solange Japanisch der einzige Pack mit dieser Tiefe ist.
 """
 from __future__ import annotations
 
-from languages.base import LanguagePack
+from .base import LanguagePack
 
 JapanesePack = LanguagePack(
     code="ja",

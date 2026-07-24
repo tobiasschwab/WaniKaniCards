@@ -13,11 +13,11 @@ from typing import Any
 from flask import Blueprint, abort, jsonify, request
 from flask_login import current_user, login_required
 
-import kanji_cards as kc
-import models
-from extensions import db
-from languages.registry import get_pack
-from services import (
+from . import kanji_cards as kc
+from . import models
+from .extensions import db
+from .languages.registry import get_pack
+from .services import (
     _current_pack,
     _current_target_lang,
     _custom_descriptor,

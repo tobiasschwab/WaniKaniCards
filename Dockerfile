@@ -24,15 +24,17 @@ WORKDIR /app
 COPY requirements.txt requirements-web.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 
-# App-Code (inkl. gebündelter Noto-JP-Schriften unter fonts/ und WanaKana-JS unter vendor/)
-COPY kanji_cards.py anki_export.py webapp.py dictionary.py gemini_client.py pdf_import.py \
-     models.py extensions.py auth.py crypto.py storage.py srs.py sample_data.json \
-     services.py srs_api.py cards_api.py jobs_api.py ./
+# App-Code: das gesamte `shiori`-Package in einem Rutsch (statt einzelner
+# Dateinamen) - eliminiert strukturell den früheren Bug, ein neues Modul in
+# der COPY-Zeile zu vergessen (siehe tests/test_packaging.py). Nicht-Python-
+# Assets (gebündelte Noto-JP-Schriften unter fonts/, WanaKana-JS unter
+# vendor/) bleiben bewusst außerhalb des Packages, siehe shiori/webapp.py
+# REPO_ROOT-Kommentar.
+COPY shiori/ ./shiori/
 COPY templates/ ./templates/
 COPY fonts/ ./fonts/
 COPY vendor/ ./vendor/
 COPY web/ ./web/
-COPY languages/ ./languages/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY docker-entrypoint.sh ./
@@ -57,4 +59,4 @@ EXPOSE 8000
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 # 2 Worker; großzügiger Timeout, da Exporte API-Aufrufe + Bild-Downloads machen.
-CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "2", "--timeout", "600", "webapp:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "2", "--timeout", "600", "shiori.webapp:app"]

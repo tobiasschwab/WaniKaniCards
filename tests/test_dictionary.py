@@ -13,7 +13,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import dictionary as dic  # noqa: E402
+from shiori import dictionary as dic  # noqa: E402
 
 
 def _jmdict_fixture() -> dict:

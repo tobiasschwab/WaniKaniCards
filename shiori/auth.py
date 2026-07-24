@@ -18,9 +18,9 @@ from flask import Blueprint, jsonify, request
 from flask_limiter.util import get_remote_address
 from flask_login import current_user, login_required, login_user, logout_user
 
-from extensions import db, limiter
-from models import User, UserSettings
-from services import delete_all_user_data
+from .extensions import db, limiter
+from .models import User, UserSettings
+from .services import delete_all_user_data
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 

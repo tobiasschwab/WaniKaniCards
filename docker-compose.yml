@@ -49,7 +49,7 @@ services:
       # Worker-Container wartet nur, bis das Schema steht (siehe
       # docker-entrypoint.sh). Verhindert, dass beide gleichzeitig migrieren.
       RUN_MIGRATIONS: "1"
-      # Erzeugen: python3 -c "from crypto import generate_master_key; print(generate_master_key())"
+      # Erzeugen: python3 -c "from shiori.crypto import generate_master_key; print(generate_master_key())"
       # Ohne Python 3 auf dem Host (NAS): openssl rand -base64 32 | tr '+/' '-_'
       WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
       WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}

@@ -9,8 +9,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-import anki_export as ae  # noqa: E402
-import kanji_cards as kc  # noqa: E402
+from shiori import anki_export as ae  # noqa: E402
+from shiori import kanji_cards as kc  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -476,7 +476,7 @@ def test_kanji_note_skips_missing_reading_cards(tmp_path):
 
 
 def test_export_deck_embeds_fonts_as_media():
-    import kanji_cards as kc2
+    from shiori import kanji_cards as kc2
     cards = kc2.load_sample_radicals()[:1]
     import tempfile
 
