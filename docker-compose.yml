@@ -99,6 +99,30 @@ services:
       - ./data:/data
     restart: unless-stopped
 
+  # Räumt periodisch alten Job-Verlauf (samt PDF-/APKG-Datei in ./data/output)
+  # weg - eigener Prozess (analog zum RQ-Worker), damit weder Webserver noch
+  # Render-Worker dafür zuständig sind (siehe cleanup_worker.py).
+  cleanup:
+    build: .
+    image: shiori
+    command: python -m shiori.cleanup_worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://shiori:shiori@db:5432/shiori
+      REDIS_URL: redis://redis:6379/0
+      WKCARDS_SECRET_KEY: ${WKCARDS_SECRET_KEY:?WKCARDS_SECRET_KEY muss gesetzt sein - siehe README}
+      WKCARDS_SESSION_SECRET: ${WKCARDS_SESSION_SECRET:?WKCARDS_SESSION_SECRET muss gesetzt sein - siehe README}
+      # Wie lange abgeschlossene Jobs aufbewahrt werden, bevor sie samt
+      # PDF/APKG gelöscht werden (Tage). Default 30.
+      # JOB_RETENTION_DAYS: "30"
+      # Wie oft der Aufräum-Durchlauf läuft (Sekunden). Default 1x täglich.
+      # JOB_CLEANUP_INTERVAL_SECONDS: "86400"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
 volumes:
   shiori_pg_data:
   shiori_redis_data:

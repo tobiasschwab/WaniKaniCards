@@ -18,7 +18,7 @@ import os
 import re
 import tempfile
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -404,6 +404,30 @@ def list_jobs() -> list[dict[str, Any]]:
         user_id=current_user.id, target_lang=_current_target_lang(),
     ).order_by(models.Job.created_at.desc()).all()
     return [_job_to_dict(r) for r in rows]
+
+
+def cleanup_old_jobs(retention_days: int) -> int:
+    """Job-Verlaufszeilen ALLER Nutzer samt evtl. erzeugter PDF-/APKG-Datei
+    löschen, deren `finished_at` (bzw. `created_at`, falls nie fertig
+    geworden - z. B. hängengeblieben) mehr als `retention_days` zurückliegt.
+
+    Wartungs-Sweep für `data/output/` (siehe `cleanup_worker.py`), läuft
+    AUSSERHALB eines Request-Kontexts (kein eingeloggter Nutzer) - deshalb
+    ohne `current_user`/Ownership-Filter, anders als `list_jobs()`. Gibt die
+    Anzahl gelöschter Jobs zurück."""
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    old_jobs = models.Job.query.filter(
+        db.or_(
+            db.and_(models.Job.finished_at.isnot(None), models.Job.finished_at < cutoff),
+            db.and_(models.Job.finished_at.is_(None), models.Job.created_at < cutoff),
+        )
+    ).all()
+    for job in old_jobs:
+        storage.delete_output(OUTPUT_DIR, f"{job.id}.pdf")
+        storage.delete_output(OUTPUT_DIR, f"{job.id}.apkg")
+        db.session.delete(job)
+    db.session.commit()
+    return len(old_jobs)
 
 
 def _already_exported_ids() -> set[int]:

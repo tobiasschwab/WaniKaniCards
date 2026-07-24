@@ -913,6 +913,15 @@ Betrieb & Recht), umgesetzt:**
   durchgelassen und beim Formatieren mit `ValueError` gecrasht – live
   nachgestellt und gefixt). Außerhalb eines Requests (z. B. im RQ-Worker-
   Prozess) steht `user_id` auf `"-"`.
+- **Aufräum-Job für alten Job-Verlauf (`cleanup_worker.py`)**: ein eigener
+  Prozess/Container (analog zum RQ-Worker), der periodisch `Job`-Zeilen ALLER
+  Nutzer löscht, deren `finished_at` (bzw. `created_at`, falls nie fertig
+  geworden) länger als `JOB_RETENTION_DAYS` (Default 30) zurückliegt –
+  inklusive der zugehörigen PDF-/APKG-Datei in `data/output/`
+  (`services.cleanup_old_jobs()`). Ohne diesen Job würde `data/output/`
+  unbegrenzt wachsen, da Jobs sonst nur beim expliziten Löschen durch den
+  Nutzer selbst verschwinden. Bewusst ein simpler Sleep-Loop statt
+  APScheduler/Cron – siehe `cleanup_worker.py`-Docstring.
 - **Backups & Betrieb**: siehe [`docs/BACKUP.md`](docs/BACKUP.md) für die
   Postgres-Backup-Strategie.
 - **Datenschutz/ToS**: siehe [`docs/PRIVACY_TEMPLATE.md`](docs/PRIVACY_TEMPLATE.md)
@@ -931,15 +940,18 @@ Disk-Speicher):
 | `S3_BUCKET` | Aktiviert Object Storage für generierte PDFs/APKGs (siehe `storage.py`). Ohne gesetzt: lokales Disk unter `data/output/`. |
 | `S3_ENDPOINT_URL` | Für selbst gehostetes S3-kompatibles Storage (z. B. MinIO). Bei AWS S3 weglassen. |
 | `S3_REGION` | AWS-Region, Default `us-east-1`. Bei MinIO i. d. R. irrelevant. |
+| `JOB_RETENTION_DAYS` | Wie viele Tage abgeschlossene Jobs (samt PDF/APKG) aufbewahrt werden, bevor der Aufräum-Job (`cleanup_worker.py`) sie löscht. Default `30`. |
+| `JOB_CLEANUP_INTERVAL_SECONDS` | Wie oft der Aufräum-Durchlauf läuft. Default `86400` (1x täglich). |
 
 Lokal einen Worker-Prozess starten (zusätzlich zum Webserver):
 
 ```bash
 rq worker renders --url redis://localhost:6379/0
+python -m shiori.cleanup_worker   # optional, im eigenen Terminal
 ```
 
-Mit Docker startet `docker compose up` automatisch einen `redis`- und einen
-`worker`-Service mit (siehe `docker-compose.yml`).
+Mit Docker startet `docker compose up` automatisch einen `redis`-, einen
+`worker`- und einen `cleanup`-Service mit (siehe `docker-compose.yml`).
 
 ### Migrationsdisziplin ab Produktivbetrieb
 

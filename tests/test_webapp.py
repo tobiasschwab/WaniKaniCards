@@ -71,6 +71,59 @@ def test_mark_exported_empty_history_leaves_everything_unmarked(logged_in_user):
 
 
 # --------------------------------------------------------------------------- #
+# services.cleanup_old_jobs (Aufräum-Job, siehe cleanup_worker.py)
+# --------------------------------------------------------------------------- #
+
+def test_cleanup_old_jobs_removes_stale_finished_job_and_its_files(logged_in_user):
+    from datetime import datetime, timedelta
+
+    from shiori import storage
+
+    old = models.Job(
+        id="old-job", user_id=logged_in_user.id, status="done",
+        finished_at=datetime.now(UTC) - timedelta(days=40),
+    )
+    db.session.add(old)
+    db.session.commit()
+    storage.save_output(services.OUTPUT_DIR, "old-job.pdf", b"pdf-bytes")
+
+    removed = services.cleanup_old_jobs(retention_days=30)
+
+    assert removed == 1
+    assert db.session.get(models.Job, "old-job") is None
+    assert storage.read_output(services.OUTPUT_DIR, "old-job.pdf") is None
+
+
+def test_cleanup_old_jobs_keeps_recent_job(logged_in_user):
+    from datetime import datetime
+
+    recent = models.Job(id="recent-job", user_id=logged_in_user.id, status="done", finished_at=datetime.now(UTC))
+    db.session.add(recent)
+    db.session.commit()
+
+    removed = services.cleanup_old_jobs(retention_days=30)
+
+    assert removed == 0
+    assert db.session.get(models.Job, "recent-job") is not None
+
+
+def test_cleanup_old_jobs_uses_created_at_for_never_finished_job(logged_in_user):
+    from datetime import datetime, timedelta
+
+    stuck = models.Job(
+        id="stuck-job", user_id=logged_in_user.id, status="running",
+        created_at=datetime.now(UTC) - timedelta(days=40), finished_at=None,
+    )
+    db.session.add(stuck)
+    db.session.commit()
+
+    removed = services.cleanup_old_jobs(retention_days=30)
+
+    assert removed == 1
+    assert db.session.get(models.Job, "stuck-job") is None
+
+
+# --------------------------------------------------------------------------- #
 # Manuell als "bekannt" markierte Wörter (KnownWord, pro Nutzer)
 # --------------------------------------------------------------------------- #
 
