@@ -584,7 +584,11 @@
         <div id="reviewSession" class="hidden">
           <div id="reviewProgress" class="muted"></div>
           <div class="review-card">
-            <div id="reviewItemType" class="review-item-type"></div>
+            <div class="review-card-header">
+              <div id="reviewItemType" class="review-item-type"></div>
+              <span id="reviewCardKind" class="tag-mini hidden"></span>
+              <button id="btnReviewEdit" type="button" class="chip-btn hidden" title="Karte bearbeiten" data-i18n-title="review.edit_button">✎</button>
+            </div>
             <div id="reviewFront" class="review-front"></div>
             <div id="reviewInputWrap" class="row gap" style="margin-top:14px">
               <input id="reviewInput" type="text" class="text" autocomplete="off" data-i18n-placeholder="review.answer_placeholder" data-i18n-aria-label="review.answer_placeholder" aria-label="Antwort eingeben" placeholder="Antwort eingeben …">
@@ -593,6 +597,7 @@
             <div id="reviewRevealWrap" class="hidden" style="margin-top:14px">
               <div id="reviewFeedback" class="review-feedback"></div>
               <div id="reviewAccepted" class="review-accepted"></div>
+              <div id="reviewBackside" class="review-backside"></div>
               <div class="review-ratings row gap" style="margin-top:10px">
                 <button data-rating="again" class="btn rating-again"><kbd>1</kbd> <span data-i18n="review.again">Nochmal</span></button>
                 <button data-rating="hard" class="btn rating-hard"><kbd>2</kbd> <span data-i18n="review.hard">Schwer</span></button>

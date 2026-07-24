@@ -891,6 +891,81 @@ def test_api_render_stores_field_overrides_in_job_params(client):
     assert job["user_id"] == client.test_user_id
 
 
+def test_save_subject_override_roundtrip_and_merge(logged_in_user):
+    """`save_subject_override` mergt neue Felder in bereits gespeicherte,
+    statt sie zu ersetzen - ein zweiter Aufruf mit nur EINEM geänderten Feld
+    darf ein zuvor gespeichertes anderes Feld nicht löschen."""
+    services.save_subject_override(logged_in_user.id, 2467, {"meanings": ["Eigene Bedeutung"]})
+    services.save_subject_override(logged_in_user.id, 2467, {"vocab_meaning": "Zusatz"})
+    stored = services.get_subject_overrides(logged_in_user.id, [2467])
+    assert stored[2467] == {"meanings": ["Eigene Bedeutung"], "vocab_meaning": "Zusatz"}
+
+    # `None` löscht gezielt EIN Feld wieder.
+    services.save_subject_override(logged_in_user.id, 2467, {"meanings": None})
+    stored = services.get_subject_overrides(logged_in_user.id, [2467])
+    assert stored[2467] == {"vocab_meaning": "Zusatz"}
+
+    # Leert man alle Felder, verschwindet die Zeile ganz statt leer zu bleiben.
+    services.save_subject_override(logged_in_user.id, 2467, {"vocab_meaning": None})
+    assert models.SubjectFieldOverride.query.filter_by(user_id=logged_in_user.id, subject_id=2467).count() == 0
+
+
+def test_build_mixed_deck_applies_persisted_subject_overrides(logged_in_user):
+    """Dauerhaft gespeicherte Overrides (siehe /api/subject-overrides) wirken
+    automatisch auch auf künftige PDF-/Anki-Exports, OHNE dass der Aufrufer
+    sie erneut als `field_overrides` mitschicken muss."""
+    services.save_subject_override(logged_in_user.id, 2467, {"meanings": ["Persistiert"]})
+    deck = services._build_mixed_deck({"subject_ids": [2467], "sample": True}, logged_in_user.id)
+    assert deck[0].meanings == ["Persistiert"]
+
+
+def test_api_subject_overrides_save_and_reflect_in_card_detail(client):
+    r = client.post("/api/subject-overrides", json={"subject_id": 2467, "fields": {"meanings": ["Meine Bedeutung"]}})
+    assert r.status_code == 200
+
+    detail = client.post("/api/card-detail", json={"subject_ids": [2467], "sample": True}).get_json()
+    assert detail["cards"]["2467"]["meanings"] == ["Meine Bedeutung"]
+
+
+def test_api_subject_overrides_scoped_per_user(client, db_session):
+    """Ein Override eines anderen Nutzers darf für DIESEN Nutzer nicht sichtbar
+    sein - gilt nur für den eigenen Account, nie global (siehe UI-Feedback:
+    "Auch WaniKani-Karten ... nur für den eigenen Account")."""
+    other = models.User(email="overridesowner@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    services.save_subject_override(other.id, 2467, {"meanings": ["Fremde Bedeutung"]})
+
+    detail = client.post("/api/card-detail", json={"subject_ids": [2467], "sample": True}).get_json()
+    assert detail["cards"]["2467"]["meanings"] != ["Fremde Bedeutung"]
+
+
+def test_api_edit_kanacard_overwrites_fields_directly(client):
+    add = client.post("/api/kanacards", json={"word": "たべる", "source": "ai", "meaning": "essen"})
+    kid = add.get_json()["id"]
+
+    r = client.post(f"/api/kanacards/{kid}/edit", json={"fields": {"meaning": "Essen (angepasst)", "meaning_extra": "futtern"}})
+    assert r.status_code == 200
+    assert r.get_json()["meaning"] == "Essen (angepasst)"
+
+    full = client.get(f"/api/kanacards/{kid}").get_json()
+    assert full["meaning"] == "Essen (angepasst)"
+    assert full["meaning_extra"] == "futtern"
+
+
+def test_api_edit_kanacard_rejects_foreign_card(client, db_session):
+    other = models.User(email="kanaowner@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    services.write_kana(
+        {"id": "theirskana", "word": "x", "meaning": "y", "tags": []}, user_id=other.id, target_lang="ja",
+    )
+    r = client.post("/api/kanacards/theirskana/edit", json={"fields": {"meaning": "hijacked"}})
+    assert r.status_code == 404
+
+
 def test_api_render_rejects_foreign_custom_id(client, db_session):
     other = models.User(email="rendertheirs@example.com")
     other.set_password("x")

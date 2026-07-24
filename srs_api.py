@@ -24,6 +24,7 @@ from extensions import db
 from services import (
     _current_target_lang,
     _require_content_provider,
+    get_subject_overrides,
     load_settings,
     read_custom_for_user,
     read_custom_owned,
@@ -323,7 +324,10 @@ def _srs_load_card_data(row: "models.ReviewState") -> dict[str, Any] | None:
             details = kc.card_details_for_ids([int(row.card_id)], sample=not token, token=token)
         except kc.WaniKaniError:
             return None
-        return details.get(int(row.card_id))
+        data = details.get(int(row.card_id))
+        if data is not None:
+            data.update(get_subject_overrides(row.user_id, [int(row.card_id)]).get(int(row.card_id), {}))
+        return data
     return None
 
 

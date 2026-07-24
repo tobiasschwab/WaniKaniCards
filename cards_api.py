@@ -95,6 +95,18 @@ def api_kanacards() -> Any:
     return jsonify([_kana_descriptor(c) for c in list_kana()])
 
 
+@bp.get("/api/kanacards/<kid>")
+@login_required
+def api_kanacard(kid: str) -> Any:
+    """Volle Felder EINER Dictionary-/KI-Karte – Grundlage für den vollen
+    Rückseiten-Reveal und den Editiermodus im Vokabeltrainer-Review (analog
+    zu `/api/customcards/<cid>`)."""
+    card = read_kana_owned(kid)
+    if card is None:
+        abort(404)
+    return jsonify(card)
+
+
 @bp.post("/api/kanacards")
 @login_required
 def api_create_kanacard() -> Any:
@@ -164,6 +176,29 @@ def api_create_kanacard() -> Any:
     }
     write_kana(record, user_id=current_user.id, target_lang=_current_target_lang())
     return jsonify(_kana_descriptor(read_kana_owned(record["id"])))
+
+
+@bp.post("/api/kanacards/<kid>/edit")
+@login_required
+def api_edit_kanacard(kid: str) -> Any:
+    """Bestehende Dictionary-/KI-Karte direkt überschreiben (Editiermodus im
+    Vokabeltrainer-Review, siehe README-Feature-Feedback) – anders als
+    `POST /api/kanacards` wird hier NICHTS neu aus dem Wörterbuch/der KI
+    hergeleitet, sondern nur die übergebenen Felder 1:1 übernommen."""
+    card = read_kana_owned(kid)
+    if card is None:
+        abort(404)
+    body = request.get_json(silent=True) or {}
+    fields = body.get("fields")
+    if not isinstance(fields, dict):
+        return jsonify({"error": "Ungültige fields."}), 400
+    allowed = {
+        "word", "kanji_hint", "reading", "meaning", "meaning_extra",
+        "sentence_ja", "sentence_translation",
+    }
+    card.update({k: v for k, v in fields.items() if k in allowed})
+    write_kana(card, user_id=current_user.id, target_lang=_current_target_lang())
+    return jsonify(_kana_descriptor(read_kana_owned(kid)))
 
 
 @bp.delete("/api/kanacards/<kid>")

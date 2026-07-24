@@ -67,11 +67,13 @@ from services import (
     _require_content_provider,
     _resolve_gemini_model,
     _upsert_known_word,
+    get_subject_overrides,
     list_kana,
     load_known,
     load_known_meta,
     load_settings,
     save_settings,
+    save_subject_override,
     set_active_language,
     srs_progress,
     TARGET_LANGS as _TARGET_LANGS,
@@ -567,11 +569,34 @@ def api_card_detail() -> Any:
     token = None if sample else load_settings().get("token")
     try:
         details = kc.card_details_for_ids(ids, sample=sample, token=token)
+        overrides = get_subject_overrides(current_user.id, ids)
+        for i, fields in overrides.items():
+            if i in details:
+                details[i].update(fields)
     except (TypeError, ValueError):
         return jsonify({"error": "Ungültige Eingabe."}), 400
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
     return jsonify({"cards": {str(k): v for k, v in details.items()}})
+
+
+@app.post("/api/subject-overrides")
+@login_required
+def api_save_subject_overrides() -> Any:
+    """Manuell im „Felder anpassen"-Dialog (Kartentabelle ODER Vokabeltrainer-
+    Review) geänderte WaniKani-Karten-Felder dauerhaft für den eigenen Account
+    speichern (siehe `models.SubjectFieldOverride`) – gilt NIE global, nur für
+    diesen Nutzer, und fließt automatisch in künftige PDF-/Anki-Exports
+    dieses Nutzers ein (`services._build_mixed_deck()`)."""
+    body = request.get_json(silent=True) or {}
+    subject_id = kc._int_or_none(body.get("subject_id"))
+    if subject_id is None:
+        return jsonify({"error": "Ungültige subject_id."}), 400
+    fields = body.get("fields")
+    if not isinstance(fields, dict):
+        return jsonify({"error": "Ungültige fields."}), 400
+    save_subject_override(current_user.id, subject_id, fields)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/translate")

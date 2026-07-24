@@ -480,6 +480,18 @@ const FIELD_SCHEMAS = {
     { key: "meaning", label: "Bedeutung", translatable: true },
     { key: "mnemonic", label: "Merkhilfe", translatable: true },
   ],
+  // Dictionary-/KI-Karten (siehe cards_api.api_edit_kanacard) - bewusst OHNE
+  // "word" (die ID ist ein Hash des Worts, siehe models.KanaCard-Docstring;
+  // eine Änderung würde die Karte effektiv "umbenennen", ohne die ID
+  // mitzuziehen - lieber die Karte neu anlegen als das riskieren).
+  kana: [
+    { key: "reading", label: "Lesung" },
+    { key: "kanji_hint", label: "Kanji-Schreibweise" },
+    { key: "meaning", label: "Bedeutung", translatable: true },
+    { key: "meaning_extra", label: "Weitere Bedeutungen", translatable: true },
+    { key: "sentence_ja", label: "Beispielsatz" },
+    { key: "sentence_translation", label: "Beispielsatz-Übersetzung", translatable: true },
+  ],
 };
 
 async function openFieldEditModal(id, objectType) {
@@ -491,11 +503,15 @@ async function openFieldEditModal(id, objectType) {
   let detail = _cardDetailCache[_fieldEditCurrentId];
   if (!detail) {
     try {
-      const r = await api("/api/card-detail", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject_ids: [id], sample: isSample() }),
-      });
-      detail = r.cards[_fieldEditCurrentId];
+      if (objectType === "kana") {
+        detail = await api(`/api/kanacards/${id}`);
+      } else {
+        const r = await api("/api/card-detail", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject_ids: [id], sample: isSample() }),
+        });
+        detail = r.cards[_fieldEditCurrentId];
+      }
     } catch (e) {
       $("#fieldEditStatus").textContent = ""; toast(e.message, true);
       $("#fieldEditOverlay").classList.add("hidden");
@@ -510,7 +526,7 @@ async function openFieldEditModal(id, objectType) {
     return;
   }
   $("#fieldEditStatus").textContent = "";
-  $("#fieldEditTitle").textContent = `Bearbeiten: ${detail.kanji || detail.vocab || detail.radical || ""}`;
+  $("#fieldEditTitle").textContent = `Bearbeiten: ${detail.kanji || detail.vocab || detail.radical || detail.word || ""}`;
   renderFieldEditBody(detail, objectType);
 }
 
@@ -564,7 +580,7 @@ function renderFieldEditBody(detail, objectType) {
   }
 }
 
-function saveFieldEdits() {
+async function saveFieldEdits() {
   const id = _fieldEditCurrentId;
   const detail = _cardDetailCache[id];
   if (!id || !detail) return;
@@ -578,11 +594,42 @@ function saveFieldEdits() {
     const changed = isList ? JSON.stringify(newValue) !== JSON.stringify(original) : newValue !== original;
     if (changed) overrides[key] = newValue;
   });
-  if (Object.keys(overrides).length) fieldOverrides[id] = overrides;
-  else delete fieldOverrides[id];
+  const isKana = _fieldEditCurrentType === "kana";
+  if (!isKana) {
+    if (Object.keys(overrides).length) fieldOverrides[id] = { ...(fieldOverrides[id] || {}), ...overrides };
+    else delete fieldOverrides[id];
+  }
   $("#fieldEditOverlay").classList.add("hidden");
+  if (Object.keys(overrides).length) {
+    try {
+      if (isKana) {
+        // Dictionary-/KI-Karten haben keinen separaten Override-Layer - die
+        // Felder werden direkt auf der Karte selbst überschrieben (siehe
+        // cards_api.api_edit_kanacard()), sie IST bereits die einzige Quelle.
+        await api(`/api/kanacards/${id}/edit`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields: overrides }),
+        });
+      } else {
+        // Dauerhaft für den eigenen Account speichern (siehe
+        // /api/subject-overrides) - gilt automatisch auch für künftige PDF-/
+        // Anki-Exports UND macht die Änderung im Vokabeltrainer-Review
+        // sichtbar, ohne dass der Nutzer sie pro Session neu setzen muss.
+        await api("/api/subject-overrides", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject_id: id, fields: overrides }),
+        });
+      }
+      Object.assign(detail, overrides);
+    } catch (e) { toast(e.message, true); }
+  }
   toast(Object.keys(overrides).length ? "Änderungen gespeichert – wirken beim Erzeugen der Karten." : "Keine Änderungen.");
-  renderTable(cards, $("#tableTitle").textContent.replace(/\s*\(\d+\)$/, ""), tableMode);
+  if (tableMode && cards.length && !$("#tablePanel").classList.contains("hidden")) {
+    renderTable(cards, $("#tableTitle").textContent.replace(/\s*\(\d+\)$/, ""), tableMode);
+  }
+  if (segValue("modeTabs") === "review" && reviewCurrentItem && String(reviewCurrentItem.card_id) === String(id)) {
+    showReviewCard();
+  }
 }
 
 // ---------- Bildkarten (Vokabel-Vorderseite = Gemini-Clipart) ----------
@@ -1591,11 +1638,22 @@ let reviewIndex = 0;
 let reviewCurrentItem = null;
 let reviewSuggestedRating = null;
 let reviewDueTotal = 0;
+// Volle Karten-Felder der GERADE angezeigten Review-Karte (Merkhilfen,
+// Beispielvokabel/-satz, …) - für den vollen Rückseiten-Reveal (siehe
+// renderReviewBackside()) UND den Editiermodus (Task "UI-Feedback:
+// Editiermodus im Review"), der denselben Datensatz wiederverwendet statt
+// ihn nochmal separat zu laden. `reviewCurrentObjectType` nur für
+// card_type "wanikani" gesetzt ("kanji"/"vocabulary"/"radical" - Mapping von
+// Card/VocabCard/RadicalCard, siehe FIELD_SCHEMAS).
+let reviewCurrentDetail = null;
+let reviewCurrentObjectType = null;
 
 function resetReviewSession() {
   reviewQueueItems = [];
   reviewIndex = 0;
   reviewCurrentItem = null;
+  reviewCurrentDetail = null;
+  reviewCurrentObjectType = null;
   reviewSuggestedRating = null;
   reviewDueTotal = 0;
   $("#reviewSession").classList.add("hidden");
@@ -1784,15 +1842,43 @@ async function showReviewCard() {
   $("#reviewItemType").textContent = t(item.item_type === "reading" ? "review.reading_label" : "review.meaning_label");
 
   const frontEl = $("#reviewFront");
+  reviewCurrentDetail = null;
+  reviewCurrentObjectType = null;
+  const kindEl = $("#reviewCardKind");
+  kindEl.classList.add("hidden");
+  $("#btnReviewEdit").classList.remove("hidden");
   if (item.card_type === "custom") {
     try {
       const full = await api(`/api/customcards/${item.card_id}`);
       frontEl.innerHTML = full.front_html || "";
+      reviewCurrentDetail = full;
     } catch (_) {
       frontEl.textContent = item.front;
     }
+    kindEl.textContent = t("review.kind_custom"); kindEl.classList.remove("hidden");
   } else {
     frontEl.textContent = item.front;
+    if (item.card_type === "wanikani") {
+      try {
+        const r = await api("/api/card-detail", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject_ids: [item.card_id], sample: isSample() }),
+        });
+        const detail = r.cards[String(item.card_id)];
+        if (detail) {
+          reviewCurrentDetail = detail;
+          reviewCurrentObjectType = detail.kind === "RadicalCard" ? "radical" : detail.kind === "VocabCard" ? "vocabulary" : "kanji";
+          kindEl.textContent = t(`review.kind_${reviewCurrentObjectType}`);
+          kindEl.classList.remove("hidden");
+        }
+      } catch (_) { /* Rückseiten-Reveal ist optional, Review funktioniert auch ohne */ }
+    } else if (item.card_type === "kana") {
+      try {
+        reviewCurrentDetail = await api(`/api/kanacards/${item.card_id}`);
+        kindEl.textContent = t(reviewCurrentDetail.source === "ai" ? "review.kind_ai" : "review.kind_dictionary");
+        kindEl.classList.remove("hidden");
+      } catch (_) { /* s.o. */ }
+    }
   }
 
   const input = $("#reviewInput");
@@ -1801,6 +1887,7 @@ async function showReviewCard() {
   $("#reviewInputWrap").classList.toggle("hidden", item.card_type === "custom");
   $("#btnReviewSubmit").textContent = t(item.card_type === "custom" ? "review.show_answer_button" : "review.submit_button");
   $("#reviewRevealWrap").classList.add("hidden");
+  $("#reviewBackside").innerHTML = "";
   document.querySelectorAll(".review-ratings button").forEach((b) => b.classList.remove("suggested"));
   if (item.card_type !== "custom") input.focus();
 }
@@ -1832,9 +1919,54 @@ function revealReview(correct, acceptedText) {
   $("#reviewAccepted").innerHTML = acceptedText || "";
   $("#reviewInputWrap").classList.add("hidden");
   $("#reviewRevealWrap").classList.remove("hidden");
+  renderReviewBackside(reviewCurrentItem, reviewCurrentDetail);
   document.querySelectorAll(".review-ratings button").forEach((b) => {
     b.classList.toggle("suggested", b.dataset.rating === reviewSuggestedRating);
   });
+}
+
+// Vollständige Rückseite wie im PDF-/Anki-Export (Merkhilfen, Beispielvokabel/
+// -satz + Übersetzung) - nicht nur die knappe akzeptierte-Antworten-Zeile
+// (#reviewAccepted), siehe UI-Feedback "beim Ergebnis etwas wie die
+// Rückseite im PDF/Anki anzeigen". Custom-Karten zeigen ihr freies HTML
+// bereits vollständig über #reviewAccepted (onReviewSubmit), hier also nichts
+// Zusätzliches nötig.
+function renderReviewBackside(item, detail) {
+  const el = $("#reviewBackside");
+  el.innerHTML = "";
+  if (!item || !detail || item.card_type === "custom") return;
+  const rows = [];
+  const row = (label, value, cls) => {
+    if (!value) return;
+    rows.push(`<div class="rb-row"><span class="rb-label">${escapeHtml(label)}</span><span class="${cls || ""}">${value}</span></div>`);
+  };
+  if (item.card_type === "wanikani") {
+    if (detail.kind === "RadicalCard") {
+      row(t("review.backside.meaning"), escapeHtml(detail.meaning));
+      row(t("review.backside.mnemonic"), escapeHtml(detail.mnemonic || ""), "rb-mnemonic");
+    } else {
+      row(t("review.backside.meanings"), (detail.meanings || []).map(escapeHtml).join(", "));
+      if (detail.kind === "VocabCard") {
+        row(t("review.backside.readings"), (detail.readings || []).map(escapeHtml).join(", "));
+      } else {
+        const readings = [...(detail.onyomi || []), ...(detail.kunyomi || [])];
+        row(t("review.backside.readings"), readings.map(escapeHtml).join(", "));
+      }
+      row(t("review.backside.meaning_mnemonic"), escapeHtml(detail.meaning_mnemonic || ""), "rb-mnemonic");
+      row(t("review.backside.reading_mnemonic"), escapeHtml(detail.reading_mnemonic || ""), "rb-mnemonic");
+      if (detail.vocab) row(t("review.backside.example_vocab"), `${escapeHtml(detail.vocab)} (${escapeHtml(detail.vocab_reading || "")}) – ${escapeHtml(detail.vocab_meaning || "")}`);
+    }
+    if (detail.sentence_ja) {
+      rows.push(`<div class="rb-row"><span class="rb-label">${escapeHtml(t("review.backside.example_sentence"))}</span><div class="rb-sentence-ja">${escapeHtml(detail.sentence_ja)}</div>${detail.sentence_en ? `<div class="rb-sentence-en">${escapeHtml(detail.sentence_en)}</div>` : ""}</div>`);
+    }
+  } else if (item.card_type === "kana") {
+    row(t("review.backside.meanings"), [detail.meaning, detail.meaning_extra].filter(Boolean).map(escapeHtml).join("; "));
+    if (detail.kanji_hint) row(t("review.backside.kanji_hint"), escapeHtml(detail.kanji_hint));
+    if (detail.sentence_ja) {
+      rows.push(`<div class="rb-row"><span class="rb-label">${escapeHtml(t("review.backside.example_sentence"))}</span><div class="rb-sentence-ja">${escapeHtml(detail.sentence_ja)}</div>${detail.sentence_translation ? `<div class="rb-sentence-en">${escapeHtml(detail.sentence_translation)}</div>` : ""}</div>`);
+    }
+  }
+  el.innerHTML = rows.join("");
 }
 
 async function onReviewSubmit() {
@@ -2218,6 +2350,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#btnReviewStart").addEventListener("click", startReviewSession);
   $("#btnReviewManage").addEventListener("click", toggleReviewManage);
+  $("#btnReviewEdit").addEventListener("click", () => {
+    const item = reviewCurrentItem;
+    if (!item) return;
+    if (item.card_type === "wanikani") {
+      if (!reviewCurrentObjectType) { toast(t("review.edit_unavailable"), true); return; }
+      openFieldEditModal(item.card_id, reviewCurrentObjectType);
+    } else if (item.card_type === "kana") {
+      openFieldEditModal(item.card_id, "kana");
+    } else if (item.card_type === "custom") {
+      // Eigene Karten haben bereits einen vollwertigen Editor ("Frei
+      // erstellen") - den wiederverwenden statt einen zweiten zu bauen
+      // (siehe UI-Feedback: "Auch WaniKani-Karten" bezog Custom-Karten mit
+      // ein, aber ohne einen komplett neuen Dialog zu fordern).
+      document.querySelector('#modeTabs button[data-v="custom"]').click();
+      editCustom(item.card_id);
+    }
+  });
   $("#btnReviewSubmit").addEventListener("click", onReviewSubmit);
   $("#reviewInput").addEventListener("keydown", (e) => { if (e.key === "Enter") onReviewSubmit(); });
   document.querySelectorAll(".review-ratings button").forEach((b) => {
