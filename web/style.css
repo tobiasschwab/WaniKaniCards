@@ -64,7 +64,10 @@ body {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
   color: var(--muted); background: var(--bg-elev); border: 1px solid var(--border);
   border-radius: 999px; padding: 6px 11px; box-shadow: var(--shadow);
+  cursor: pointer; transition: border-color .15s, transform .05s;
 }
+.conn-dot:hover { border-color: var(--accent); }
+.conn-dot:active { transform: translateY(1px); }
 .conn-dot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--err); flex: 0 0 auto; }
 .conn-dot.on { color: var(--ok); }
 .conn-dot.on .dot { background: var(--ok); }
@@ -177,10 +180,19 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 /* Toggles */
 .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 6px 0 20px; }
 @media (max-width: 480px) { .toggles { grid-template-columns: 1fr; } }
-.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; max-width: 100%; }
 .switch input { display: none; }
-.switch span { width: 40px; height: 23px; border-radius: 999px; background: var(--border); position: relative; transition: background .18s; flex: 0 0 auto; }
-.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%; background: #fff; transition: transform .18s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+/* Nur der ERSTE <span> (der Schalter-Track) bekommt Toggle-Optik + den
+   ::after-Knopf. Der ZWEITE <span> ist reiner Label-Text - er darf NIE
+   zweizeilig umbrechen (align-items:center würde den Knopf sonst mittig über
+   beide Zeilen legen) und braucht den Toggle-Look/::after-Knopf nicht, sonst
+   erscheint ein zweiter, falsch positionierter Kreis mitten im Text (genau
+   der gemeldete Überlappungs-Bug). Der ganze Schalter darf als atomarer
+   Flex-Item bei wenig Platz stattdessen als Ganzes umbrechen - das übernimmt
+   `flex-wrap:wrap` der umgebenden `.row.gap`. */
+.switch input + span { width: 40px; height: 23px; border-radius: 999px; background: var(--border); position: relative; transition: background .18s; flex: 0 0 auto; }
+.switch input + span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%; background: #fff; transition: transform .18s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.switch input + span + span { white-space: nowrap; }
 .switch input:checked + span { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .switch input:checked + span::after { transform: translateX(17px); }
 
@@ -347,12 +359,15 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .word-token { cursor: pointer; border-radius: 4px; padding: 0 1px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 .word-token.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-token.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-token.card-exists { color: var(--warn); text-decoration-color: var(--warn); }
 .word-token:hover { background: rgba(109,59,245,.1); }
 .word-token.known:hover { background: rgba(22,163,74,.1); }
 .word-token.unknown:hover { background: rgba(0,180,216,.1); }
+.word-token.card-exists:hover { background: rgba(217,119,6,.1); }
 .word-legend { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 .word-legend.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-legend.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-legend.card-exists { color: var(--warn); text-decoration-color: var(--warn); }
 
 /* KI-Modus: Tabelle Japanisch / Bekannt / Deutsch / Vokabeln / Bemerkung */
 .ki-table { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); overflow: hidden; }
@@ -391,8 +406,10 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .ki-freq-chip .c { color: var(--muted); font-size: 11px; }
 .ki-freq-chip.unknown { color: var(--accent-2); border-color: var(--accent-2); }
 .ki-freq-chip.known { color: var(--ok); border-color: var(--ok); }
+.ki-freq-chip.card-exists { color: var(--warn); border-color: var(--warn); }
 .ki-freq-chip.unknown:hover { background: rgba(0,180,216,.1); }
 .ki-freq-chip.known:hover { background: rgba(22,163,74,.1); }
+.ki-freq-chip.card-exists:hover { background: rgba(217,119,6,.1); }
 .ki-pct-badge {
   display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
   background: hsla(var(--pct-hue), 70%, 45%, .18); color: hsl(var(--pct-hue), 75%, 32%);
@@ -429,13 +446,20 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 
 /* Übungs-Modus (SRS-Vokabeltrainer) */
 .review-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; margin-top: 10px; text-align: center; }
-.review-item-type { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 10px; }
+.review-item-type { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.review-card-header { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 10px; }
 .review-front { font-size: 42px; font-weight: 700; margin-bottom: 6px; word-break: break-word; }
 #reviewInputWrap input { text-align: center; font-size: 16px; }
 .review-feedback { font-weight: 700; font-size: 15px; }
 .review-feedback.ok { color: var(--ok); }
 .review-feedback.err { color: var(--err); }
 .review-accepted { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.review-backside { text-align: left; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 14px; color: var(--text); }
+.review-backside .rb-row { margin-bottom: 8px; }
+.review-backside .rb-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin-bottom: 2px; }
+.review-backside .rb-mnemonic { white-space: pre-wrap; }
+.review-backside .rb-sentence-ja { font-weight: 600; }
+.review-backside .rb-sentence-en { color: var(--muted); }
 .review-ratings { justify-content: center; }
 .review-ratings button { border-width: 2px; }
 .review-ratings button.rating-again { color: var(--err); }

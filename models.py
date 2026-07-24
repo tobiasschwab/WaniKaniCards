@@ -201,6 +201,28 @@ class KanaCard(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
+class SubjectFieldOverride(db.Model):
+    """Pro-Nutzer, persistente Feld-Überschreibungen für ein WaniKani-Subject
+    (Kanji/Vokabel/Radical) – Grundlage für den „Felder manuell anpassen"-
+    Dialog (bisher nur ephemer im `field_overrides`-Request-Parameter, siehe
+    `kc._apply_field_overrides()`), jetzt zusätzlich dauerhaft gespeichert,
+    damit Änderungen (z. B. während des Übens im Vokabeltrainer) auch nach
+    einem Reload sichtbar bleiben und in künftige PDF-/Anki-Exports desselben
+    Nutzers einfließen (siehe `services._build_mixed_deck()`). Gilt nur für
+    den eigenen Account, nie global.
+
+    `fields` hält dieselbe Struktur wie das bisherige `field_overrides[id]`
+    (`{feldname: neuer_wert, …}`), Gültigkeit der Feldnamen wird erst beim
+    Anwenden geprüft (`kc._apply_field_overrides()`), nicht hier im Modell."""
+
+    __tablename__ = "subject_field_overrides"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    subject_id = db.Column(db.Integer, primary_key=True)
+    fields = db.Column(db.JSON, nullable=False, default=dict)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
 class Job(db.Model):
     """Pro-Nutzer-Pendant zu jobs/*.json (Render-Verlauf, siehe
     webapp.write_job/read_job)."""

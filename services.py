@@ -19,7 +19,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import redis
 from flask import jsonify
@@ -601,6 +601,66 @@ def _delete_srs_rows_for_card(user_id: int, card_type: str, card_id: str) -> Non
     models.ReviewLog.query.filter_by(user_id=user_id, card_type=card_type, card_id=card_id).delete()
 
 
+def srs_progress(user_id: int, target_lang: str) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """`(added, learned)` – alle `(card_type, card_id)`-Paare, die der Nutzer
+    in sein SRS-Training aufgenommen hat, sowie die Teilmenge davon, die
+    mindestens einmal bewertet wurde (`reps > 0` in mindestens einer
+    Prüfrichtung). Grundlage für den dritten Wortlisten-/Text-Modus-Status
+    "Karte vorhanden" (in `added`, aber noch nicht in `learned`) sowie das
+    automatische Befördern zu "bekannt" nach der ersten Bewertung (sobald in
+    `learned`) – rein aus dem bestehenden `ReviewState`-Zustand berechnet,
+    keine zusätzliche Datenbank-Spalte nötig."""
+    rows = models.ReviewState.query.filter_by(user_id=user_id, target_lang=target_lang).all()
+    added = {(r.card_type, r.card_id) for r in rows}
+    learned = {(r.card_type, r.card_id) for r in rows if r.reps > 0}
+    return added, learned
+
+
+def get_subject_overrides(user_id: int, subject_ids: Iterable[int]) -> dict[int, dict[str, Any]]:
+    """Persistierte Feld-Überschreibungen für die gegebenen Subject-IDs laden
+    (siehe `models.SubjectFieldOverride`) – Grundlage für den „Felder manuell
+    anpassen"-Dialog (seedet ihn mit den zuletzt gespeicherten Werten) UND für
+    `_build_mixed_deck()` (damit PDF-/Anki-Exports dieselben Anpassungen
+    automatisch mitbekommen)."""
+    ids = {int(i) for i in subject_ids}
+    if not ids:
+        return {}
+    rows = models.SubjectFieldOverride.query.filter(
+        models.SubjectFieldOverride.user_id == user_id,
+        models.SubjectFieldOverride.subject_id.in_(ids),
+    ).all()
+    return {r.subject_id: (r.fields or {}) for r in rows}
+
+
+def save_subject_override(user_id: int, subject_id: int, fields: dict[str, Any]) -> None:
+    """Feld-Überschreibungen für EIN Subject dauerhaft speichern – MERGT die
+    übergebenen `fields` in bereits gespeicherte Werte (statt sie zu
+    ersetzen), damit ein erneutes Speichern NUR geänderter Felder (z. B. aus
+    dem Editiermodus im Vokabeltrainer-Review) frühere Anpassungen anderer
+    Felder (z. B. eine Bildkarte, siehe `/api/gemini/generate-image`) nicht
+    versehentlich löscht. Ein Feldwert von `None` entfernt genau diese eine
+    Überschreibung wieder (Reset-auf-Original für ein einzelnes Feld). Ist
+    das Ergebnis danach leer, wird die Zeile ganz entfernt statt einer leeren
+    Datenleiche."""
+    row = db.session.get(models.SubjectFieldOverride, (user_id, subject_id))
+    merged = dict(row.fields or {}) if row is not None else {}
+    for key, value in fields.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    if not merged:
+        if row is not None:
+            db.session.delete(row)
+            db.session.commit()
+        return
+    if row is None:
+        row = models.SubjectFieldOverride(user_id=user_id, subject_id=subject_id)
+        db.session.add(row)
+    row.fields = merged
+    db.session.commit()
+
+
 def delete_all_user_data(user_id: int) -> None:
     """Sämtliche Daten eines Nutzers löschen – für die Konto-Löschung
     (DELETE /api/auth/account). Die Fremdschlüssel auf `users.id` haben KEIN
@@ -617,8 +677,8 @@ def delete_all_user_data(user_id: int) -> None:
         storage.delete_output(OUTPUT_DIR, f"{job.id}.apkg")
     for model in (
         models.ReviewLog, models.ReviewState, models.Job, models.KanaCard,
-        models.CustomCard, models.KnownWord, models.UserLanguageSecrets,
-        models.UserSettings,
+        models.CustomCard, models.KnownWord, models.SubjectFieldOverride,
+        models.UserLanguageSecrets, models.UserSettings,
     ):
         model.query.filter_by(user_id=user_id).delete()
 
@@ -638,13 +698,23 @@ def _build_mixed_deck(
     weil `KanaCard`-Lookups seit dem Multi-Language-Umbau danach scopen."""
     deck: list[Any] = []
     if p.get("subject_ids"):
+        # Dauerhaft gespeicherte Feld-Anpassungen (z. B. während des Übens im
+        # Vokabeltrainer gesetzt, siehe /api/subject-overrides) automatisch
+        # mit etwaigen einmaligen `field_overrides` dieses Render-Calls
+        # zusammenführen – Letztere gewinnen bei Überschneidung, weil sie vom
+        # Nutzer bewusst gerade für DIESEN Export gesetzt wurden.
+        field_overrides = {
+            str(k): dict(v) for k, v in get_subject_overrides(user_id, p["subject_ids"]).items()
+        }
+        for k, v in (p.get("field_overrides") or {}).items():
+            field_overrides.setdefault(str(k), {}).update(v)
         deck.extend(
             kc.resolve_subject_deck(
                 p["subject_ids"],
                 use_cache=p.get("use_cache", True),
                 sample=p.get("sample", False),
                 sentence_overrides=p.get("sentence_overrides"),
-                field_overrides=p.get("field_overrides"),
+                field_overrides=field_overrides,
                 token=token,
             )
         )

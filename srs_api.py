@@ -24,6 +24,7 @@ from extensions import db
 from services import (
     _current_target_lang,
     _require_content_provider,
+    get_subject_overrides,
     load_settings,
     read_custom_for_user,
     read_custom_owned,
@@ -323,8 +324,20 @@ def _srs_load_card_data(row: "models.ReviewState") -> dict[str, Any] | None:
             details = kc.card_details_for_ids([int(row.card_id)], sample=not token, token=token)
         except kc.WaniKaniError:
             return None
-        return details.get(int(row.card_id))
+        data = details.get(int(row.card_id))
+        if data is not None:
+            data.update(get_subject_overrides(row.user_id, [int(row.card_id)]).get(int(row.card_id), {}))
+        return data
     return None
+
+
+def _split_answer_synonyms(text: str) -> list[str]:
+    """Ein Bedeutungsfeld wie "Kuchen; Torte; Biskuit; Backwerk" (JMdict/
+    Gemini trennen mehrere gültige Übersetzungen/Glossen mit "; ", siehe
+    dictionary.build_reading_index()) in EINZELNE akzeptierte Antworten
+    auftrennen - sonst müsste der Nutzer die komplette Aufzählung wortgleich
+    eintippen, um als richtig zu gelten."""
+    return [part.strip() for part in text.split(";") if part.strip()]
 
 
 def _srs_accepted_answers(row: "models.ReviewState") -> list[str] | None:
@@ -340,7 +353,12 @@ def _srs_accepted_answers(row: "models.ReviewState") -> list[str] | None:
     if row.card_type == "kana":
         if row.item_type == "reading":
             return [data["reading"]] if data.get("reading") else None
-        answers = [a for a in (data.get("meaning"), data.get("meaning_extra")) if a]
+        answers = [
+            syn
+            for field in (data.get("meaning"), data.get("meaning_extra"))
+            if field
+            for syn in _split_answer_synonyms(field)
+        ]
         return answers or None
     if row.card_type == "wanikani":
         if row.item_type == "reading":

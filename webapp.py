@@ -67,12 +67,15 @@ from services import (
     _require_content_provider,
     _resolve_gemini_model,
     _upsert_known_word,
+    get_subject_overrides,
     list_kana,
     load_known,
     load_known_meta,
     load_settings,
     save_settings,
+    save_subject_override,
     set_active_language,
+    srs_progress,
     TARGET_LANGS as _TARGET_LANGS,
 )
 
@@ -566,11 +569,34 @@ def api_card_detail() -> Any:
     token = None if sample else load_settings().get("token")
     try:
         details = kc.card_details_for_ids(ids, sample=sample, token=token)
+        overrides = get_subject_overrides(current_user.id, ids)
+        for i, fields in overrides.items():
+            if i in details:
+                details[i].update(fields)
     except (TypeError, ValueError):
         return jsonify({"error": "Ungültige Eingabe."}), 400
     except kc.WaniKaniError as exc:
         return jsonify({"error": str(exc)}), 502
     return jsonify({"cards": {str(k): v for k, v in details.items()}})
+
+
+@app.post("/api/subject-overrides")
+@login_required
+def api_save_subject_overrides() -> Any:
+    """Manuell im „Felder anpassen"-Dialog (Kartentabelle ODER Vokabeltrainer-
+    Review) geänderte WaniKani-Karten-Felder dauerhaft für den eigenen Account
+    speichern (siehe `models.SubjectFieldOverride`) – gilt NIE global, nur für
+    diesen Nutzer, und fließt automatisch in künftige PDF-/Anki-Exports
+    dieses Nutzers ein (`services._build_mixed_deck()`)."""
+    body = request.get_json(silent=True) or {}
+    subject_id = kc._int_or_none(body.get("subject_id"))
+    if subject_id is None:
+        return jsonify({"error": "Ungültige subject_id."}), 400
+    fields = body.get("fields")
+    if not isinstance(fields, dict):
+        return jsonify({"error": "Ungültige fields."}), 400
+    save_subject_override(current_user.id, subject_id, fields)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/translate")
@@ -609,19 +635,26 @@ def api_text_annotate() -> Any:
     Reine Janome-Lemmatisierung + WaniKani-/JMdict-Abgleich, kein Gemini
     (dafür siehe `/api/text-annotate-ai`, der eigenständige „KI"-Modus).
 
-    Jedes erkannte Wort bekommt zwei rohe Signale (fürs clientseitige
+    Jedes erkannte Wort bekommt drei rohe Signale (fürs clientseitige
     Umschalten von „bekannt" ohne Server-Roundtrip):
     - `manually_known` (bool) – manuell als bekannt markiert (`/api/known`).
-    - `ready`          (bool) – Karte dafür existiert bereits
-                                 (WaniKani exportiert bzw. Dictionary-Karte erstellt).
+    - `ready`          (bool) – Karte dafür existiert bereits (WaniKani
+                                 exportiert bzw. Dictionary-Karte erstellt)
+                                 ODER wurde im Vokabeltrainer schon mindestens
+                                 einmal bewertet (gilt dann als "gelernt").
+    - `card_exists`    (bool) – im Vokabeltrainer-Training, aber noch nie
+                                 bewertet ("Karte vorhanden", aber noch nicht
+                                 gelernt) - nur gesetzt, wenn NICHT bereits
+                                 `manually_known`/`ready`.
     Daraus abgeleitet (bereits serverseitig berechnet, zur Bequemlichkeit):
-    - `status` – nur noch `known` / `unknown` (treibt die Farbcodierung im
-                 Text-Modus: grün/blau, unabhängig von Quelle oder Grund –
-                 Details wie „manuell markiert" vs. „Karte erstellt" bzw.
-                 die Quelle (`source`: `wanikani`/`dictionary`) zeigt das
+    - `status` – `known` / `card_exists` / `unknown` (treibt die Farbcodierung
+                 im Text-Modus: grün/orange/blau, unabhängig von Quelle oder
+                 Grund – Details wie „manuell markiert" vs. „Karte erstellt"
+                 bzw. die Quelle (`source`: `wanikani`/`dictionary`) zeigt das
                  Wort-Popup).
     - `known`  – `manually_known or ready`, treibt die „Prozent bekannt"-Statistik
-                 (Vorkommen-basiert, nicht nur eindeutige Wörter).
+                 (Vorkommen-basiert, nicht nur eindeutige Wörter). Ein reines
+                 `card_exists` (noch nicht bewertet) zählt NICHT als bekannt.
 
     Nur verfügbar, wenn die aktive Zielsprache einen Offline-Tokenizer hat
     (aktuell nur Japanisch/Janome) - für andere Sprachen siehe
@@ -644,6 +677,7 @@ def api_text_annotate() -> Any:
     exported = _already_exported_ids()
     known_manual = load_known()
     created_kana = {c["id"] for c in list_kana()}
+    srs_added, srs_learned = srs_progress(current_user.id, _current_target_lang())
     total = 0
     known_count = 0
     for line in lines:
@@ -652,11 +686,14 @@ def api_text_annotate() -> Any:
                 continue
             is_dict = seg.get("source") == "dictionary"
             sid: int | str = str(seg["id"]) if is_dict else int(seg["id"])
+            srs_key = ("kana" if is_dict else "wanikani", str(sid))
             is_manual = sid in known_manual
-            is_ready = sid in (created_kana if is_dict else exported)
+            is_ready = sid in (created_kana if is_dict else exported) or srs_key in srs_learned
+            is_card_exists = srs_key in srs_added and not (is_manual or is_ready)
             seg["manually_known"] = is_manual
             seg["ready"] = is_ready
-            seg["status"] = "known" if (is_manual or is_ready) else "unknown"
+            seg["card_exists"] = is_card_exists
+            seg["status"] = "known" if (is_manual or is_ready) else ("card_exists" if is_card_exists else "unknown")
             seg["known"] = is_manual or is_ready
             total += 1
             if seg["known"]:
@@ -718,6 +755,7 @@ def api_text_annotate_ai() -> Any:
     exported = _already_exported_ids()
     known_manual = load_known()
     created_kana = {c["id"] for c in list_kana()}
+    srs_added, srs_learned = srs_progress(current_user.id, _current_target_lang())
     total = 0
     known_count = 0
     for row in rows:
@@ -726,11 +764,14 @@ def api_text_annotate_ai() -> Any:
                 continue
             is_wk = seg.get("source") == "wanikani"
             sid: int | str = int(seg["id"]) if is_wk else str(seg["id"])
+            srs_key = ("wanikani" if is_wk else "kana", str(sid))
             is_manual = sid in known_manual
-            is_ready = sid in (exported if is_wk else created_kana)
+            is_ready = sid in (exported if is_wk else created_kana) or srs_key in srs_learned
+            is_card_exists = srs_key in srs_added and not (is_manual or is_ready)
             seg["manually_known"] = is_manual
             seg["ready"] = is_ready
-            seg["status"] = "known" if (is_manual or is_ready) else "unknown"
+            seg["card_exists"] = is_card_exists
+            seg["status"] = "known" if (is_manual or is_ready) else ("card_exists" if is_card_exists else "unknown")
             seg["known"] = is_manual or is_ready
             total += 1
             if seg["known"]:

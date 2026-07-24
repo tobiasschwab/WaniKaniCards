@@ -1245,6 +1245,36 @@ Einstellungs-Panel unter „Konto".
   klassische „PWA liefert ewig die alte Version"-Falle) und fasst `/api/`-
   Requests gar nicht an (Sitzungs-/Lernstands-Daten werden nie gecacht).
 
+**Phase 7 (umgesetzt) – Editiermodus im Review & voller Rückseiten-Reveal:**
+
+- **Dauerhafte Feld-Überschreibungen für WaniKani-Karten**
+  (`models.SubjectFieldOverride`, `(user_id, subject_id)` → `fields`-JSON):
+  bisher lebte eine im „Felder manuell anpassen"-Dialog gespeicherte Änderung
+  nur ephemer im Browser (`fieldOverrides`, nur für den jeweiligen
+  Render-Aufruf mitgeschickt) und ging nach einem Reload verloren. Über
+  `POST /api/subject-overrides` (mergt neue Felder in bereits gespeicherte,
+  ein Feldwert `None` löscht gezielt EIN Feld wieder, siehe
+  `services.save_subject_override()`) landet die Änderung jetzt dauerhaft in
+  der Datenbank – gilt **nur für den eigenen Account**, nie global.
+  `/api/card-detail` liefert die gespeicherten Werte automatisch mit
+  (`services.get_subject_overrides()`), und `_build_mixed_deck()` wendet sie
+  automatisch auf künftige PDF-/Anki-Exports an, ganz ohne dass der Aufrufer
+  sie erneut als `field_overrides` mitschicken muss.
+- **Editiermodus im Vokabeltrainer-Review**: ein ✎-Button neben der
+  Karten-Typ-Anzeige öffnet je nach `card_type` den passenden Editor –
+  WaniKani-Karten den bestehenden „Felder manuell anpassen"-Dialog (jetzt
+  inkl. Persistenz s. o.), Dictionary-/KI-Karten einen neuen, direkten
+  Editier-Endpunkt (`POST /api/kanacards/<id>/edit`, überschreibt Felder 1:1
+  statt sie wie beim Anlegen neu aus Wörterbuch/KI herzuleiten – bewusst OHNE
+  das Wort selbst, dessen Hash die Karten-ID bildet), eigene Karten den
+  bereits vorhandenen „Frei erstellen"-Editor.
+- **Voller Rückseiten-Reveal beim Üben**: nach dem Beantworten zeigt der
+  Review-Screen jetzt Kartentyp (Kanji/Vokabel/Radical/Wörterbuch/KI/Frei)
+  plus – wie auf der gedruckten/Anki-Rückseite – Bedeutungs-/Lesungs-Merkhilfe
+  und Beispielvokabel/-satz mit Übersetzung, nicht nur die knappe
+  akzeptierte-Antworten-Zeile (`renderReviewBackside()` in `web/app.js`,
+  nutzt denselben `/api/card-detail`-Datensatz wie der Editiermodus).
+
 ## Architektur
 
 Ein Skript (`kanji_cards.py`), klar in Funktionen getrennt:

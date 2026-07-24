@@ -229,6 +229,42 @@ def test_api_text_annotate_ready_true_when_dictionary_card_already_created(clien
     assert word2["known"] is True
 
 
+def test_api_text_annotate_shows_card_exists_for_srs_added_but_unreviewed_word(client):
+    """Regressionstest für Nutzer-Feedback: eine Karte, die zum Vokabeltrainer
+    hinzugefügt, aber noch nie bewertet wurde, soll weder als "unbekannt" noch
+    fälschlich schon als "bekannt" gelten - dafür der dritte Status
+    "card_exists" ("Karte vorhanden")."""
+    first = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word = next(s for line in first["lines"] for s in line if s["type"] == "word")
+
+    client.post("/api/srs/add", json={"subject_ids": [word["id"]], "sample": True})
+
+    second = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word2 = next(s for line in second["lines"] for s in line if s["type"] == "word")
+    assert word2["status"] == "card_exists"
+    assert word2["card_exists"] is True
+    assert word2["known"] is False  # zählt NICHT als bekannt, solange nie bewertet
+
+
+def test_api_text_annotate_promotes_to_known_after_first_rating(client):
+    """Sobald mindestens eine Prüfrichtung der Karte einmal bewertet wurde,
+    gilt sie automatisch als bekannt (ohne manuelles Markieren)."""
+    first = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word = next(s for line in first["lines"] for s in line if s["type"] == "word")
+    client.post("/api/srs/add", json={"subject_ids": [word["id"]], "sample": True})
+
+    row = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id=str(word["id"])).first()
+    client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": str(word["id"]), "item_type": row.item_type, "rating": "good",
+    })
+
+    second = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word2 = next(s for line in second["lines"] for s in line if s["type"] == "word")
+    assert word2["status"] == "known"
+    assert word2["known"] is True
+    assert word2["card_exists"] is False
+
+
 def test_api_text_annotate_ai_without_key_returns_error(client):
     r = client.post("/api/text-annotate-ai", json={"text": "大きい山です。", "sample": True})
     assert r.status_code == 400
@@ -855,6 +891,81 @@ def test_api_render_stores_field_overrides_in_job_params(client):
     assert job["user_id"] == client.test_user_id
 
 
+def test_save_subject_override_roundtrip_and_merge(logged_in_user):
+    """`save_subject_override` mergt neue Felder in bereits gespeicherte,
+    statt sie zu ersetzen - ein zweiter Aufruf mit nur EINEM geänderten Feld
+    darf ein zuvor gespeichertes anderes Feld nicht löschen."""
+    services.save_subject_override(logged_in_user.id, 2467, {"meanings": ["Eigene Bedeutung"]})
+    services.save_subject_override(logged_in_user.id, 2467, {"vocab_meaning": "Zusatz"})
+    stored = services.get_subject_overrides(logged_in_user.id, [2467])
+    assert stored[2467] == {"meanings": ["Eigene Bedeutung"], "vocab_meaning": "Zusatz"}
+
+    # `None` löscht gezielt EIN Feld wieder.
+    services.save_subject_override(logged_in_user.id, 2467, {"meanings": None})
+    stored = services.get_subject_overrides(logged_in_user.id, [2467])
+    assert stored[2467] == {"vocab_meaning": "Zusatz"}
+
+    # Leert man alle Felder, verschwindet die Zeile ganz statt leer zu bleiben.
+    services.save_subject_override(logged_in_user.id, 2467, {"vocab_meaning": None})
+    assert models.SubjectFieldOverride.query.filter_by(user_id=logged_in_user.id, subject_id=2467).count() == 0
+
+
+def test_build_mixed_deck_applies_persisted_subject_overrides(logged_in_user):
+    """Dauerhaft gespeicherte Overrides (siehe /api/subject-overrides) wirken
+    automatisch auch auf künftige PDF-/Anki-Exports, OHNE dass der Aufrufer
+    sie erneut als `field_overrides` mitschicken muss."""
+    services.save_subject_override(logged_in_user.id, 2467, {"meanings": ["Persistiert"]})
+    deck = services._build_mixed_deck({"subject_ids": [2467], "sample": True}, logged_in_user.id)
+    assert deck[0].meanings == ["Persistiert"]
+
+
+def test_api_subject_overrides_save_and_reflect_in_card_detail(client):
+    r = client.post("/api/subject-overrides", json={"subject_id": 2467, "fields": {"meanings": ["Meine Bedeutung"]}})
+    assert r.status_code == 200
+
+    detail = client.post("/api/card-detail", json={"subject_ids": [2467], "sample": True}).get_json()
+    assert detail["cards"]["2467"]["meanings"] == ["Meine Bedeutung"]
+
+
+def test_api_subject_overrides_scoped_per_user(client, db_session):
+    """Ein Override eines anderen Nutzers darf für DIESEN Nutzer nicht sichtbar
+    sein - gilt nur für den eigenen Account, nie global (siehe UI-Feedback:
+    "Auch WaniKani-Karten ... nur für den eigenen Account")."""
+    other = models.User(email="overridesowner@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    services.save_subject_override(other.id, 2467, {"meanings": ["Fremde Bedeutung"]})
+
+    detail = client.post("/api/card-detail", json={"subject_ids": [2467], "sample": True}).get_json()
+    assert detail["cards"]["2467"]["meanings"] != ["Fremde Bedeutung"]
+
+
+def test_api_edit_kanacard_overwrites_fields_directly(client):
+    add = client.post("/api/kanacards", json={"word": "たべる", "source": "ai", "meaning": "essen"})
+    kid = add.get_json()["id"]
+
+    r = client.post(f"/api/kanacards/{kid}/edit", json={"fields": {"meaning": "Essen (angepasst)", "meaning_extra": "futtern"}})
+    assert r.status_code == 200
+    assert r.get_json()["meaning"] == "Essen (angepasst)"
+
+    full = client.get(f"/api/kanacards/{kid}").get_json()
+    assert full["meaning"] == "Essen (angepasst)"
+    assert full["meaning_extra"] == "futtern"
+
+
+def test_api_edit_kanacard_rejects_foreign_card(client, db_session):
+    other = models.User(email="kanaowner@example.com")
+    other.set_password("x")
+    db.session.add(other)
+    db.session.commit()
+    services.write_kana(
+        {"id": "theirskana", "word": "x", "meaning": "y", "tags": []}, user_id=other.id, target_lang="ja",
+    )
+    r = client.post("/api/kanacards/theirskana/edit", json={"fields": {"meaning": "hijacked"}})
+    assert r.status_code == 404
+
+
 def test_api_render_rejects_foreign_custom_id(client, db_session):
     other = models.User(email="rendertheirs@example.com")
     other.set_password("x")
@@ -1380,6 +1491,29 @@ def test_api_srs_check_reading_uses_onyomi_and_kunyomi(client):
         "card_type": "wanikani", "card_id": "440", "item_type": "reading", "answer": "ひと",
     })
     assert r2.get_json()["correct"] is True  # kunyomi ebenfalls akzeptiert
+
+
+def test_api_srs_check_kana_card_splits_semicolon_separated_synonyms(client, monkeypatch):
+    """Regressionstest: eine Dictionary-/KI-Karte mit mehreren durch "; "
+    getrennten Synonymen (z. B. "Kuchen; Torte; Biskuit; Backwerk") darf nicht
+    als EINE Antwort verlangt werden - jedes einzelne Synonym muss für sich
+    als richtig zählen (siehe _split_answer_synonyms())."""
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {"けーき": {"kanji": None, "meaning": "Kuchen; Torte; Biskuit; Backwerk"}})
+    created = client.post("/api/kanacards", json={"word": "けーき"}).get_json()
+    client.post("/api/srs/add", json={"kana_ids": [created["id"]]})
+
+    for word in ("Kuchen", "Torte", "Biskuit", "Backwerk"):
+        r = client.post("/api/srs/check", json={
+            "card_type": "kana", "card_id": created["id"], "item_type": "meaning", "answer": word,
+        })
+        assert r.get_json()["correct"] is True, f"{word!r} sollte als richtig gelten"
+
+    r = client.post("/api/srs/check", json={
+        "card_type": "kana", "card_id": created["id"], "item_type": "meaning",
+        "answer": "Kuchen; Torte; Biskuit; Backwerk",
+    })
+    assert r.get_json()["correct"] is False  # die volle Aufzählung ist NICHT die erwartete Eingabe
 
 
 def test_api_srs_check_returns_ungraded_for_custom_card(client):
