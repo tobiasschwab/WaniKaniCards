@@ -618,8 +618,10 @@ beide Befehle erzeugen einen gleichwertigen, gültigen Key ganz ohne Python 3
 und ohne `crypto.py` je auszuführen:
 
 ```bash
-# Variante A: openssl (auf praktisch jedem NAS vorhanden, empfohlen)
-export WKCARDS_SECRET_KEY=$(openssl rand -base64 32 | tr '+/' '-_')
+# Variante A: openssl (auf praktisch jedem NAS vorhanden, empfohlen) - oder
+# gleich das mitgelieferte Skript nutzen (WICHTIG: mit "source"/"." aufrufen,
+# sonst geht der Key beim Skriptende als Subshell-Variable wieder verloren):
+source ./create_secret.sh
 echo "$WKCARDS_SECRET_KEY"   # aufschreiben/sichern - bei Verlust sind gespeicherte Keys unlesbar
 
 # Variante B: falls kein openssl vorhanden ist, tut's auch das System-Python 2.7
