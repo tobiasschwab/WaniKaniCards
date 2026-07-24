@@ -181,7 +181,10 @@ try:
 except ValueError:
     _trusted_proxy_hops = 0
 if _trusted_proxy_hops:
-    app.wsgi_app = ProxyFix(
+    # Idiomatisches Werkzeug-Muster (siehe ProxyFix-Doku) - `wsgi_app` ist
+    # zur Laufzeit ein normales Instanz-Attribut, das Ersetzen ist
+    # beabsichtigt, mypy kennt aber nur den Klassen-Methoden-Typ.
+    app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
         app.wsgi_app, x_for=_trusted_proxy_hops, x_proto=_trusted_proxy_hops,
         x_host=_trusted_proxy_hops, x_port=_trusted_proxy_hops,
     )
@@ -776,7 +779,7 @@ def api_resolve() -> Any:
     token = None if sample else load_settings().get("token")
     try:
         if mode == "level":
-            level = int(body.get("level"))
+            level = int(body.get("level"))  # type: ignore[arg-type]  # None/ungültig -> TypeError/ValueError, unten abgefangen
             deck_types = body.get("types") or [body.get("type", "kanji")]
             cards = kc.resolve_level(level, deck_types, sample=sample, token=token)
         elif mode == "search":

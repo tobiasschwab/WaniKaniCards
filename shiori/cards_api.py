@@ -257,6 +257,7 @@ def api_create_kanacard() -> Any:
     s = load_settings()
     deepl_key = s.get("deepl_key") or None
     sentence_audio = body.get("sentence_audio_url") or None
+    card_obj: kc.KanaCard | None
     if source == "ai":
         meaning = str(body.get("meaning") or "").strip()
         if not meaning:
@@ -281,6 +282,7 @@ def api_create_kanacard() -> Any:
         )
         if card_obj is None:
             return jsonify({"error": f"„{word}“ wurde nicht als gültiges Wort erkannt."}), 404
+    assert card_obj.card_id is not None  # von build_*_kana_card() immer gesetzt
     record = {
         "id": card_obj.card_id,
         "word": card_obj.word,
@@ -295,7 +297,9 @@ def api_create_kanacard() -> Any:
         "tags": card_obj.tags,
     }
     write_kana(record, user_id=current_user.id, target_lang=_current_target_lang())
-    return jsonify(_kana_descriptor(read_kana_owned(record["id"])))
+    saved = read_kana_owned(card_obj.card_id)
+    assert saved is not None  # gerade geschrieben, muss lesbar sein
+    return jsonify(_kana_descriptor(saved))
 
 
 @bp.post("/api/kanacards/<kid>/edit")
@@ -346,7 +350,9 @@ def api_edit_kanacard(kid: str) -> Any:
     }
     card.update({k: v for k, v in fields.items() if k in allowed})
     write_kana(card, user_id=current_user.id, target_lang=_current_target_lang())
-    return jsonify(_kana_descriptor(read_kana_owned(kid)))
+    saved = read_kana_owned(kid)
+    assert saved is not None  # gerade geschrieben, muss lesbar sein
+    return jsonify(_kana_descriptor(saved))
 
 
 @bp.delete("/api/kanacards/<kid>")

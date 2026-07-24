@@ -485,7 +485,7 @@ def api_srs_check() -> Any:
     quality = _match_quality(answer, accepted)
     # exact -> "good" (sicher gewusst), fuzzy (nur mit Tippfehler-Toleranz
     # akzeptiert) -> "hard" (ehrlicher Vorschlag), kein Treffer -> "again".
-    suggested = {"exact": "good", "fuzzy": "hard"}.get(quality, "again")
+    suggested = {"exact": "good", "fuzzy": "hard"}.get(quality or "", "again")
     return jsonify({
         "correct": quality is not None,
         "accepted_answers": accepted,
@@ -639,7 +639,8 @@ def api_srs_stats() -> Any:
         if s.reps == 0:
             by_stage["new"] += 1
         else:
-            by_stage[stage_names.get((s.fsrs_state or {}).get("state"), "learning")] += 1
+            fsrs_stage = int((s.fsrs_state or {}).get("state") or 0)
+            by_stage[stage_names.get(fsrs_stage, "learning")] += 1
 
     daily_counts = _daily_review_counts(current_user.id, lang)
     today = now.date()

@@ -1,0 +1,13 @@
+# Installation: pip install -r requirements-dev.txt && pre-commit install
+#
+# Bewusst NUR Lint (schnell, Sekunden) - der volle Testlauf (~85s) läuft
+# manuell/in CI statt hier, sonst wird jeder Commit spürbar langsamer
+# (siehe README "Entwicklungswerkzeuge"). Kein ruff-format-Hook: die
+# mehrzeiligen Anki-Template-Strings in anki_export.py hätten davon nur
+# unnötiges Diff-Rauschen ohne funktionalen Nutzen (siehe README).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      - id: ruff
+        args: [--fix]

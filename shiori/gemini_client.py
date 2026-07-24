@@ -282,18 +282,18 @@ def _post_with_retry(
         if resp.status_code == 429 or resp.status_code >= 500:
             if total_waited >= max_total_wait or attempt == max_attempts - 1:
                 break
-            wait = _server_retry_delay(resp) if resp.status_code == 429 else None
+            retry_wait = _server_retry_delay(resp) if resp.status_code == 429 else None
             source = "vom Server empfohlen"
-            if wait is None:
-                wait, source = backoff, "geschätzt"
+            if retry_wait is None:
+                retry_wait, source = backoff, "geschätzt"
                 backoff = min(backoff * 2, 20)
-            wait = min(wait, max_total_wait - total_waited)
+            retry_wait = min(retry_wait, max_total_wait - total_waited)
             logger.info(
                 "Gemini: HTTP %s für %s, Versuch %d/%d – warte %.0fs (%s)",
-                resp.status_code, label, attempt + 1, max_attempts, wait, source,
+                resp.status_code, label, attempt + 1, max_attempts, retry_wait, source,
             )
-            time.sleep(wait)
-            total_waited += wait
+            time.sleep(retry_wait)
+            total_waited += retry_wait
             continue
         break
     if last_exc is not None or resp is None or not resp.ok:

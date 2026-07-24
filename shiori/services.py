@@ -114,6 +114,7 @@ def _get_or_create_user_settings(user_id: int) -> models.UserSettings:
             # Zeile - kein Fehler, kein Datenverlust.
             db.session.rollback()
             settings = db.session.get(models.UserSettings, user_id)
+    assert settings is not None  # IntegrityError garantiert, dass die Zeile jetzt existiert
     return settings
 
 
@@ -132,6 +133,7 @@ def _get_or_create_language_secrets(user_id: int, target_lang: str) -> models.Us
             # Gleiches Race wie bei _get_or_create_user_settings() oben.
             db.session.rollback()
             row = db.session.get(models.UserLanguageSecrets, (user_id, target_lang))
+    assert row is not None  # IntegrityError garantiert, dass die Zeile jetzt existiert
     return row
 
 

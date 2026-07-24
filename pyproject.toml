@@ -39,3 +39,11 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 check_untyped_defs = true
 exclude = ["migrations/versions/"]
+
+[[tool.mypy.overrides]]
+# Flask-SQLAlchemy's `db.Model` ist ein zur Laufzeit dynamisch erzeugtes
+# Attribut (kein echtes Klassen-Attribut) - mypy kann es ohne eigenes
+# Flask-SQLAlchemy-Stub-Paket (existiert aktuell nicht) statisch nicht
+# auflösen. Nur für dieses eine, bekannte Muster deaktiviert, nicht global.
+module = "shiori.models"
+disable_error_code = ["name-defined"]

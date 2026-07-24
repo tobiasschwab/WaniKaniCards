@@ -20,11 +20,11 @@ import logging
 import os
 import re
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import requests
 
@@ -518,7 +518,7 @@ def _pick_audio_url(audios: list[dict[str, Any]] | None) -> str | None:
     return chosen.get("url") if chosen else None
 
 
-def _resolve_audio_url(url: str | None, fetcher: callable | None) -> str | None:
+def _resolve_audio_url(url: str | None, fetcher: Callable | None) -> str | None:
     """Audio-URL für den Anki-Export einbetten (herunterladen → data-URI).
 
     So funktionieren die Karten im Anki-Review komplett offline, ohne bei
@@ -537,7 +537,7 @@ MAX_EXTRA_SENTENCES = 2
 
 
 def _build_extra_sentences(
-    sentences: list[dict[str, Any]], fetcher: callable | None
+    sentences: list[dict[str, Any]], fetcher: Callable | None
 ) -> list[dict[str, Any]]:
     """Beispielsätze 2..N (der erste läuft separat über sentence_ja/_en)."""
     out: list[dict[str, Any]] = []
@@ -558,7 +558,7 @@ def _build_extra_sentences(
 def _build_components(
     data: dict[str, Any],
     subject_map: dict[int, dict[str, Any]],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
 ) -> list[dict[str, Any]]:
     """Die Radicals auflösen, aus denen ein Kanji zusammengesetzt ist.
 
@@ -596,7 +596,7 @@ def _build_components(
 def build_card(
     kanji: dict[str, Any],
     vocab_map: dict[int, dict[str, Any]],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
     sentence_overrides: dict[int, dict[str, Any]] | None = None,
 ) -> Card:
     """Aus einem Kanji-Subject (+ Subject-Map) eine Card bauen.
@@ -641,7 +641,8 @@ def build_card(
             _pick_audio_url(vdata.get("pronunciation_audios")), image_fetcher
         )
         sentences = vdata.get("context_sentences") or []
-        override = (sentence_overrides or {}).get(_int_or_none(vocab.get("id")))
+        vocab_id = _int_or_none(vocab.get("id"))
+        override = (sentence_overrides or {}).get(vocab_id) if vocab_id is not None else None
         if override and override.get("ja"):
             card.sentence_ja = override["ja"]
             card.sentence_en = override.get("en") or None
@@ -662,7 +663,7 @@ def build_card(
 def build_cards(
     kanji_list: list[dict[str, Any]],
     vocab_map: dict[int, dict[str, Any]],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
 ) -> list[Card]:
     return [build_card(k, vocab_map, image_fetcher) for k in kanji_list]
 
@@ -686,7 +687,7 @@ RADICAL_MAX_EXAMPLES = 6
 def build_radical_card(
     radical: dict[str, Any],
     kanji_map: dict[int, dict[str, Any]],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
 ) -> RadicalCard:
     """Aus einem Radical-Subject (+ Kanji-Map) eine RadicalCard bauen.
 
@@ -743,14 +744,14 @@ def build_radical_card(
 def build_radical_cards(
     radical_list: list[dict[str, Any]],
     kanji_map: dict[int, dict[str, Any]],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
 ) -> list[RadicalCard]:
     return [build_radical_card(r, kanji_map, image_fetcher) for r in radical_list]
 
 
 def build_vocab_card(
     vocab: dict[str, Any],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
     sentence_override: dict[str, Any] | None = None,
 ) -> VocabCard:
     """Aus einem Vokabel-Subject eine VocabCard bauen.
@@ -823,7 +824,7 @@ def build_kana_card(
     sentence: str | None = None,
     *,
     deepl_key: str | None = None,
-    translate_fn: callable | None = None,
+    translate_fn: Callable | None = None,
 ) -> KanaCard | None:
     """Aus einem im Text gefundenen Wort (ohne WaniKani-Treffer) eine KanaCard
     bauen. Bedeutung kommt aus JMdict; gibt `None` zurück, wenn dort auch
@@ -860,7 +861,7 @@ def build_generic_dictionary_card(
     has_reading: bool = False,
     deepl_key: str | None = None,
     gemini_model: str = gemini_client.DEFAULT_MODEL,
-    translate_fn: callable | None = None,
+    translate_fn: Callable | None = None,
 ) -> KanaCard | None:
     """Wie `build_kana_card()` (manuell eingegebenes Wort → Karte), aber für
     Zielsprachen OHNE eigenes Wörterbuch-Backend wie JMdict (alles außer
@@ -890,7 +891,7 @@ def build_ai_kana_card(
     sentence: str | None = None,
     sentence_audio_url: str | None = None,
     deepl_key: str | None = None,
-    translate_fn: callable | None = None,
+    translate_fn: Callable | None = None,
 ) -> KanaCard:
     """Karte für ein im KI-Modus gefundenes Wort ohne WaniKani-/JMdict-Treffer,
     dessen Bedeutung stattdessen von Gemini selbst stammt (siehe
@@ -956,16 +957,21 @@ def paginate(
     """Karten in Seiten à `per_page` aufteilen; letzte Seite mit None auffüllen."""
     pages: list[list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None]] = []
     for start in range(0, len(cards), per_page):
-        chunk: list[Card | None] = list(cards[start : start + per_page])
+        chunk: list[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard | None] = list(
+            cards[start : start + per_page]
+        )
         while len(chunk) < per_page:
             chunk.append(None)
         pages.append(chunk)
     return pages
 
 
+_CardT = TypeVar("_CardT")
+
+
 def mirror_backside(
-    chunk: Sequence[Card | None], cols: int, duplex: str = "long-edge"
-) -> list[Card | None]:
+    chunk: Sequence[_CardT], cols: int, duplex: str = "long-edge"
+) -> list[_CardT]:
     """Rückseiten-Raster für Duplexdruck spiegeln.
 
     Der Chunk ist zeilenweise (row-major) mit `cols` Spalten angeordnet.
@@ -1525,8 +1531,8 @@ def _is_kana_only(text: str) -> bool:
 
 
 def _reconcile_gemini_tokens(
-    gtoks: list[tuple[str, ...]], original_text: str
-) -> list[tuple[str, ...]] | None:
+    gtoks: list[tuple[Any, ...]], original_text: str
+) -> list[tuple[Any, ...]] | None:
     """Prüfen, ob Gemini-Tokens zum Original-Satz passen – bei Bedarf um
     fehlende Satzzeichen am Ende ergänzen, statt strikt auf Zeichengleichheit
     zu bestehen.
@@ -1639,7 +1645,7 @@ def annotate_text(
 
     best_by_lemma: dict[str, dict[str, Any]] = {}
     for chars, subs in hits_by_chars.items():
-        subs.sort(key=lambda s: _ANNOTATE_KIND_PRIORITY.get(s.get("object"), 9))
+        subs.sort(key=lambda s: _ANNOTATE_KIND_PRIORITY.get(s.get("object") or "", 9))
         best_by_lemma[chars] = subs[0]
 
     lines_out: list[list[dict[str, Any]]] = []
@@ -1817,7 +1823,7 @@ def annotate_text_ai(
 
     best_by_lemma: dict[str, dict[str, Any]] = {}
     for chars, subs in hits_by_chars.items():
-        subs.sort(key=lambda s: _ANNOTATE_KIND_PRIORITY.get(s.get("object"), 9))
+        subs.sort(key=lambda s: _ANNOTATE_KIND_PRIORITY.get(s.get("object") or "", 9))
         best_by_lemma[chars] = subs[0]
 
     rows: list[dict[str, Any]] = []
@@ -1949,7 +1955,7 @@ def _apply_field_overrides(card: Any, overrides: dict[str, Any] | None) -> None:
 
 def _build_subject_registry(
     ids: list[int], *, use_cache: bool, sample: bool, token: str | None = None,
-) -> tuple[dict[int, dict[str, Any]], callable | None]:
+) -> tuple[dict[int, dict[str, Any]], Callable | None]:
     """Subjects + ihre Bezüge (Beispielvokabeln, Kompositions-Radicals) einmalig
     laden – gemeinsam genutzt von `resolve_subject_deck()` und
     `card_details_for_ids()`. Gibt `(registry, image_fetcher)` zurück."""
@@ -2120,7 +2126,7 @@ def build_deck(
 
 
 def render_deck(
-    deck: Sequence[Card | CoverCard | RadicalCard | VocabCard],
+    deck: Sequence[Card | CoverCard | RadicalCard | VocabCard | CustomCard | KanaCard],
     output: str | Path,
     *,
     layout: str = "a6",
@@ -2164,7 +2170,7 @@ def _subject_descriptor(subject: dict[str, Any]) -> dict[str, Any]:
     meanings = _primary_first(data.get("meanings", []), "meaning", lower_first=True)
     obj = subject.get("object", "")
     return {
-        "id": int(subject.get("id")),
+        "id": int(subject.get("id")),  # type: ignore[arg-type]  # WaniKani-Subjects haben immer eine id
         "object": obj,
         "kind": _OBJ_KIND.get(obj, obj or "?"),
         "characters": strip_markup(data.get("characters")) or "",
@@ -2202,7 +2208,7 @@ def collect_composition(
 def build_any_card(
     subject: dict[str, Any],
     registry: dict[int, dict[str, Any]],
-    image_fetcher: callable | None = None,
+    image_fetcher: Callable | None = None,
     sentence_overrides: dict[int, dict[str, Any]] | None = None,
 ) -> Card | RadicalCard | VocabCard:
     """Passende Karte je nach Subject-Typ bauen (nutzt registry für Bezüge)."""
@@ -2210,7 +2216,8 @@ def build_any_card(
     if obj == "radical":
         return build_radical_card(subject, registry, image_fetcher)
     if obj == "vocabulary":
-        override = (sentence_overrides or {}).get(_int_or_none(subject.get("id")))
+        subject_id = _int_or_none(subject.get("id"))
+        override = (sentence_overrides or {}).get(subject_id) if subject_id is not None else None
         return build_vocab_card(subject, image_fetcher, override)
     return build_card(subject, registry, image_fetcher, sentence_overrides)  # kanji
 
