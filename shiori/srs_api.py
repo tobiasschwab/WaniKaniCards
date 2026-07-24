@@ -18,7 +18,7 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
 from . import kanji_cards as kc
-from . import models, srs
+from . import models, schemas, srs
 from .extensions import db
 from .services import (
     _current_target_lang,
@@ -104,9 +104,13 @@ def api_srs_add() -> Any:
         description: WaniKani-API-Fehler.
     """
     body = request.get_json(silent=True) or {}
-    subject_ids = [int(i) for i in (body.get("subject_ids") or [])]
-    custom_ids = [str(i) for i in (body.get("custom_ids") or [])]
-    kana_ids = [str(i) for i in (body.get("kana_ids") or [])]
+    try:
+        data = schemas.parse_body(schemas.SrsAddBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
+    subject_ids = data.subject_ids
+    custom_ids = data.custom_ids
+    kana_ids = data.kana_ids
     if not (subject_ids or custom_ids or kana_ids):
         return jsonify({"error": "Keine Karten ausgewählt."}), 400
 
@@ -119,7 +123,7 @@ def api_srs_add() -> Any:
             return jsonify({"error": f"Dictionary-Karte „{kid}“ nicht gefunden."}), 404
 
     lang = _current_target_lang()
-    sample = bool(body.get("sample"))
+    sample = data.sample
     added = 0
 
     if subject_ids:
@@ -469,12 +473,12 @@ def api_srs_check() -> Any:
         description: Karte nicht in der Lernwarteschlange.
     """
     body = request.get_json(silent=True) or {}
-    card_type = str(body.get("card_type", ""))
-    card_id = str(body.get("card_id", ""))
-    item_type = str(body.get("item_type", ""))
-    answer = str(body.get("answer", ""))
+    try:
+        data = schemas.parse_body(schemas.SrsCheckBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
 
-    row = _get_review_row(card_type, card_id, item_type)
+    row = _get_review_row(data.card_type, data.card_id, data.item_type)
     if row is None:
         return jsonify({"error": "Karte nicht in der Lernwarteschlange gefunden."}), 404
 
@@ -482,7 +486,7 @@ def api_srs_check() -> Any:
     if accepted is None:
         return jsonify({"correct": None, "accepted_answers": [], "suggested_rating": None})
 
-    quality = _match_quality(answer, accepted)
+    quality = _match_quality(data.answer, accepted)
     # exact -> "good" (sicher gewusst), fuzzy (nur mit Tippfehler-Toleranz
     # akzeptiert) -> "hard" (ehrlicher Vorschlag), kein Treffer -> "again".
     suggested = {"exact": "good", "fuzzy": "hard"}.get(quality or "", "again")
@@ -527,18 +531,18 @@ def api_srs_answer() -> Any:
         description: Karte nicht in der Lernwarteschlange.
     """
     body = request.get_json(silent=True) or {}
-    card_type = str(body.get("card_type", ""))
-    card_id = str(body.get("card_id", ""))
-    item_type = str(body.get("item_type", ""))
-    rating = str(body.get("rating", ""))
+    try:
+        data = schemas.parse_body(schemas.SrsAnswerBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
 
-    row = _get_review_row(card_type, card_id, item_type)
+    row = _get_review_row(data.card_type, data.card_id, data.item_type)
     if row is None:
         return jsonify({"error": "Karte nicht in der Lernwarteschlange gefunden."}), 404
 
     was_new = row.reps == 0
     try:
-        updated = srs.review(srs.state_from_row(row), rating)
+        updated = srs.review(srs.state_from_row(row), data.rating)
     except srs.SrsError as exc:
         return jsonify({"error": str(exc)}), 400
     srs.apply_state_to_row(row, updated)
@@ -546,8 +550,8 @@ def api_srs_answer() -> Any:
     # Docstring) - ReviewState selbst hält nur den AKTUELLEN Zustand, keine
     # Historie.
     db.session.add(models.ReviewLog(
-        user_id=current_user.id, target_lang=row.target_lang, card_type=card_type,
-        card_id=card_id, item_type=item_type, rating=rating, was_new=was_new,
+        user_id=current_user.id, target_lang=row.target_lang, card_type=data.card_type,
+        card_id=data.card_id, item_type=data.item_type, rating=data.rating, was_new=was_new,
     ))
     db.session.commit()
 
@@ -760,17 +764,17 @@ def api_srs_remove() -> Any:
         description: Nicht eingeloggt.
     """
     body = request.get_json(silent=True) or {}
-    card_type = str(body.get("card_type", ""))
-    card_id = str(body.get("card_id", ""))
-    if not card_type or not card_id:
-        return jsonify({"error": "card_type und card_id erforderlich."}), 400
+    try:
+        data = schemas.parse_body(schemas.SrsRemoveBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
 
     lang = _current_target_lang()
     removed = models.ReviewState.query.filter_by(
-        user_id=current_user.id, target_lang=lang, card_type=card_type, card_id=card_id,
+        user_id=current_user.id, target_lang=lang, card_type=data.card_type, card_id=data.card_id,
     ).delete()
     models.ReviewLog.query.filter_by(
-        user_id=current_user.id, target_lang=lang, card_type=card_type, card_id=card_id,
+        user_id=current_user.id, target_lang=lang, card_type=data.card_type, card_id=data.card_id,
     ).delete()
     db.session.commit()
 

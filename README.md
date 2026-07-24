@@ -1615,6 +1615,17 @@ geänderten Dateien, nicht auf den Templates in `anki_export.py`, siehe
 ~85 s) läuft bewusst **nicht** als Pre-Commit-Hook (das würde jeden Commit
 spürbar verlangsamen), sondern manuell/in CI.
 
+### Request-Validierung (`shiori/schemas.py`)
+
+Auth- (`/api/auth/*`) und SRS-Endpunkte (`/api/srs/*`) validieren ihren
+JSON-Body über [Pydantic](https://docs.pydantic.dev/)-Modelle statt manueller
+`body.get()`/`isinstance()`-Prüfungen – ein ungültiger Typ (z. B. eine Zahl
+statt E-Mail-String) oder ein fehlendes Pflichtfeld liefert einheitlich
+`400 {"error": "..."}` über `schemas.parse_body()`. Bewusst **nicht** für
+`/api/settings`: dessen Semantik ("unbekannte/ungültige Felder still
+ignorieren, Rest unverändert lassen") passt nicht zum Fail-Fast-Modell von
+Pydantic – dort bleibt die bisherige manuelle Prüfung.
+
 ## Tests
 
 ```bash

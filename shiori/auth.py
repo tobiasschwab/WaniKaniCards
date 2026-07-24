@@ -12,20 +12,16 @@ SPA-artige Single-Page-App, alle Routen hier liefern JSON.
 """
 from __future__ import annotations
 
-import re
-
 from flask import Blueprint, jsonify, request
 from flask_limiter.util import get_remote_address
 from flask_login import current_user, login_required, login_user, logout_user
 
+from . import schemas
 from .extensions import db, limiter
 from .models import User, UserSettings
 from .services import delete_all_user_data
 
 bp = Blueprint("auth", __name__, url_prefix="/api/auth")
-
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_MIN_PASSWORD_LEN = 8
 
 
 @bp.post("/signup")
@@ -70,27 +66,23 @@ def signup():
         description: Rate-Limit (5 pro Stunde und IP) überschritten.
     """
     body = request.get_json(silent=True) or {}
-    email = str(body.get("email", "")).strip().lower()
-    password = str(body.get("password", ""))
-    # Optional bei der Registrierung mitgegeben (siehe web/index.html
-    # Onboarding); ohne Angabe bleiben die Modell-Defaults ("de"/"ja") -
-    # Muttersprache/Zielsprache lassen sich danach jederzeit in den
-    # Einstellungen ändern (siehe /api/settings/language).
-    native_lang = str(body.get("native_lang") or "de").strip().lower()[:10]
-    active_target_lang = str(body.get("active_target_lang") or "ja").strip().lower()[:10]
+    try:
+        # native_lang/active_target_lang optional bei der Registrierung
+        # mitgegeben (siehe web/index.html Onboarding); ohne Angabe bleiben
+        # die Modell-Defaults ("de"/"ja") - lassen sich danach jederzeit in
+        # den Einstellungen ändern (siehe /api/settings/language).
+        data = schemas.parse_body(schemas.SignupBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
 
-    if not _EMAIL_RE.match(email):
-        return jsonify({"error": "Ungültige E-Mail-Adresse."}), 400
-    if len(password) < _MIN_PASSWORD_LEN:
-        return jsonify({"error": f"Passwort muss mindestens {_MIN_PASSWORD_LEN} Zeichen haben."}), 400
-    if User.query.filter_by(email=email).first() is not None:
+    if User.query.filter_by(email=data.email).first() is not None:
         return jsonify({"error": "Für diese E-Mail-Adresse existiert bereits ein Konto."}), 409
 
-    user = User(email=email, native_lang=native_lang)
-    user.set_password(password)
+    user = User(email=data.email, native_lang=data.native_lang)
+    user.set_password(data.password)
     db.session.add(user)
     db.session.flush()  # user.id wird für die FK unten gebraucht
-    db.session.add(UserSettings(user_id=user.id, active_target_lang=active_target_lang))
+    db.session.add(UserSettings(user_id=user.id, active_target_lang=data.active_target_lang))
     db.session.commit()
 
     login_user(user)
@@ -123,14 +115,16 @@ def login():
         description: Rate-Limit überschritten.
     """
     body = request.get_json(silent=True) or {}
-    email = str(body.get("email", "")).strip().lower()
-    password = str(body.get("password", ""))
+    try:
+        data = schemas.parse_body(schemas.LoginBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
 
-    user = User.query.filter_by(email=email).first()
+    user = User.query.filter_by(email=data.email).first()
     # Bewusst dieselbe Fehlermeldung bei unbekannter E-Mail UND falschem
     # Passwort (keine Rückmeldung, ob eine E-Mail-Adresse überhaupt
     # registriert ist - übliche Praxis gegen Account-Enumeration).
-    if user is None or not user.check_password(password):
+    if user is None or not user.check_password(data.password):
         return jsonify({"error": "E-Mail oder Passwort falsch."}), 401
 
     login_user(user)
@@ -188,17 +182,17 @@ def change_password():
         description: Rate-Limit überschritten.
     """
     body = request.get_json(silent=True) or {}
-    current_password = str(body.get("current_password", ""))
-    new_password = str(body.get("new_password", ""))
+    try:
+        data = schemas.parse_body(schemas.ChangePasswordBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
 
-    if not current_user.check_password(current_password):
+    if not current_user.check_password(data.current_password):
         return jsonify({"error": "Aktuelles Passwort falsch."}), 403
-    if len(new_password) < _MIN_PASSWORD_LEN:
-        return jsonify({"error": f"Neues Passwort muss mindestens {_MIN_PASSWORD_LEN} Zeichen haben."}), 400
-    if new_password == current_password:
+    if data.new_password == data.current_password:
         return jsonify({"error": "Das neue Passwort muss sich vom aktuellen unterscheiden."}), 400
 
-    current_user.set_password(new_password)
+    current_user.set_password(data.new_password)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -231,8 +225,11 @@ def delete_account():
         description: Passwort falsch.
     """
     body = request.get_json(silent=True) or {}
-    password = str(body.get("password", ""))
-    if not current_user.check_password(password):
+    try:
+        data = schemas.parse_body(schemas.DeleteAccountBody, body)
+    except schemas.ValidationFailed as exc:
+        return jsonify({"error": exc.message}), 400
+    if not current_user.check_password(data.password):
         return jsonify({"error": "Passwort falsch."}), 403
 
     user_id = current_user.id

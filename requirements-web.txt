@@ -25,3 +25,7 @@ flasgger>=0.9.7
 
 # Error-Tracking (nur aktiv, wenn SENTRY_DSN gesetzt ist, siehe webapp.py).
 sentry-sdk[flask]>=2.0
+
+# Request-Body-Validierung für die sicherheitskritischen Endpunkte
+# (Auth, SRS, Settings), siehe schemas.py.
+pydantic>=2.0
