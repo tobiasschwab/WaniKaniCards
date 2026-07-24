@@ -631,6 +631,29 @@ export WKCARDS_SECRET_KEY=$(python -c "import os,base64; print(base64.urlsafe_b6
 export WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)
 ```
 
+> ⚠️ **`sudo docker compose up` findet die Variablen trotzdem nicht?** `sudo`
+> setzt standardmäßig die Umgebungsvariablen der aufrufenden Shell zurück –
+> ein zuvor per `export`/`source ./create_secret.sh` gesetzter Key ist für den
+> `sudo`-Prozess dann unsichtbar (Fehlermeldung: „required variable
+> WKCARDS_SECRET_KEY is missing a value"). Robuster (unabhängig von `sudo`
+> und der Shell-Sitzung): die Werte direkt in eine `.env`-Datei im selben
+> Verzeichnis wie `docker-compose.yml` schreiben – die liest Docker Compose
+> automatisch ein, unabhängig davon, wer/wie es aufgerufen wird:
+>
+> ```bash
+> {
+>   echo "WKCARDS_SECRET_KEY=$(openssl rand -base64 32 | tr '+/' '-_')"
+>   echo "WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)"
+> } >> .env
+> ```
+>
+> `.env` steht bereits in `.gitignore` – landet also nicht versehentlich im
+> Repo. Dort können auch andere Variablen wie `WANIKANI_API_TOKEN` stehen
+> (falls für eigene Skripte/Tools genutzt) – für die Web-App selbst genügt
+> aber der WaniKani-Token in den Einstellungen nach dem ersten Login,
+> `WANIKANI_API_TOKEN` als Umgebungsvariable ist nur für das CLI-Skript
+> (`kanji_cards.py`) relevant.
+
 Diese beiden `export`-Zeilen ersetzen die zwei `python3 -c "..."`-Zeilen im
 Codeblock oben 1:1 – der Rest (`docker compose up --build`) bleibt gleich.
 `crypto.py` selbst muss auf dem NAS-Host **nie** ausgeführt werden; der Key
