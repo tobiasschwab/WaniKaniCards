@@ -327,6 +327,15 @@ def _srs_load_card_data(row: "models.ReviewState") -> dict[str, Any] | None:
     return None
 
 
+def _split_answer_synonyms(text: str) -> list[str]:
+    """Ein Bedeutungsfeld wie "Kuchen; Torte; Biskuit; Backwerk" (JMdict/
+    Gemini trennen mehrere gültige Übersetzungen/Glossen mit "; ", siehe
+    dictionary.build_reading_index()) in EINZELNE akzeptierte Antworten
+    auftrennen - sonst müsste der Nutzer die komplette Aufzählung wortgleich
+    eintippen, um als richtig zu gelten."""
+    return [part.strip() for part in text.split(";") if part.strip()]
+
+
 def _srs_accepted_answers(row: "models.ReviewState") -> list[str] | None:
     """Akzeptierte Antworten für eine Prüfrichtung, oder `None`, wenn die
     Karte nicht automatisch prüfbar ist (Custom-Karten: freies HTML auf
@@ -340,7 +349,12 @@ def _srs_accepted_answers(row: "models.ReviewState") -> list[str] | None:
     if row.card_type == "kana":
         if row.item_type == "reading":
             return [data["reading"]] if data.get("reading") else None
-        answers = [a for a in (data.get("meaning"), data.get("meaning_extra")) if a]
+        answers = [
+            syn
+            for field in (data.get("meaning"), data.get("meaning_extra"))
+            if field
+            for syn in _split_answer_synonyms(field)
+        ]
         return answers or None
     if row.card_type == "wanikani":
         if row.item_type == "reading":

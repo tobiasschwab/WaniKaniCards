@@ -177,10 +177,19 @@ input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 /* Toggles */
 .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 6px 0 20px; }
 @media (max-width: 480px) { .toggles { grid-template-columns: 1fr; } }
-.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; max-width: 100%; }
 .switch input { display: none; }
-.switch span { width: 40px; height: 23px; border-radius: 999px; background: var(--border); position: relative; transition: background .18s; flex: 0 0 auto; }
-.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%; background: #fff; transition: transform .18s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+/* Nur der ERSTE <span> (der Schalter-Track) bekommt Toggle-Optik + den
+   ::after-Knopf. Der ZWEITE <span> ist reiner Label-Text - er darf NIE
+   zweizeilig umbrechen (align-items:center würde den Knopf sonst mittig über
+   beide Zeilen legen) und braucht den Toggle-Look/::after-Knopf nicht, sonst
+   erscheint ein zweiter, falsch positionierter Kreis mitten im Text (genau
+   der gemeldete Überlappungs-Bug). Der ganze Schalter darf als atomarer
+   Flex-Item bei wenig Platz stattdessen als Ganzes umbrechen - das übernimmt
+   `flex-wrap:wrap` der umgebenden `.row.gap`. */
+.switch input + span { width: 40px; height: 23px; border-radius: 999px; background: var(--border); position: relative; transition: background .18s; flex: 0 0 auto; }
+.switch input + span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px; border-radius: 50%; background: #fff; transition: transform .18s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.switch input + span + span { white-space: nowrap; }
 .switch input:checked + span { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .switch input:checked + span::after { transform: translateX(17px); }
 

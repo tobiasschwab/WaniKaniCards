@@ -201,6 +201,34 @@
             </div>
           </div>
 
+          <!-- Vokabeltrainer (Tageslimits) -->
+          <div class="settings-row" data-row="srs">
+            <button type="button" class="settings-row-head">
+              <span class="settings-icon" style="background:#2d8f6f">📚</span>
+              <span class="settings-row-text">
+                <span class="settings-row-title" data-i18n="settings.srs.title">Vokabeltrainer</span>
+                <span class="settings-row-desc" data-i18n="settings.srs.desc">Tageslimits fürs Üben</span>
+              </span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="settings-row-body hidden">
+              <label class="field">
+                <span class="label" data-i18n="settings.srs.new_per_day_label">Neue Karten pro Tag</span>
+                <input id="srsNewPerDay" type="number" min="0" step="1" class="text" style="max-width:120px">
+                <span class="hint" data-i18n="settings.srs.new_per_day_hint">Wie viele NEUE Karten (noch nie beantwortet) maximal pro Tag ausgeliefert werden. Bereits fällige Karten darüber hinaus bleiben einfach bis morgen liegen.</span>
+              </label>
+              <label class="field" style="margin-top:10px">
+                <span class="label" data-i18n="settings.srs.reviews_per_day_label">Wiederholungen pro Tag</span>
+                <input id="srsReviewsPerDay" type="number" min="0" step="1" class="text" style="max-width:120px">
+                <span class="hint" data-i18n="settings.srs.reviews_per_day_hint">Deckelt ALLE Bewertungen pro Tag (neue + bereits gelernte Karten zusammen).</span>
+              </label>
+              <div class="row gap" style="margin-top:10px">
+                <button id="srsLimitsSave" class="btn primary" data-i18n="common.save">Speichern</button>
+              </div>
+              <div id="srsLimitsStatus" class="status" style="margin-top:8px"></div>
+            </div>
+          </div>
+
           <!-- Konto (Passwort ändern / Konto löschen) -->
           <div class="settings-row" data-row="account">
             <button type="button" class="settings-row-head">
@@ -652,7 +680,7 @@
     </section>
 
     <!-- Verlauf -->
-    <section class="panel history">
+    <section id="historyPanel" class="panel history">
       <h2 data-i18n="history.title">Verlauf</h2>
       <ul id="historyList" class="history-list"></ul>
       <p id="historyEmpty" class="muted" data-i18n="history.empty">Noch keine Exporte.</p>

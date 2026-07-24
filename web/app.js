@@ -272,6 +272,8 @@ async function loadSettings() {
   $("#hole").checked = d.hole === true;
   applyLayoutState();
   applyFormatState();
+  $("#srsNewPerDay").value = d.srs_new_per_day ?? 20;
+  $("#srsReviewsPerDay").value = d.srs_reviews_per_day ?? 200;
 }
 // UI-Chrome-Sprachen, für die es tatsächlich eine i18n/*.json gibt (siehe
 // i18n.js) - unabhängig von den Zielsprachen (SUPPORTED_TARGET_LANGS in
@@ -1975,6 +1977,11 @@ document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll(".tab-group").forEach((g) => {
       g.classList.toggle("sel", !!g.querySelector(`button[data-v="${v}"]`));
     });
+    // Tabelle + Verlauf sind eigene <section>-Panels UNTERHALB der Moduswahl,
+    // nicht Teil von #modeReview - sie blieben bisher auch während des Übens
+    // sichtbar und lenkten dort nur ab (kein Bezug zum aktuellen Review-Screen).
+    $("#tablePanel").classList.toggle("hidden", v === "review");
+    $("#historyPanel").classList.toggle("hidden", v === "review");
     if (v === "custom") loadCustoms();
     if (v === "wortliste") loadWortliste();
     if (v === "review") enterReviewMode();
@@ -2062,6 +2069,27 @@ document.addEventListener("DOMContentLoaded", () => {
       _selectGeminiModel(current);
       st.textContent = `${r.models.length} Modelle geladen ✓`; st.className = "status ok";
     } catch (e) { st.textContent = "Fehlgeschlagen: " + e.message; st.className = "status err"; }
+  });
+
+  $("#srsLimitsSave").addEventListener("click", async () => {
+    const st = $("#srsLimitsStatus");
+    st.textContent = ""; st.className = "status";
+    try {
+      await api("/api/settings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          defaults: {
+            srs_new_per_day: parseInt($("#srsNewPerDay").value, 10) || 0,
+            srs_reviews_per_day: parseInt($("#srsReviewsPerDay").value, 10) || 0,
+          },
+        }),
+      });
+      toast("Gespeichert");
+      st.textContent = "Gespeichert ✓"; st.className = "status ok";
+      // Betrifft direkt, wie viele Karten "Wiederholen" ausliefert - Dashboard
+      // neu laden, falls der Üben-Tab gerade offen ist.
+      if (segValue("modeTabs") === "review") enterReviewMode();
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
   });
 
   $("#accChangePw").addEventListener("click", async () => {

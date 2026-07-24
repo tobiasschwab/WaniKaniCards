@@ -1382,6 +1382,29 @@ def test_api_srs_check_reading_uses_onyomi_and_kunyomi(client):
     assert r2.get_json()["correct"] is True  # kunyomi ebenfalls akzeptiert
 
 
+def test_api_srs_check_kana_card_splits_semicolon_separated_synonyms(client, monkeypatch):
+    """Regressionstest: eine Dictionary-/KI-Karte mit mehreren durch "; "
+    getrennten Synonymen (z. B. "Kuchen; Torte; Biskuit; Backwerk") darf nicht
+    als EINE Antwort verlangt werden - jedes einzelne Synonym muss für sich
+    als richtig zählen (siehe _split_answer_synonyms())."""
+    import dictionary as dic
+    monkeypatch.setattr(dic, "_index_cache", {"けーき": {"kanji": None, "meaning": "Kuchen; Torte; Biskuit; Backwerk"}})
+    created = client.post("/api/kanacards", json={"word": "けーき"}).get_json()
+    client.post("/api/srs/add", json={"kana_ids": [created["id"]]})
+
+    for word in ("Kuchen", "Torte", "Biskuit", "Backwerk"):
+        r = client.post("/api/srs/check", json={
+            "card_type": "kana", "card_id": created["id"], "item_type": "meaning", "answer": word,
+        })
+        assert r.get_json()["correct"] is True, f"{word!r} sollte als richtig gelten"
+
+    r = client.post("/api/srs/check", json={
+        "card_type": "kana", "card_id": created["id"], "item_type": "meaning",
+        "answer": "Kuchen; Torte; Biskuit; Backwerk",
+    })
+    assert r.get_json()["correct"] is False  # die volle Aufzählung ist NICHT die erwartete Eingabe
+
+
 def test_api_srs_check_returns_ungraded_for_custom_card(client):
     created = client.post("/api/customcards", json={"front_html": "<div>x</div>", "back_html": "<div>y</div>"}).get_json()
     client.post("/api/srs/add", json={"custom_ids": [created["id"]]})
