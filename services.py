@@ -601,6 +601,21 @@ def _delete_srs_rows_for_card(user_id: int, card_type: str, card_id: str) -> Non
     models.ReviewLog.query.filter_by(user_id=user_id, card_type=card_type, card_id=card_id).delete()
 
 
+def srs_progress(user_id: int, target_lang: str) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """`(added, learned)` – alle `(card_type, card_id)`-Paare, die der Nutzer
+    in sein SRS-Training aufgenommen hat, sowie die Teilmenge davon, die
+    mindestens einmal bewertet wurde (`reps > 0` in mindestens einer
+    Prüfrichtung). Grundlage für den dritten Wortlisten-/Text-Modus-Status
+    "Karte vorhanden" (in `added`, aber noch nicht in `learned`) sowie das
+    automatische Befördern zu "bekannt" nach der ersten Bewertung (sobald in
+    `learned`) – rein aus dem bestehenden `ReviewState`-Zustand berechnet,
+    keine zusätzliche Datenbank-Spalte nötig."""
+    rows = models.ReviewState.query.filter_by(user_id=user_id, target_lang=target_lang).all()
+    added = {(r.card_type, r.card_id) for r in rows}
+    learned = {(r.card_type, r.card_id) for r in rows if r.reps > 0}
+    return added, learned
+
+
 def delete_all_user_data(user_id: int) -> None:
     """Sämtliche Daten eines Nutzers löschen – für die Konto-Löschung
     (DELETE /api/auth/account). Die Fremdschlüssel auf `users.id` haben KEIN

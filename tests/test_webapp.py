@@ -229,6 +229,42 @@ def test_api_text_annotate_ready_true_when_dictionary_card_already_created(clien
     assert word2["known"] is True
 
 
+def test_api_text_annotate_shows_card_exists_for_srs_added_but_unreviewed_word(client):
+    """Regressionstest für Nutzer-Feedback: eine Karte, die zum Vokabeltrainer
+    hinzugefügt, aber noch nie bewertet wurde, soll weder als "unbekannt" noch
+    fälschlich schon als "bekannt" gelten - dafür der dritte Status
+    "card_exists" ("Karte vorhanden")."""
+    first = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word = next(s for line in first["lines"] for s in line if s["type"] == "word")
+
+    client.post("/api/srs/add", json={"subject_ids": [word["id"]], "sample": True})
+
+    second = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word2 = next(s for line in second["lines"] for s in line if s["type"] == "word")
+    assert word2["status"] == "card_exists"
+    assert word2["card_exists"] is True
+    assert word2["known"] is False  # zählt NICHT als bekannt, solange nie bewertet
+
+
+def test_api_text_annotate_promotes_to_known_after_first_rating(client):
+    """Sobald mindestens eine Prüfrichtung der Karte einmal bewertet wurde,
+    gilt sie automatisch als bekannt (ohne manuelles Markieren)."""
+    first = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word = next(s for line in first["lines"] for s in line if s["type"] == "word")
+    client.post("/api/srs/add", json={"subject_ids": [word["id"]], "sample": True})
+
+    row = models.ReviewState.query.filter_by(user_id=client.test_user_id, card_id=str(word["id"])).first()
+    client.post("/api/srs/answer", json={
+        "card_type": "wanikani", "card_id": str(word["id"]), "item_type": row.item_type, "rating": "good",
+    })
+
+    second = client.post("/api/text-annotate", json={"text": "大きい", "sample": True}).get_json()
+    word2 = next(s for line in second["lines"] for s in line if s["type"] == "word")
+    assert word2["status"] == "known"
+    assert word2["known"] is True
+    assert word2["card_exists"] is False
+
+
 def test_api_text_annotate_ai_without_key_returns_error(client):
     r = client.post("/api/text-annotate-ai", json={"text": "大きい山です。", "sample": True})
     assert r.status_code == 400

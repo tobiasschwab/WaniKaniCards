@@ -106,6 +106,20 @@ async function doLogout() {
   location.reload();
 }
 
+// Einstellungen öffnen und direkt zu einer Sektion springen (z. B. von den
+// Status-Pills im Header aus) - schließt zuerst alle anderen offenen
+// Sektionen, damit nicht mehrere gleichzeitig aufgeklappt bleiben.
+function openSettingsSection(rowName) {
+  $("#settingsOverlay").classList.remove("hidden");
+  document.querySelectorAll(".settings-row").forEach((row) => {
+    const body = row.querySelector(".settings-row-body");
+    const isTarget = row.dataset.row === rowName;
+    body.classList.toggle("hidden", !isTarget);
+    row.classList.toggle("open", isTarget);
+  });
+  $(`.settings-row[data-row="${rowName}"]`)?.scrollIntoView({ block: "nearest" });
+}
+
 let cards = [];                 // aktuelle Tabellenzeilen (Descriptors)
 const selected = new Set();     // ausgewählte ids (als String)
 let tableMode = "subject";      // "subject" | "custom"
@@ -205,7 +219,7 @@ function _setConnPill(el, connected, connectedLabel) {
 }
 function _setConnDot(el, name, connected) {
   el.className = "conn-dot " + (connected ? "on" : "off");
-  el.title = `${name}: ${connected ? "verbunden" : "nicht verbunden"}`;
+  el.title = `${name}: ${connected ? "verbunden" : "nicht verbunden"} – zu den Einstellungen`;
 }
 // Nur für die Anzeige im Dropdown – DeepL selbst braucht nur den Code.
 const _LANG_NAMES = {
@@ -1226,6 +1240,7 @@ function openWordPopup(el, seg, mode = "text") {
   let note = "";
   if (seg.manually_known) note = "✓ manuell als bekannt markiert";
   else if (seg.ready) note = (isDict || isAi) ? "✓ Karte bereits erstellt" : "✓ bereits exportiert";
+  else if (seg.card_exists) note = "📚 Im Vokabeltrainer, noch nicht bewertet";
   $("#wpExportedNote").textContent = note;
   $("#wpExportedNote").classList.toggle("hidden", !note);
   $("#wpAdd").textContent = isAi ? "+ KI-Karte erstellen" : isDict ? "+ Dictionary-Karte erstellen" : "+ Zur Tabelle";
@@ -1330,7 +1345,7 @@ function applySegChange(seg, patch) {
     total++;
     if (s.id === seg.id && s.source === seg.source) {
       Object.assign(s, patch);
-      s.status = (s.manually_known || s.ready) ? "known" : "unknown";
+      s.status = (s.manually_known || s.ready) ? "known" : (s.card_exists ? "card_exists" : "unknown");
       s.known = s.manually_known || s.ready;
     }
     if (s.known) known++;
@@ -2006,6 +2021,19 @@ document.addEventListener("DOMContentLoaded", () => {
     head.addEventListener("click", () => {
       const nowOpen = body.classList.toggle("hidden") === false;
       row.classList.toggle("open", nowOpen);
+    });
+  });
+
+  // Status-Pills im Header (WaniKani/DeepL/Gemini) führen direkt zur
+  // passenden Einstellungen-Sektion, statt nur den Verbindungsstatus
+  // anzuzeigen - ein Klick öffnet die Settings UND klappt die Sektion auf.
+  [["connWanikani", "wanikani"], ["connDeepl", "deepl"], ["connGemini", "gemini"]].forEach(([id, rowName]) => {
+    const el = $(`#${id}`);
+    el.addEventListener("click", () => openSettingsSection(rowName));
+    // role="button" auf einem <span> bekommt von sich aus keine Enter/Space-
+    // Aktivierung wie ein echtes <button> - hier nachrüsten.
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSettingsSection(rowName); }
     });
   });
 

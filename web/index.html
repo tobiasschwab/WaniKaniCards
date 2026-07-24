@@ -24,9 +24,9 @@
       </div>
       <div class="header-actions">
         <div class="conn-row" id="connRow">
-          <span class="conn-dot off" id="connWanikani" title="WaniKani: nicht verbunden"><span class="dot"></span>WaniKani</span>
-          <span class="conn-dot off" id="connDeepl" title="DeepL: nicht verbunden"><span class="dot"></span>DeepL</span>
-          <span class="conn-dot off" id="connGemini" title="Gemini: nicht verbunden"><span class="dot"></span>Gemini</span>
+          <span class="conn-dot off" id="connWanikani" role="button" tabindex="0" title="WaniKani: nicht verbunden – zu den Einstellungen"><span class="dot"></span>WaniKani</span>
+          <span class="conn-dot off" id="connDeepl" role="button" tabindex="0" title="DeepL: nicht verbunden – zu den Einstellungen"><span class="dot"></span>DeepL</span>
+          <span class="conn-dot off" id="connGemini" role="button" tabindex="0" title="Gemini: nicht verbunden – zu den Einstellungen"><span class="dot"></span>Gemini</span>
         </div>
         <span id="accountEmail" class="muted hidden"></span>
         <button id="logoutBtn" class="btn small hidden" data-i18n="header.logout" data-i18n-title="header.logout">Abmelden</button>
@@ -405,6 +405,7 @@
           <div id="textDisplay" class="text-display"></div>
           <p class="hint">
             <span class="word-legend known">bekannt</span> ·
+            <span class="word-legend card-exists">Karte vorhanden</span> ·
             <span class="word-legend unknown">unbekannt</span>
             &nbsp;– Details (Quelle, Grund) im Popup. Wort anklicken für Bedeutung, Hinzufügen oder „bekannt" markieren.
           </p>
@@ -435,6 +436,7 @@
             <div id="kiFreqList"></div>
             <p class="hint" style="margin-top:6px">
               <span class="word-legend known">bekannt</span> ·
+              <span class="word-legend card-exists">Karte vorhanden</span> ·
               <span class="word-legend unknown">unbekannt</span>
             </p>
           </div>

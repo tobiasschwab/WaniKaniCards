@@ -64,7 +64,10 @@ body {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
   color: var(--muted); background: var(--bg-elev); border: 1px solid var(--border);
   border-radius: 999px; padding: 6px 11px; box-shadow: var(--shadow);
+  cursor: pointer; transition: border-color .15s, transform .05s;
 }
+.conn-dot:hover { border-color: var(--accent); }
+.conn-dot:active { transform: translateY(1px); }
 .conn-dot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--err); flex: 0 0 auto; }
 .conn-dot.on { color: var(--ok); }
 .conn-dot.on .dot { background: var(--ok); }
@@ -356,12 +359,15 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .word-token { cursor: pointer; border-radius: 4px; padding: 0 1px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 .word-token.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-token.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-token.card-exists { color: var(--warn); text-decoration-color: var(--warn); }
 .word-token:hover { background: rgba(109,59,245,.1); }
 .word-token.known:hover { background: rgba(22,163,74,.1); }
 .word-token.unknown:hover { background: rgba(0,180,216,.1); }
+.word-token.card-exists:hover { background: rgba(217,119,6,.1); }
 .word-legend { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 .word-legend.unknown { color: var(--accent-2); text-decoration-color: var(--accent-2); }
 .word-legend.known { color: var(--ok); text-decoration-color: var(--ok); }
+.word-legend.card-exists { color: var(--warn); text-decoration-color: var(--warn); }
 
 /* KI-Modus: Tabelle Japanisch / Bekannt / Deutsch / Vokabeln / Bemerkung */
 .ki-table { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); overflow: hidden; }
@@ -400,8 +406,10 @@ textarea.text { min-height: 120px; resize: vertical; font-family: inherit; line-
 .ki-freq-chip .c { color: var(--muted); font-size: 11px; }
 .ki-freq-chip.unknown { color: var(--accent-2); border-color: var(--accent-2); }
 .ki-freq-chip.known { color: var(--ok); border-color: var(--ok); }
+.ki-freq-chip.card-exists { color: var(--warn); border-color: var(--warn); }
 .ki-freq-chip.unknown:hover { background: rgba(0,180,216,.1); }
 .ki-freq-chip.known:hover { background: rgba(22,163,74,.1); }
+.ki-freq-chip.card-exists:hover { background: rgba(217,119,6,.1); }
 .ki-pct-badge {
   display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
   background: hsla(var(--pct-hue), 70%, 45%, .18); color: hsl(var(--pct-hue), 75%, 32%);
