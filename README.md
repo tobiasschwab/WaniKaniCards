@@ -653,6 +653,17 @@ export WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)
 > aber der WaniKani-Token in den Einstellungen nach dem ersten Login,
 > `WANIKANI_API_TOKEN` als Umgebungsvariable ist nur für das CLI-Skript
 > (`kanji_cards.py`) relevant.
+>
+> Kurz zusammengefasst, als ein Block zum Kopieren:
+>
+> ```bash
+> {
+>   echo "WKCARDS_SECRET_KEY=$(openssl rand -base64 32 | tr '+/' '-_')"
+>   echo "WKCARDS_SESSION_SECRET=$(openssl rand -hex 32)"
+> } >> .env
+>
+> sudo docker compose up --build
+> ```
 
 Diese beiden `export`-Zeilen ersetzen die zwei `python3 -c "..."`-Zeilen im
 Codeblock oben 1:1 – der Rest (`docker compose up --build`) bleibt gleich.
