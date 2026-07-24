@@ -1,0 +1,19 @@
+# Shell-Skripte MÜSSEN mit LF-Zeilenenden ausgecheckt werden, unabhängig von
+# der Git-Einstellung `core.autocrlf` auf dem jeweiligen Host - ein Windows-
+# Checkout mit autocrlf=true würde sonst CRLF-Zeilenenden erzeugen, was die
+# Shebang-Zeile (#!/bin/sh) im Linux-Container kaputt macht ("no such file or
+# directory" beim exec, siehe docker-entrypoint.sh). Das Dockerfile räumt das
+# beim Build zusätzlich defensiv per sed auf - diese Regel verhindert das
+# Problem aber schon direkt beim `git checkout`/`git pull`.
+*.sh text eol=lf
+
+# Python-Dateien ebenfalls konsistent mit LF (kein funktionales Problem wie
+# bei Shell-Skripten, aber unnötige Diffs durch Zeilenenden-Wechsel vermeiden).
+*.py text eol=lf
+
+# Binärdateien nie durch Zeilenenden-Konvertierung anfassen.
+*.png binary
+*.ttf binary
+*.db binary
+*.pdf binary
+*.apkg binary

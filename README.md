@@ -671,6 +671,19 @@ Codeblock oben 1:1 – der Rest (`docker compose up --build`) bleibt gleich.
 wird nur als Umgebungsvariable an den Docker-Container weitergereicht, in dem
 Python 3 + `cryptography` bereits enthalten sind (siehe `Dockerfile`).
 
+> ⚠️ **Build läuft durch, aber die Container melden sofort `exec
+> ./docker-entrypoint.sh: no such file or directory`?** Das ist ein
+> Zeilenenden-Problem, keines mit Dateirechten – `docker-entrypoint.sh` hat
+> CRLF- statt LF-Zeilenenden bekommen (typischerweise, wenn der Docker-Build-
+> Kontext von einem Windows-Checkout kommt, z. B. über eine Netzwerkfreigabe
+> zu einem NAS, und Git dort `core.autocrlf=true` gesetzt hat). Die Shebang-
+> Zeile wird dadurch zu `#!/bin/sh\r`, wonach kein Interpreter mehr gefunden
+> wird. Ab dieser Version räumt das `Dockerfile` das selbst per `sed` auf
+> (`sed -i 's/\r$//' docker-entrypoint.sh`, siehe dort), ein einfaches
+> `docker compose up --build` mit dem aktuellen Stand sollte also reichen.
+> Tritt es trotzdem auf (z. B. mit einem älteren Checkout), hilft `git pull`
+> gefolgt von `docker compose build --no-cache`.
+
 Der Host-Ordner `./data` ist als Volume eingehängt (`./data:/data`), sodass
 PDFs/APKGs und API-Caches einen Neustart überdauern; Accounts/Einstellungen
 liegen im `db`-Postgres-Service (eigenes Volume). Im Browser zunächst ein

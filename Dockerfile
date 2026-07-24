@@ -36,7 +36,16 @@ COPY languages/ ./languages/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY docker-entrypoint.sh ./
-RUN chmod +x docker-entrypoint.sh
+# CR-Zeichen (Windows/CRLF-Zeilenenden) entfernen, BEVOR das Skript ausführbar
+# gemacht wird: checkt jemand das Repo auf Windows aus (git core.autocrlf=true)
+# und der Docker-Build-Kontext kommt von diesem Checkout (z. B. über eine
+# Netzwerkfreigabe zu einem NAS), landet in der Shebang-Zeile "#!/bin/sh\r" -
+# der Kernel sucht dann einen Interpreter namens "/bin/sh\r", findet ihn nicht
+# und meldet irreführend "exec ./docker-entrypoint.sh: no such file or
+# directory", obwohl die Datei existiert. sed macht das unabhängig von den
+# Host-Zeilenenden robust (siehe auch .gitattributes, die das beim Checkout
+# von vornherein verhindert).
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 
 # Datenverzeichnis (Volume): settings.json, output/, jobs/, .cache/ (Phase 1:
 # Accounts/Auth liegen in Postgres, siehe DATABASE_URL – Nutzdaten folgen erst
