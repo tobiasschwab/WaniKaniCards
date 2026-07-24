@@ -33,7 +33,11 @@ def upgrade() -> None:
         sa.Column('card_id', sa.String(64), nullable=False),
         sa.Column('item_type', sa.String(16), nullable=False),
         sa.Column('rating', sa.String(16), nullable=False),
-        sa.Column('was_new', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        # Bewusst sa.false() statt sa.text('0')/'0': SQLite akzeptiert "0" als
+        # Boolean-Default (dort ist BOOLEAN nur eine INTEGER-Affinität mit
+        # CHECK-Constraint), Postgres hat aber eine echte BOOLEAN-Spalte und
+        # lehnt einen Integer-Default mit "DatatypeMismatch" ab.
+        sa.Column('was_new', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text('CURRENT_TIMESTAMP')),
     )

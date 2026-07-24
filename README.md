@@ -684,6 +684,18 @@ Python 3 + `cryptography` bereits enthalten sind (siehe `Dockerfile`).
 > Tritt es trotzdem auf (z. B. mit einem älteren Checkout), hilft `git pull`
 > gefolgt von `docker compose build --no-cache`.
 
+> ⚠️ **`db-1`/`shiori` melden `column "was_new" is of type boolean but
+> default expression is of type integer` beim Anwenden der Migrationen?**
+> Ein Fehler in der Migration `0839f2a16194` (behoben) – sie setzte für die
+> Spalte `review_logs.was_new` einen Integer-Default (`0`), den SQLite
+> stillschweigend akzeptiert (dort ist `BOOLEAN` nur eine `INTEGER`-Affinität
+> mit CHECK-Constraint), Postgres mit seiner echten `BOOLEAN`-Spalte aber
+> ablehnt. `git pull` holt den Fix; da die Migration transaktional läuft,
+> hat Postgres beim Fehlschlagen automatisch zurückgerollt (kein
+> Datenverlust, kein manueller Eingriff an der DB nötig) – einfach
+> `docker compose up --build` erneut ausführen, die Migration setzt an
+> derselben Stelle sauber fort.
+
 Der Host-Ordner `./data` ist als Volume eingehängt (`./data:/data`), sodass
 PDFs/APKGs und API-Caches einen Neustart überdauern; Accounts/Einstellungen
 liegen im `db`-Postgres-Service (eigenes Volume). Im Browser zunächst ein
